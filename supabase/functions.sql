@@ -29,7 +29,8 @@
 create or replace function create_room(
   p_map_id text,
   p_num_detectives int,
-  p_host_display_name text
+  p_host_display_name text,
+  p_host_role text default 'mrx'
 ) returns table (out_room_id uuid, out_room_code text, out_host_player_id uuid)
 language plpgsql
 security definer
@@ -39,9 +40,19 @@ declare
   v_code text;
   v_host_id uuid;
   v_attempt int := 0;
+  v_valid_roles text[];
 begin
   if p_num_detectives < 2 or p_num_detectives > 5 then
     raise exception 'num_detectives must be between 2 and 5';
+  end if;
+
+  -- validate the host's chosen role is actually a legal seat for this
+  -- room's detective count (e.g. can't pick "d4" in a 3-detective room)
+  select array_cat(array['mrx'], array_agg('d' || gs order by gs))
+    into v_valid_roles
+    from generate_series(0, p_num_detectives - 1) gs;
+  if not (p_host_role = any(v_valid_roles)) then
+    raise exception 'Invalid role % for a room with % detectives', p_host_role, p_num_detectives;
   end if;
 
   loop
@@ -55,7 +66,7 @@ begin
   returning id into v_room_id;
 
   insert into players (room_id, role, display_name)
-  values (v_room_id, 'mrx', p_host_display_name)
+  values (v_room_id, p_host_role, p_host_display_name)
   returning id into v_host_id;
 
   update rooms set host_player_id = v_host_id where id = v_room_id;
@@ -123,6 +134,56 @@ begin
   select coalesce(array_agg(pl.role), '{}') into v_taken from players pl where pl.room_id = v_room.id;
 
   return query select v_room.id, v_room.map_id, v_room.num_detectives, v_room.status, v_taken;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- leave_lobby -- a player backs out of a room before the game has
+-- started. If the leaving player is the host, host status passes to
+-- another remaining player (arbitrarily, the earliest-joined one) so the
+-- room isn't left ownerless; if they were the only player left, the room
+-- itself is deleted (cascades to the player row via the FK). Fails if the
+-- room has already started (use a different mechanism -- pause/end-game
+-- -- for that; leaving a LOBBY and leaving an in-progress GAME are
+-- different actions on purpose, see the design notes higher up this file).
+-- -----------------------------------------------------------------------------
+create or replace function leave_lobby(
+  p_room_id uuid,
+  p_player_id uuid
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_next_host_id uuid;
+begin
+  select * into v_room from rooms r where r.id = p_room_id;
+  if v_room.id is null then
+    return; -- room already gone, nothing to do
+  end if;
+  if v_room.status <> 'lobby' then
+    raise exception 'Cannot leave -- the game has already started';
+  end if;
+
+  delete from players where id = p_player_id and room_id = p_room_id;
+
+  -- if the leaver was host, hand host status to whoever's been here
+  -- longest; if nobody's left, delete the room entirely
+  if v_room.host_player_id = p_player_id then
+    select id into v_next_host_id
+    from players
+    where room_id = p_room_id
+    order by connected_at asc
+    limit 1;
+
+    if v_next_host_id is null then
+      delete from rooms where id = p_room_id;
+    else
+      update rooms set host_player_id = v_next_host_id where id = p_room_id;
+    end if;
+  end if;
 end;
 $$;
 

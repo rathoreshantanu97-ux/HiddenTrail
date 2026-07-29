@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { MAP_LIST } from "../maps/index.js";
+import { useActiveMaps } from "../lib/useActiveMaps.js";
 import { DETECTIVE_COLORS } from "../lib/gameEngine.js";
 import { styles } from "./GameBoard.jsx";
 
@@ -10,6 +10,7 @@ import { styles } from "./GameBoard.jsx";
 // for everyone rather than each device picking independently.)
 // ---------------------------------------------------------------------------
 export default function SetupScreen({ onStart }) {
+  const MAP_LIST = useActiveMaps();
   const [mapId, setMapId] = useState("city");
   const [numDetectives, setNumDetectives] = useState(3);
   const [selectedDetectiveNames, setSelectedDetectiveNames] = useState(["", "", "", "", ""]);

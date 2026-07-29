@@ -3,6 +3,7 @@ import { MAPS } from "./maps/index.js";
 import { useLocalGameStore } from "./lib/localGameStore.js";
 import { useSupabaseGameStore } from "./lib/supabaseGameStore.js";
 import * as api from "./lib/supabaseApi.js";
+import * as auth from "./lib/accessControlApi.js";
 import LandingScreen from "./components/LandingScreen.jsx";
 import LobbyScreen from "./components/LobbyScreen.jsx";
 import SetupScreen from "./components/SetupScreen.jsx";
@@ -10,6 +11,8 @@ import HandoffScreen from "./components/HandoffScreen.jsx";
 import GameBoard from "./components/GameBoard.jsx";
 import EndedScreen from "./components/EndedScreen.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
+import OwnerPanel from "./components/OwnerPanel.jsx";
+import { useRoomStatus } from "./lib/useRoomStatus.js";
 import { currentActor } from "./lib/gameEngine.js";
 
 // ---------------------------------------------------------------------------
@@ -25,12 +28,78 @@ import { currentActor } from "./lib/gameEngine.js";
 // `useSupabaseGameStore` both implement the same interface (see
 // gameStoreInterface.js), so GameBoard/EndedScreen render identically
 // regardless of which one is driving them.
+//
+// `account` (passed down from AuthGate/main.jsx) is either:
+//   - { accountId, displayName }         a real logged-in account
+//   - { isGuest: true, displayName }     a guest session (public mode only)
+//   - null                                Supabase not configured (dev mode)
+// An owner-panel entry point is shown only when a real account has
+// is_owner -- checked server-side by the panel's own RPCs regardless, but
+// we also avoid rendering the link at all for non-owners.
 // ---------------------------------------------------------------------------
 
 const LOCAL_ROOM_KEY = "scotlandyard_room";
 
-export default function App() {
-  const [appMode, setAppMode] = useState("landing"); // "landing" | "passandplay" | "multiplayer"
+// Shows a normal "loading" message briefly, then -- if the game state
+// still hasn't arrived after a few seconds -- switches to a clear "this
+// room no longer exists" message with a way back to the landing screen.
+// This replaces what used to be an infinite spinner if a room's rows had
+// been deleted (manually, or by a future cleanup job) while a stale
+// localStorage session still pointed at it.
+function LoadingOrDeadRoom({ onGiveUp, immediate }) {
+  const [timedOut, setTimedOut] = useState(Boolean(immediate));
+
+  useEffect(() => {
+    if (immediate) return; // already known to be gone -- no need to wait
+    const id = setTimeout(() => setTimedOut(true), 6000);
+    return () => clearTimeout(id);
+  }, [immediate]);
+
+  if (!timedOut) {
+    return <div style={{ padding: 40, textAlign: "center", fontFamily: "system-ui" }}>Loading game state...</div>;
+  }
+
+  return (
+    <div style={{ padding: 40, textAlign: "center", fontFamily: "system-ui" }}>
+      <p style={{ color: "#a33", fontWeight: 600 }}>This room no longer exists.</p>
+      <p style={{ color: "#777", fontSize: 13 }}>
+        It may have ended, been closed, or the link may be out of date.
+      </p>
+      <button
+        style={{
+          marginTop: 12,
+          background: "#111",
+          color: "#fff",
+          border: "none",
+          borderRadius: 10,
+          padding: "10px 20px",
+          fontSize: 14,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+        onClick={onGiveUp}
+      >
+        Back to start
+      </button>
+    </div>
+  );
+}
+
+export default function App({ account }) {
+  const [appMode, setAppMode] = useState("landing"); // "landing" | "passandplay" | "multiplayer" | "ownerPanel"
+  const [isOwner, setIsOwner] = useState(false);
+
+  useEffect(() => {
+    if (account?.accountId) {
+      // list_accounts_for_owner itself enforces the is_owner check --
+      // calling it here is a cheap way to find out if THIS account is an
+      // owner (fails harmlessly for non-owners, we just don't show the link).
+      auth
+        .listAccountsForOwner(account.accountId)
+        .then(() => setIsOwner(true))
+        .catch(() => setIsOwner(false));
+    }
+  }, [account]);
 
   // ---- Pass-and-play specific state ----
   const localStore = useLocalGameStore();
@@ -46,7 +115,16 @@ export default function App() {
   const [mpNumDetectives, setMpNumDetectives] = useState(3);
   const [mpMapId, setMpMapId] = useState("city");
   const [mpDisplayName, setMpDisplayName] = useState("");
-  const [mpStage, setMpStage] = useState("lobby"); // "lobby" | "playing"
+  // mpStage used to be local-only state that only the HOST's own click
+  // ever updated -- meaning a detective's browser had no way to learn the
+  // game had started. It's now derived from the room's actual `status`
+  // column via a live Supabase subscription (see useRoomStatus.js), so
+  // every client -- host or not -- sees the same "has this game started"
+  // truth, kept in sync automatically.
+  const { status: roomStatus, roomNotFound: mpRoomNotFound } = useRoomStatus(
+    appMode === "multiplayer" ? mpRoomId : null
+  );
+  const mpStage = roomStatus === "playing" || roomStatus === "ended" ? "playing" : "lobby";
 
   const supabaseStore = useSupabaseGameStore({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
@@ -56,7 +134,10 @@ export default function App() {
 
   // Restore a multiplayer session on refresh (room/player id persisted to
   // localStorage), so accidentally reloading the page mid-game doesn't
-  // boot the player out of their seat.
+  // boot the player out of their seat. Note: we deliberately do NOT
+  // persist/restore "stage" (lobby vs playing) here anymore -- that's now
+  // always derived live from the room's actual status (see useRoomStatus
+  // above), so a stale cached stage value can never disagree with reality.
   useEffect(() => {
     const saved = localStorage.getItem(LOCAL_ROOM_KEY);
     if (saved) {
@@ -72,7 +153,6 @@ export default function App() {
           setMpMapId(parsed.mapId);
           setMpDisplayName(parsed.displayName);
           setAppMode("multiplayer");
-          setMpStage(parsed.stage || "lobby");
         }
       } catch {
         localStorage.removeItem(LOCAL_ROOM_KEY);
@@ -90,7 +170,6 @@ export default function App() {
       numDetectives: mpNumDetectives,
       mapId: mpMapId,
       displayName: mpDisplayName,
-      stage: mpStage,
       ...extra,
     };
     localStorage.setItem(LOCAL_ROOM_KEY, JSON.stringify(payload));
@@ -101,21 +180,21 @@ export default function App() {
     setAppMode("passandplay");
   }
 
-  async function handleCreateRoom({ displayName, mapId, numDetectives }) {
+  async function handleCreateRoom({ displayName, mapId, numDetectives, hostRole }) {
     const { roomId, roomCode, hostPlayerId } = await api.createRoom({
       mapId,
       numDetectives,
       hostDisplayName: displayName,
+      hostRole,
     });
     setMpRoomId(roomId);
     setMpRoomCode(roomCode);
     setMpPlayerId(hostPlayerId);
-    setMpRole("mrx");
+    setMpRole(hostRole);
     setMpIsHost(true);
     setMpNumDetectives(numDetectives);
     setMpMapId(mapId);
     setMpDisplayName(displayName);
-    setMpStage("lobby");
     setAppMode("multiplayer");
     localStorage.setItem(
       LOCAL_ROOM_KEY,
@@ -123,7 +202,7 @@ export default function App() {
         roomId,
         roomCode,
         playerId: hostPlayerId,
-        role: "mrx",
+        role: hostRole,
         isHost: true,
         numDetectives,
         mapId,
@@ -148,7 +227,6 @@ export default function App() {
     setMpNumDetectives(info.numDetectives);
     setMpMapId(info.mapId);
     setMpDisplayName(displayName);
-    setMpStage("lobby");
     setAppMode("multiplayer");
     localStorage.setItem(
       LOCAL_ROOM_KEY,
@@ -169,8 +247,10 @@ export default function App() {
   async function handleStartMultiplayerGame() {
     const map = MAPS[mpMapId];
     await supabaseStore.startGame(map);
-    setMpStage("playing");
-    persistMpSession({ stage: "playing" });
+    // no need to persist a "stage" here anymore -- the next load of this
+    // room will correctly show "playing" because useRoomStatus reads it
+    // live from the room's actual status column, not from anything we
+    // wrote to localStorage
   }
 
   function handleLeaveMultiplayer() {
@@ -217,12 +297,18 @@ export default function App() {
   // RENDER
   // ---------------------------------------------------------------------------
 
+  if (appMode === "ownerPanel") {
+    return <OwnerPanel accountId={account.accountId} onBack={() => setAppMode("landing")} />;
+  }
+
   if (appMode === "landing") {
     return (
       <LandingScreen
         onChoosePassAndPlay={handleChoosePassAndPlay}
         onChooseCreateRoom={handleCreateRoom}
         onChooseJoinRoom={{ lookup: handleLookupRoom, confirm: handleConfirmJoin }}
+        showOwnerPanelLink={isOwner}
+        onOpenOwnerPanel={() => setAppMode("ownerPanel")}
       />
     );
   }
@@ -270,6 +356,23 @@ export default function App() {
     const mrxName = () => map.mrxName || "Mr. X";
     const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
 
+    if (mpRoomNotFound) {
+      return (
+        <LoadingOrDeadRoom
+          immediate
+          onGiveUp={() => {
+            localStorage.removeItem(LOCAL_ROOM_KEY);
+            setMpRoomId(null);
+            setMpRoomCode(null);
+            setMpPlayerId(null);
+            setMpRole(null);
+            setMpIsHost(false);
+            setAppMode("landing");
+          }}
+        />
+      );
+    }
+
     if (mpStage === "lobby") {
       return (
         <LobbyScreen
@@ -281,13 +384,31 @@ export default function App() {
           numDetectives={mpNumDetectives}
           mapId={mpMapId}
           onStart={handleStartMultiplayerGame}
+          onLeave={handleLeaveMultiplayer}
         />
       );
     }
 
     const match = supabaseStore.match;
     if (!match) {
-      return <div style={{ padding: 40, textAlign: "center", fontFamily: "system-ui" }}>Loading game state...</div>;
+      return (
+        <LoadingOrDeadRoom
+          onGiveUp={() => {
+            // The room's data is gone (deleted rows, or it never
+            // properly started) -- clear the stale local session so a
+            // future reload doesn't repeat this same hang, and send the
+            // player back to the landing screen with a clear reason
+            // instead of a silent infinite spinner.
+            localStorage.removeItem(LOCAL_ROOM_KEY);
+            setMpRoomId(null);
+            setMpRoomCode(null);
+            setMpPlayerId(null);
+            setMpRole(null);
+            setMpIsHost(false);
+            setAppMode("landing");
+          }}
+        />
+      );
     }
 
     if (match.phase === "ended") {

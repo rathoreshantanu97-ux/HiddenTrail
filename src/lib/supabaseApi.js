@@ -14,11 +14,12 @@ async function callRpc(name, args) {
   return data;
 }
 
-export async function createRoom({ mapId, numDetectives, hostDisplayName }) {
+export async function createRoom({ mapId, numDetectives, hostDisplayName, hostRole }) {
   const rows = await callRpc("create_room", {
     p_map_id: mapId,
     p_num_detectives: numDetectives,
     p_host_display_name: hostDisplayName,
+    p_host_role: hostRole || "mrx",
   });
   const row = rows?.[0];
   if (!row) throw new Error("Failed to create room");
@@ -140,6 +141,10 @@ export async function getAllChannelMessages({ roomId, after }) {
     body: r.out_body,
     createdAt: r.out_created_at,
   }));
+}
+
+export async function leaveLobby({ roomId, playerId }) {
+  await callRpc("leave_lobby", { p_room_id: roomId, p_player_id: playerId });
 }
 
 export async function heartbeat({ playerId }) {

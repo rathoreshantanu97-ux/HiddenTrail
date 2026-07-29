@@ -9,9 +9,10 @@ import { MAP_LIST } from "../maps/index.js";
 // handful of people doesn't need realtime precision) and shows the room
 // code prominently so the host can share it.
 // ---------------------------------------------------------------------------
-export default function LobbyScreen({ roomId, roomCode, myPlayerId, myRole, isHost, numDetectives, mapId, onStart }) {
+export default function LobbyScreen({ roomId, roomCode, myPlayerId, myRole, isHost, numDetectives, mapId, onStart, onLeave }) {
   const [players, setPlayers] = useState([]);
   const [starting, setStarting] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [err, setErr] = useState("");
 
   const refresh = useCallback(async () => {
@@ -41,6 +42,18 @@ export default function LobbyScreen({ roomId, roomCode, myPlayerId, myRole, isHo
     } catch (e) {
       setErr(e.message || "Failed to start game.");
       setStarting(false);
+    }
+  }
+
+  async function handleLeave() {
+    setLeaving(true);
+    setErr("");
+    try {
+      await api.leaveLobby({ roomId, playerId: myPlayerId });
+      onLeave();
+    } catch (e) {
+      setErr(e.message || "Failed to leave.");
+      setLeaving(false);
     }
   }
 
@@ -82,6 +95,10 @@ export default function LobbyScreen({ roomId, roomCode, myPlayerId, myRole, isHo
         ) : (
           <p style={styles.waitNote}>Waiting for the host to start the game...</p>
         )}
+
+        <button style={styles.leaveBtn} onClick={handleLeave} disabled={leaving}>
+          {leaving ? "Leaving..." : "Leave Lobby"}
+        </button>
       </div>
     </div>
   );
@@ -143,4 +160,16 @@ const styles = {
     width: "100%",
   },
   waitNote: { color: "#888", fontSize: 13.5 },
+  leaveBtn: {
+    marginTop: 12,
+    background: "none",
+    border: "1px solid #e0a8a8",
+    color: "#a33",
+    borderRadius: 10,
+    padding: "10px 16px",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    width: "100%",
+  },
 };

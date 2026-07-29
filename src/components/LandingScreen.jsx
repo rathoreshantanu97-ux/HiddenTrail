@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { isSupabaseConfigured } from "../lib/supabaseClient.js";
+import { useActiveMaps } from "../lib/useActiveMaps.js";
 
 // ---------------------------------------------------------------------------
 // LANDING SCREEN — the very first thing a player sees. Three paths:
@@ -7,7 +8,7 @@ import { isSupabaseConfigured } from "../lib/supabaseClient.js";
 //   2. Create an online room (host flow)
 //   3. Join an online room by code
 // ---------------------------------------------------------------------------
-export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom, onChooseJoinRoom }) {
+export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom, onChooseJoinRoom, showOwnerPanelLink, onOpenOwnerPanel }) {
   const [mode, setMode] = useState(null); // null | "create" | "join"
   const configured = isSupabaseConfigured();
 
@@ -48,6 +49,12 @@ export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom,
           </div>
         )}
 
+        {mode === null && showOwnerPanelLink && (
+          <button style={styles.ownerLinkBtn} onClick={onOpenOwnerPanel}>
+            Owner Panel
+          </button>
+        )}
+
         {mode === "create" && (
           <CreateRoomForm onBack={() => setMode(null)} onCreate={onChooseCreateRoom} />
         )}
@@ -64,9 +71,11 @@ export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom,
 }
 
 function CreateRoomForm({ onBack, onCreate }) {
+  const activeMaps = useActiveMaps();
   const [displayName, setDisplayName] = useState("");
   const [mapId, setMapId] = useState("city");
   const [numDetectives, setNumDetectives] = useState(3);
+  const [hostRole, setHostRole] = useState("mrx");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -78,12 +87,17 @@ function CreateRoomForm({ onBack, onCreate }) {
     setBusy(true);
     setErr("");
     try {
-      await onCreate({ displayName: displayName.trim(), mapId, numDetectives });
+      await onCreate({ displayName: displayName.trim(), mapId, numDetectives, hostRole });
     } catch (e) {
       setErr(e.message || "Failed to create room.");
       setBusy(false);
     }
   }
+
+  const roleOptions = [
+    { value: "mrx", label: "Mr. X" },
+    ...Array.from({ length: numDetectives }, (_, i) => ({ value: `d${i}`, label: `Detective ${i + 1}` })),
+  ];
 
   return (
     <div style={styles.form}>
@@ -98,9 +112,11 @@ function CreateRoomForm({ onBack, onCreate }) {
 
       <label style={styles.label}>Map</label>
       <select style={styles.select} value={mapId} onChange={(e) => setMapId(e.target.value)}>
-        <option value="city">Simplified City</option>
-        <option value="bengaluru">Bengaluru</option>
-        <option value="westeros">Westeros</option>
+        {activeMaps.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
       </select>
 
       <label style={styles.label}>Number of detectives</label>
@@ -109,14 +125,34 @@ function CreateRoomForm({ onBack, onCreate }) {
           <button
             key={n}
             style={{ ...styles.pill, ...(numDetectives === n ? styles.pillActive : {}) }}
-            onClick={() => setNumDetectives(n)}
+            onClick={() => {
+              setNumDetectives(n);
+              // if the previously chosen detective seat no longer exists
+              // at the new count (e.g. was "Detective 5", count dropped
+              // to 3), fall back to Mr. X rather than submitting an
+              // invalid role
+              if (hostRole !== "mrx" && parseInt(hostRole.slice(1)) >= n) {
+                setHostRole("mrx");
+              }
+            }}
           >
             {n}
           </button>
         ))}
       </div>
 
-      <p style={styles.hostNote}>You'll be seated as Mr. X (the host). Other players join as detectives.</p>
+      <label style={styles.label}>Your role</label>
+      <select style={styles.select} value={hostRole} onChange={(e) => setHostRole(e.target.value)}>
+        {roleOptions.map((r) => (
+          <option key={r.value} value={r.value}>
+            {r.label}
+          </option>
+        ))}
+      </select>
+
+      <p style={styles.hostNote}>
+        Other players will pick from the remaining roles when they join.
+      </p>
 
       {err && <div style={styles.errText}>{err}</div>}
 
@@ -246,6 +282,17 @@ function JoinRoomForm({ onBack, onJoin }) {
 }
 
 const styles = {
+  ownerLinkBtn: {
+    marginTop: 16,
+    background: "none",
+    border: "1px solid #ddd",
+    borderRadius: 8,
+    padding: "8px 14px",
+    fontSize: 12,
+    color: "#888",
+    cursor: "pointer",
+    width: "100%",
+  },
   page: {
     fontFamily: "system-ui, -apple-system, sans-serif",
     minHeight: "100vh",

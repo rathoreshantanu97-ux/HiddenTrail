@@ -110,6 +110,68 @@ now work locally.
    values as your `.env.local`.
 3. Redeploy (or push a new commit — Vercel redeploys automatically).
 
+### 6. Set up access control (recommended before sharing your deployed link)
+
+By default, once online multiplayer is configured, the app is **private**:
+new visitors must either request access (you relay a one-time code to
+them) or use an invite code from someone already approved.
+
+1. In Supabase SQL Editor, run `supabase/access_control_schema.sql`, then
+   `supabase/access_control_functions.sql` (in that order).
+2. Sign up at [resend.com](https://resend.com) (free tier) and get an API key.
+3. In Supabase Dashboard → Edge Functions, deploy the function in
+   `supabase/functions/notify-access-request/` (requires the
+   [Supabase CLI](https://supabase.com/docs/guides/cli)):
+   ```bash
+   supabase functions deploy notify-access-request
+   ```
+4. In Supabase Dashboard → Edge Functions → Secrets, add:
+   ```
+   RESEND_API_KEY = <your Resend API key>
+   OWNER_EMAIL    = <your own email address>
+   ```
+5. Create your own account by using the normal "Request access" flow on
+   the deployed app once — you'll get the OTP emailed to `OWNER_EMAIL`.
+6. In Supabase SQL Editor, mark your account as the owner:
+   ```sql
+   update accounts set is_owner = true where username = 'your_chosen_username';
+   ```
+7. Log back in — you'll now see an "Owner Panel" link on the landing
+   screen, where you can adjust invite-code limits, review pending
+   requests, toggle public/private mode, activate/deactivate individual
+   maps, and set turn-timer bounds + the default invite-code limit for
+   new accounts.
+
+**What the Owner Panel controls:**
+- **Public/private mode** — toggle whether "Continue as guest" is offered.
+- **Maps** — deactivate a map (e.g. while it's being edited/tested) so it
+  stops appearing in the map picker, without deleting its code. Reactivate
+  any time.
+- **Game settings** — the min/max bounds a host can pick a room's turn
+  timer from, and the default invite-code limit newly issued codes start
+  with (existing codes keep whatever limit they already had). Note: the
+  turn-timer minimum can never be set below 15 seconds, even if you enter
+  a lower number — this is enforced in the database itself, since going
+  lower risks conflicting with how inactive-player detection works.
+- **Accounts table** — see every account, who invited them, their
+  invite-code usage, and adjust any account's invite limit or regenerate
+  their code.
+- **Pending requests** — see who's waiting on an OTP (new signups or
+  invite-code upgrades) so you know who to relay a code to.
+
+**How people get in:**
+- **You approve them directly**: they use "Request access", you get an
+  email with a one-time code, you relay it to them yourself (text, call,
+  in person), they enter it and set a password.
+- **Someone you approved invites their own friends**: every approved
+  account gets a reusable invite code (default limit: 20 uses, adjustable
+  per-account in the Owner Panel). Their friends use "I have an invite
+  code" instead of requesting access from you — no OTP needed.
+- **Public mode** (toggle in the Owner Panel): also allows anyone to
+  "Continue as guest" with just a name, no account at all. Useful for a
+  one-off open game night; switch back to private afterward and existing
+  guest sessions simply won't be re-honored on their next visit.
+
 ---
 
 ## How the two modes work under the hood

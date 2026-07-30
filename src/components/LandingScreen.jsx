@@ -1,22 +1,40 @@
 import React, { useState, useEffect } from "react";
 import { isSupabaseConfigured } from "../lib/supabaseClient.js";
 import { useActiveMaps } from "../lib/useActiveMaps.js";
+import { computeSeatLayout, computeSeatLayoutSafe, seatLabel } from "../lib/seatLayout.js";
 
 // ---------------------------------------------------------------------------
-// LANDING SCREEN — the very first thing a player sees. Three paths:
-//   1. Same-device pass-and-play (always available, no Supabase needed)
-//   2. Create an online room (host flow)
-//   3. Join an online room by code
+// LANDING SCREEN — the very first thing a player sees.
+//   - Same-device pass-and-play: top-level, always available
+//   - "Play Online": a sub-choice revealing Create Room / Join Room
+//   - Logout: always available (clears the account session or guest flag)
 // ---------------------------------------------------------------------------
-export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom, onChooseJoinRoom, showAdminPanelLink, onOpenAdminPanel, accountDisplayName }) {
-  const [mode, setMode] = useState(null); // null | "create" | "join"
+export default function LandingScreen({
+  onChoosePassAndPlay,
+  onChooseCreateRoom,
+  onChooseJoinRoom,
+  showAdminPanelLink,
+  onOpenAdminPanel,
+  accountDisplayName,
+  onLogout,
+}) {
+  const [mode, setMode] = useState(null); // null | "online" | "create" | "join"
   const configured = isSupabaseConfigured();
 
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <h1 style={styles.title}>Scotland Yard</h1>
-        <p style={styles.subtitle}>Hidden-movement detective game</p>
+        <div style={styles.headerRow}>
+          <div>
+            <h1 style={styles.title}>Scotland Yard</h1>
+            <p style={styles.subtitle}>Hidden-movement detective game</p>
+          </div>
+          {onLogout && (
+            <button style={styles.logoutBtn} onClick={onLogout}>
+              Log out
+            </button>
+          )}
+        </div>
 
         {mode === null && (
           <div style={styles.choiceStack}>
@@ -27,24 +45,31 @@ export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom,
 
             <button
               style={{ ...styles.choiceBtn, ...(configured ? {} : styles.choiceBtnDisabled) }}
-              onClick={() => configured && setMode("create")}
+              onClick={() => configured && setMode("online")}
               disabled={!configured}
             >
-              <div style={styles.choiceTitle}>Create Online Room</div>
+              <div style={styles.choiceTitle}>Play Online</div>
               <div style={styles.choiceDesc}>
                 {configured
-                  ? "Start a new game, invite friends with a room code."
+                  ? "Create a room for friends to join, or join one with a code."
                   : "Online multiplayer isn't configured yet (see console for setup steps)."}
               </div>
             </button>
+          </div>
+        )}
 
-            <button
-              style={{ ...styles.choiceBtn, ...(configured ? {} : styles.choiceBtnDisabled) }}
-              onClick={() => configured && setMode("join")}
-              disabled={!configured}
-            >
+        {mode === "online" && (
+          <div style={styles.choiceStack}>
+            <button style={styles.choiceBtn} onClick={() => setMode("create")}>
+              <div style={styles.choiceTitle}>Create Online Room</div>
+              <div style={styles.choiceDesc}>Start a new game, invite friends with a room code.</div>
+            </button>
+            <button style={styles.choiceBtn} onClick={() => setMode("join")}>
               <div style={styles.choiceTitle}>Join Online Room</div>
               <div style={styles.choiceDesc}>Enter a room code a friend shared with you.</div>
+            </button>
+            <button style={styles.linkBtn} onClick={() => setMode(null)}>
+              Back
             </button>
           </div>
         )}
@@ -56,12 +81,12 @@ export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom,
         )}
 
         {mode === "create" && (
-          <CreateRoomForm onBack={() => setMode(null)} onCreate={onChooseCreateRoom} accountDisplayName={accountDisplayName} />
+          <CreateRoomForm onBack={() => setMode("online")} onCreate={onChooseCreateRoom} accountDisplayName={accountDisplayName} />
         )}
 
         {mode === "join" && (
           <JoinRoomForm
-            onBack={() => setMode(null)}
+            onBack={() => setMode("online")}
             onJoin={{ lookup: onChooseJoinRoom.lookup, confirm: onChooseJoinRoom.confirm }}
             accountDisplayName={accountDisplayName}
           />
@@ -76,9 +101,11 @@ function CreateRoomForm({ onBack, onCreate, accountDisplayName }) {
   const [displayName, setDisplayName] = useState(accountDisplayName || "");
   const [mapId, setMapId] = useState(null);
   const [numDetectives, setNumDetectives] = useState(3);
+  const [totalPlayers, setTotalPlayers] = useState(2);
   const [hostRole, setHostRole] = useState("mrx");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [seatErr, setSeatErr] = useState("");
 
   // Same fix as SetupScreen.jsx: never default mapId to a hardcoded
   // string like "city" -- if that specific map is deactivated, nothing
@@ -92,15 +119,52 @@ function CreateRoomForm({ onBack, onCreate, accountDisplayName }) {
     }
   }, [activeMaps, mapId]);
 
+  // Compute the fair-split seat layout live as the host adjusts either
+  // number. If the current combination is invalid (e.g. more
+  // detective-controllers than detectives), show a clear message instead
+  // of crashing -- computeSeatLayout throws on invalid input by design.
+  useEffect(() => {
+    try {
+      computeSeatLayout(numDetectives, totalPlayers);
+      setSeatErr("");
+    } catch (e) {
+      setSeatErr(e.message);
+    }
+    // if the previously chosen host role no longer exists in the new
+    // layout (e.g. detective count dropped), fall back to Mr. X
+    if (hostRole !== "mrx") {
+      try {
+        const layout = computeSeatLayout(numDetectives, totalPlayers);
+        if (!layout.some((s) => s.seatRole === hostRole)) {
+          setHostRole("mrx");
+        }
+      } catch {
+        setHostRole("mrx");
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numDetectives, totalPlayers]);
+
+  let seatLayout = [];
+  try {
+    seatLayout = computeSeatLayout(numDetectives, totalPlayers);
+  } catch {
+    seatLayout = [];
+  }
+
   async function handleSubmit() {
     if (!displayName.trim()) {
       setErr("Enter your name first.");
       return;
     }
+    if (seatErr) {
+      setErr(seatErr);
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
-      await onCreate({ displayName: displayName.trim(), mapId, numDetectives, hostRole });
+      await onCreate({ displayName: displayName.trim(), mapId, numDetectives, totalPlayers, hostRole });
     } catch (e) {
       setErr(e.message || "Failed to create room.");
       setBusy(false);
@@ -109,7 +173,7 @@ function CreateRoomForm({ onBack, onCreate, accountDisplayName }) {
 
   const roleOptions = [
     { value: "mrx", label: "Mr. X" },
-    ...Array.from({ length: numDetectives }, (_, i) => ({ value: `d${i}`, label: `Detective ${i + 1}` })),
+    ...seatLayout.map((s) => ({ value: s.seatRole, label: seatLabel(s.seatRole) })),
   ];
 
   return (
@@ -132,27 +196,40 @@ function CreateRoomForm({ onBack, onCreate, accountDisplayName }) {
         ))}
       </select>
 
-      <label style={styles.label}>Number of detectives</label>
-      <div style={styles.rowCenter}>
-        {[2, 3, 4, 5].map((n) => (
-          <button
-            key={n}
-            style={{ ...styles.pill, ...(numDetectives === n ? styles.pillActive : {}) }}
-            onClick={() => {
-              setNumDetectives(n);
-              // if the previously chosen detective seat no longer exists
-              // at the new count (e.g. was "Detective 5", count dropped
-              // to 3), fall back to Mr. X rather than submitting an
-              // invalid role
-              if (hostRole !== "mrx" && parseInt(hostRole.slice(1)) >= n) {
-                setHostRole("mrx");
-              }
-            }}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
+      <label style={styles.label}>Number of detectives (3–20)</label>
+      <input
+        type="number"
+        min={3}
+        max={20}
+        style={styles.numberInput}
+        value={numDetectives}
+        onChange={(e) => setNumDetectives(Math.max(3, Math.min(20, parseInt(e.target.value, 10) || 3)))}
+      />
+
+      <label style={styles.label}>Total players (including you)</label>
+      <input
+        type="number"
+        min={2}
+        max={numDetectives + 1}
+        style={styles.numberInput}
+        value={totalPlayers}
+        onChange={(e) => setTotalPlayers(Math.max(2, Math.min(numDetectives + 1, parseInt(e.target.value, 10) || 2)))}
+      />
+      <p style={styles.hostNote}>
+        1 player will be Mr. X; the rest split the {numDetectives} detectives as evenly as possible.
+      </p>
+
+      {seatErr ? (
+        <div style={styles.errText}>{seatErr}</div>
+      ) : (
+        <div style={styles.seatPreview}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Seat layout preview:</div>
+          <div>Mr. X</div>
+          {seatLayout.map((s) => (
+            <div key={s.seatRole}>{seatLabel(s.seatRole)}</div>
+          ))}
+        </div>
+      )}
 
       <label style={styles.label}>Your role</label>
       <select style={styles.select} value={hostRole} onChange={(e) => setHostRole(e.target.value)}>
@@ -163,13 +240,11 @@ function CreateRoomForm({ onBack, onCreate, accountDisplayName }) {
         ))}
       </select>
 
-      <p style={styles.hostNote}>
-        Other players will pick from the remaining roles when they join.
-      </p>
+      <p style={styles.hostNote}>Other players will pick from the remaining seats when they join.</p>
 
       {err && <div style={styles.errText}>{err}</div>}
 
-      <button style={styles.primaryBtn} onClick={handleSubmit} disabled={busy}>
+      <button style={styles.primaryBtn} onClick={handleSubmit} disabled={busy || !!seatErr}>
         {busy ? "Creating..." : "Create Room"}
       </button>
       <button style={styles.linkBtn} onClick={onBack}>
@@ -245,8 +320,7 @@ function JoinRoomForm({ onBack, onJoin, accountDisplayName }) {
     );
   }
 
-  const detectiveSlots = Array.from({ length: roomInfo.numDetectives }, (_, i) => `d${i}`);
-  const allSlots = ["mrx", ...detectiveSlots];
+  const allSlots = ["mrx", ...(computeSeatLayoutSafe(roomInfo.numDetectives, roomInfo.totalPlayers).map((s) => s.seatRole))];
 
   return (
     <div style={styles.form}>
@@ -263,7 +337,7 @@ function JoinRoomForm({ onBack, onJoin, accountDisplayName }) {
       <div style={styles.rowCenter}>
         {allSlots.map((s) => {
           const taken = roomInfo.takenRoles.includes(s);
-          const label = s === "mrx" ? "Mr. X" : `Detective ${parseInt(s.slice(1)) + 1}`;
+          const label = seatLabel(s);
           return (
             <button
               key={s}
@@ -326,6 +400,17 @@ const styles = {
     boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
     textAlign: "center",
   },
+  headerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 },
+  logoutBtn: {
+    border: "1px solid #ddd",
+    background: "#fff",
+    borderRadius: 8,
+    padding: "6px 12px",
+    fontSize: 12,
+    color: "#888",
+    cursor: "pointer",
+    flexShrink: 0,
+  },
   title: { margin: "0 0 4px", fontSize: 28, letterSpacing: -0.5 },
   subtitle: { color: "#777", marginBottom: 24, fontSize: 14 },
   choiceStack: { display: "flex", flexDirection: "column", gap: 10 },
@@ -347,6 +432,21 @@ const styles = {
     borderRadius: 8,
     border: "1.5px solid #ddd",
     fontSize: 14,
+  },
+  numberInput: {
+    padding: "10px 12px",
+    borderRadius: 8,
+    border: "1.5px solid #ddd",
+    fontSize: 14,
+    width: 80,
+  },
+  seatPreview: {
+    background: "#f4f2ec",
+    borderRadius: 8,
+    padding: "10px 12px",
+    fontSize: 13,
+    color: "#444",
+    lineHeight: 1.6,
   },
   select: {
     padding: "10px 12px",

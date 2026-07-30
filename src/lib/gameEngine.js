@@ -68,6 +68,8 @@ export function formatLogEntry(entry, theme) {
       return `${mrxName()} played a 2x (double move) card.`;
     case "round_limit_reached":
       return `Round limit reached \u2014 ${mrxName()} wins by evasion!`;
+    case "ended_by_vote":
+      return `All players voted to end the game.`;
     default:
       return "";
   }

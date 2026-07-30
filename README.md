@@ -182,6 +182,26 @@ them) or use an invite code from someone already approved.
   one-off open game night; switch back to private afterward and existing
   guest sessions simply won't be re-honored on their next visit.
 
+### Data cleanup (recommended, keeps your database tidy)
+
+Rooms don't clean themselves up automatically unless you set this up.
+Without it, ended games and abandoned lobbies just sit in your database
+forever.
+
+1. In Supabase SQL Editor, run `supabase/data_cleanup.sql`.
+2. **Note:** this uses the `pg_cron` Postgres extension, which is
+   available on Supabase's hosted plans but may not be enabled by
+   default on every project tier — if the `create extension` line fails,
+   check **Database → Extensions** in your Supabase dashboard and enable
+   `pg_cron` manually first, then re-run the file.
+3. Once set up, a scheduled job runs every 30 minutes and deletes:
+   - Rooms whose game ended more than 1 hour ago (gives players time to
+     see the results screen first).
+   - Lobbies nobody ever started a game in, after 24 hours.
+4. To verify it's running: `select * from cron.job_run_details order by start_time desc limit 10;`
+   in the SQL Editor.
+5. To clean up manually right now (e.g. for testing): `select cleanup_stale_rooms();`
+
 ---
 
 ## How the two modes work under the hood

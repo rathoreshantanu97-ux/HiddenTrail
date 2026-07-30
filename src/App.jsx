@@ -11,6 +11,7 @@ import HandoffScreen from "./components/HandoffScreen.jsx";
 import GameBoard from "./components/GameBoard.jsx";
 import EndedScreen from "./components/EndedScreen.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
+import EndGameVote from "./components/EndGameVote.jsx";
 import AdminPanel from "./components/AdminPanel.jsx";
 import { useRoomStatus } from "./lib/useRoomStatus.js";
 import { currentActor } from "./lib/gameEngine.js";
@@ -85,7 +86,7 @@ function LoadingOrDeadRoom({ onGiveUp, immediate }) {
   );
 }
 
-export default function App({ account }) {
+export default function App({ account, onLogout }) {
   const [appMode, setAppMode] = useState("landing"); // "landing" | "passandplay" | "multiplayer" | "adminPanel"
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -113,6 +114,7 @@ export default function App({ account }) {
   const [mpRole, setMpRole] = useState(null);
   const [mpIsHost, setMpIsHost] = useState(false);
   const [mpNumDetectives, setMpNumDetectives] = useState(3);
+  const [mpTotalPlayers, setMpTotalPlayers] = useState(2);
   const [mpMapId, setMpMapId] = useState("city");
   const [mpDisplayName, setMpDisplayName] = useState("");
   // mpStage used to be local-only state that only the HOST's own click
@@ -150,6 +152,7 @@ export default function App({ account }) {
           setMpRole(parsed.role);
           setMpIsHost(parsed.isHost);
           setMpNumDetectives(parsed.numDetectives);
+          setMpTotalPlayers(parsed.totalPlayers || 2);
           setMpMapId(parsed.mapId);
           setMpDisplayName(parsed.displayName);
           setAppMode("multiplayer");
@@ -168,6 +171,7 @@ export default function App({ account }) {
       role: mpRole,
       isHost: mpIsHost,
       numDetectives: mpNumDetectives,
+      totalPlayers: mpTotalPlayers,
       mapId: mpMapId,
       displayName: mpDisplayName,
       ...extra,
@@ -180,10 +184,11 @@ export default function App({ account }) {
     setAppMode("passandplay");
   }
 
-  async function handleCreateRoom({ displayName, mapId, numDetectives, hostRole }) {
+  async function handleCreateRoom({ displayName, mapId, numDetectives, totalPlayers, hostRole }) {
     const { roomId, roomCode, hostPlayerId } = await api.createRoom({
       mapId,
       numDetectives,
+      totalPlayers,
       hostDisplayName: displayName,
       hostRole,
     });
@@ -193,6 +198,7 @@ export default function App({ account }) {
     setMpRole(hostRole);
     setMpIsHost(true);
     setMpNumDetectives(numDetectives);
+    setMpTotalPlayers(totalPlayers);
     setMpMapId(mapId);
     setMpDisplayName(displayName);
     setAppMode("multiplayer");
@@ -205,6 +211,7 @@ export default function App({ account }) {
         role: hostRole,
         isHost: true,
         numDetectives,
+        totalPlayers,
         mapId,
         displayName,
         stage: "lobby",
@@ -218,13 +225,14 @@ export default function App({ account }) {
 
   async function handleConfirmJoin({ displayName, roomCode, role }) {
     const { roomId, playerId } = await api.joinRoom({ roomCode, role, displayName });
-    const info = await api.lookupRoom(roomCode); // to get mapId/numDetectives for the lobby screen
+    const info = await api.lookupRoom(roomCode); // to get mapId/numDetectives/totalPlayers for the lobby screen
     setMpRoomId(roomId);
     setMpRoomCode(roomCode);
     setMpPlayerId(playerId);
     setMpRole(role);
     setMpIsHost(false);
     setMpNumDetectives(info.numDetectives);
+    setMpTotalPlayers(info.totalPlayers);
     setMpMapId(info.mapId);
     setMpDisplayName(displayName);
     setAppMode("multiplayer");
@@ -237,6 +245,7 @@ export default function App({ account }) {
         role,
         isHost: false,
         numDetectives: info.numDetectives,
+        totalPlayers: info.totalPlayers,
         mapId: info.mapId,
         displayName,
         stage: "lobby",
@@ -310,6 +319,7 @@ export default function App({ account }) {
         showAdminPanelLink={isAdmin}
         onOpenAdminPanel={() => setAppMode("adminPanel")}
         accountDisplayName={account?.displayName || ""}
+        onLogout={account ? onLogout : null}
       />
     );
   }
@@ -321,7 +331,7 @@ export default function App({ account }) {
     const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
 
     if (!match) {
-      return <SetupScreen onStart={handleStartPassAndPlay} />;
+      return <SetupScreen onStart={handleStartPassAndPlay} onBack={() => setAppMode("landing")} />;
     }
     if (match.phase === "handoff") {
       return <HandoffScreen handoffFor={handoffFor} round={match.round} onReady={handleReadyForTurn} />;
@@ -381,8 +391,11 @@ export default function App({ account }) {
           roomCode={mpRoomCode}
           myPlayerId={mpPlayerId}
           myRole={mpRole}
+          onRoleChanged={setMpRole}
           isHost={mpIsHost}
+          onHostChanged={setMpIsHost}
           numDetectives={mpNumDetectives}
+          totalPlayers={mpTotalPlayers}
           mapId={mpMapId}
           onStart={handleStartMultiplayerGame}
           onLeave={handleLeaveMultiplayer}
@@ -439,6 +452,9 @@ export default function App({ account }) {
         onActivateDoubleMove={() => supabaseStore.activateDoubleMove()}
         extraHeaderContent={
           <div style={{ marginBottom: 10 }}>
+            <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+              <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
+            </div>
             <ChatPanel roomId={mpRoomId} myPlayerId={mpPlayerId} myRole={mpRole} myDisplayName={mpDisplayName} />
           </div>
         }

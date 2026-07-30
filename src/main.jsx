@@ -16,7 +16,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     {isPreviewRoute ? (
       <MapPreviewPage />
     ) : (
-      <AuthGate>{(account) => <App account={account} />}</AuthGate>
+      <AuthGate>{(account, onLogout) => <App account={account} onLogout={onLogout} />}</AuthGate>
     )}
   </React.StrictMode>,
 )

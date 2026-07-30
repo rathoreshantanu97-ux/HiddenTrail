@@ -57,6 +57,12 @@ export default function AuthGate({ children }) {
     setStatus("authenticated");
   }
 
+  async function handleLogout() {
+    await auth.logout(); // clears both a real session token and the guest flag, whichever applies
+    setAccount(null);
+    setStatus("unauthenticated");
+  }
+
   if (status === "checking") {
     return <div style={{ padding: 40, textAlign: "center", fontFamily: "system-ui" }}>Loading...</div>;
   }
@@ -65,5 +71,5 @@ export default function AuthGate({ children }) {
     return <AuthScreen onAuthenticated={handleAuthenticated} />;
   }
 
-  return children(account);
+  return children(account, handleLogout);
 }

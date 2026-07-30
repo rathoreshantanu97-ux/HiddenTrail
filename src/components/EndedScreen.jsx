@@ -19,11 +19,15 @@ export default function EndedScreen({ map, match, mrxName, detectiveName, onNewG
   return (
     <div style={styles.page}>
       <div style={styles.setupCard}>
-        <h1 style={styles.title}>{match.winner === "mrx" ? `${mrxName()} Wins` : "Detectives Win"}</h1>
+        <h1 style={styles.title}>
+          {match.winner === "mrx" ? `${mrxName()} Wins` : match.winner === "detectives" ? "Detectives Win" : "Game Ended"}
+        </h1>
         <p style={styles.subtitle}>
           {match.winner === "mrx"
             ? `${mrxName()} evaded capture for 22 rounds.`
-            : `A detective landed on ${mrxName()}'s station.`}
+            : match.winner === "detectives"
+            ? `A detective landed on ${mrxName()}'s station.`
+            : "All players agreed to end the game early."}
         </p>
         <div style={styles.logBox}>
           {readableLog.slice(-8).map((l, i) => (

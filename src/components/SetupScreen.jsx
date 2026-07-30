@@ -9,7 +9,7 @@ import { styles } from "./GameBoard.jsx";
 // LandingScreen's CreateRoomForm instead, since the host picks these once
 // for everyone rather than each device picking independently.)
 // ---------------------------------------------------------------------------
-export default function SetupScreen({ onStart }) {
+export default function SetupScreen({ onStart, onBack }) {
   const MAP_LIST = useActiveMaps();
   // IMPORTANT: mapId must never default to a hardcoded string like "city"
   // -- if an owner deactivates that specific map, MAP_LIST.find() would
@@ -140,6 +140,11 @@ export default function SetupScreen({ onStart }) {
         >
           Start Game
         </button>
+        {onBack && (
+          <button style={styles.linkBtn} onClick={onBack}>
+            Back
+          </button>
+        )}
       </div>
     </div>
   );

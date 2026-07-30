@@ -38,6 +38,13 @@ create table if not exists rooms (
   host_player_id uuid,                    -- set once the host's player row exists
   created_at timestamptz not null default now()
 );
+-- IMPORTANT: `create table if not exists` above does NOTHING if the table
+-- already existed from an earlier run of an older version of this file --
+-- including silently skipping any columns (like total_players) that were
+-- added to this definition after your table was first created. The line
+-- below is what actually fixes that: it's a genuine ALTER that runs
+-- every time, and is a safe no-op if the column's already there.
+alter table rooms add column if not exists total_players int not null default 0;
 
 -- -----------------------------------------------------------------------------
 -- PLAYERS — one row per connected participant (detective slot or Mr. X).

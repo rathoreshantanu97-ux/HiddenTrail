@@ -64,8 +64,17 @@ export default function SetupScreen({ onStart, onBack }) {
   return (
     <div style={styles.page}>
       <div style={styles.setupCard}>
-        <h1 style={styles.title}>Scotland Yard</h1>
-        <p style={styles.subtitle}>Pass-and-play · hidden Mr. X · laptop-sized board</p>
+        <div style={styles.headerRow}>
+          <div>
+            <h1 style={styles.title}>Scotland Yard</h1>
+            <p style={styles.subtitle}>Pass-and-play · hidden Mr. X · laptop-sized board</p>
+          </div>
+          {onBack && (
+            <button style={styles.backBtn} onClick={onBack}>
+              ← Back
+            </button>
+          )}
+        </div>
 
         <label style={styles.label}>Map</label>
         <div style={styles.rowCenter}>
@@ -140,11 +149,6 @@ export default function SetupScreen({ onStart, onBack }) {
         >
           Start Game
         </button>
-        {onBack && (
-          <button style={styles.linkBtn} onClick={onBack}>
-            Back
-          </button>
-        )}
       </div>
     </div>
   );

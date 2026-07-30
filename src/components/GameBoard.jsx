@@ -744,6 +744,17 @@ export const styles = {
   },
   title: { margin: "0 0 4px", fontSize: 28, letterSpacing: -0.5 },
   subtitle: { color: "#777", marginBottom: 20, fontSize: 14 },
+  headerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, textAlign: "left" },
+  backBtn: {
+    border: "1px solid #ddd",
+    background: "#fff",
+    borderRadius: 8,
+    padding: "6px 12px",
+    fontSize: 13,
+    color: "#555",
+    cursor: "pointer",
+    flexShrink: 0,
+  },
   label: { display: "block", fontSize: 13, color: "#555", marginBottom: 8, fontWeight: 600 },
   rowCenter: { display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" },
   characterPickerGrid: {

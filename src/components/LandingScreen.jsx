@@ -21,6 +21,14 @@ export default function LandingScreen({
   const [mode, setMode] = useState(null); // null | "online" | "create" | "join"
   const configured = isSupabaseConfigured();
 
+  function goBack() {
+    if (mode === "create" || mode === "join") {
+      setMode("online");
+    } else {
+      setMode(null);
+    }
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.card}>
@@ -29,10 +37,16 @@ export default function LandingScreen({
             <h1 style={styles.title}>Scotland Yard</h1>
             <p style={styles.subtitle}>Hidden-movement detective game</p>
           </div>
-          {onLogout && (
-            <button style={styles.logoutBtn} onClick={onLogout}>
-              Log out
+          {mode !== null ? (
+            <button style={styles.backBtn} onClick={goBack}>
+              ← Back
             </button>
+          ) : (
+            onLogout && (
+              <button style={styles.logoutBtn} onClick={onLogout}>
+                Log out
+              </button>
+            )
           )}
         </div>
 
@@ -68,9 +82,6 @@ export default function LandingScreen({
               <div style={styles.choiceTitle}>Join Online Room</div>
               <div style={styles.choiceDesc}>Enter a room code a friend shared with you.</div>
             </button>
-            <button style={styles.linkBtn} onClick={() => setMode(null)}>
-              Back
-            </button>
           </div>
         )}
 
@@ -81,12 +92,11 @@ export default function LandingScreen({
         )}
 
         {mode === "create" && (
-          <CreateRoomForm onBack={() => setMode("online")} onCreate={onChooseCreateRoom} accountDisplayName={accountDisplayName} />
+          <CreateRoomForm onCreate={onChooseCreateRoom} accountDisplayName={accountDisplayName} />
         )}
 
         {mode === "join" && (
           <JoinRoomForm
-            onBack={() => setMode("online")}
             onJoin={{ lookup: onChooseJoinRoom.lookup, confirm: onChooseJoinRoom.confirm }}
             accountDisplayName={accountDisplayName}
           />
@@ -96,7 +106,7 @@ export default function LandingScreen({
   );
 }
 
-function CreateRoomForm({ onBack, onCreate, accountDisplayName }) {
+function CreateRoomForm({ onCreate, accountDisplayName }) {
   const activeMaps = useActiveMaps();
   const [displayName, setDisplayName] = useState(accountDisplayName || "");
   const [mapId, setMapId] = useState(null);
@@ -247,14 +257,11 @@ function CreateRoomForm({ onBack, onCreate, accountDisplayName }) {
       <button style={styles.primaryBtn} onClick={handleSubmit} disabled={busy || !!seatErr}>
         {busy ? "Creating..." : "Create Room"}
       </button>
-      <button style={styles.linkBtn} onClick={onBack}>
-        Back
-      </button>
     </div>
   );
 }
 
-function JoinRoomForm({ onBack, onJoin, accountDisplayName }) {
+function JoinRoomForm({ onJoin, accountDisplayName }) {
   const [displayName, setDisplayName] = useState(accountDisplayName || "");
   const [roomCode, setRoomCode] = useState("");
   const [roomInfo, setRoomInfo] = useState(null); // { numDetectives, takenRoles } once code is looked up
@@ -313,9 +320,6 @@ function JoinRoomForm({ onBack, onJoin, accountDisplayName }) {
         <button style={styles.primaryBtn} onClick={handleLookup} disabled={busy}>
           {busy ? "Looking up..." : "Find Room"}
         </button>
-        <button style={styles.linkBtn} onClick={onBack}>
-          Back
-        </button>
       </div>
     );
   }
@@ -360,9 +364,6 @@ function JoinRoomForm({ onBack, onJoin, accountDisplayName }) {
 
       <button style={styles.primaryBtn} onClick={handleSubmit} disabled={busy}>
         {busy ? "Joining..." : "Join Room"}
-      </button>
-      <button style={styles.linkBtn} onClick={onBack}>
-        Back
       </button>
     </div>
   );

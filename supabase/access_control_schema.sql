@@ -37,7 +37,7 @@ create extension if not exists pgcrypto;
 --   default_invite_code_limit: how many uses a NEWLY issued invite code
 --     starts with. Existing accounts' individual limits (accounts.
 --     invite_code_limit) are unaffected by later changes to this default.
--- Only an owner account (accounts.is_owner = true) can change any of
+-- Only an admin account (accounts.is_admin = true) can change any of
 -- these, via the set_app_config() RPC.
 -- -----------------------------------------------------------------------------
 create table if not exists app_settings (
@@ -84,7 +84,7 @@ create table if not exists accounts (
   username text unique not null,
   display_name text not null,
   password_hash text not null,
-  is_owner boolean not null default false,   -- set manually on your own account row
+  is_admin boolean not null default false,   -- set manually on your own account row
   is_invite_created boolean not null default false,  -- true if created via someone's invite code
   invited_by_account_id uuid references accounts(id) on delete set null,
   invite_code text unique,                    -- null for invite_created accounts until upgraded
@@ -177,7 +177,7 @@ create policy sessions_deny_all on sessions for select using (false);
 -- app_settings: readable by EVERYONE (even logged-out visitors need to
 -- know whether to show the "Continue as Guest" option on the login
 -- screen). Never writable directly by clients -- only via the
--- set_app_public() RPC, which checks the caller is an owner account.
+-- set_app_public() RPC, which checks the caller is an admin account.
 drop policy if exists app_settings_select_all on app_settings;
 create policy app_settings_select_all on app_settings for select using (true);
 

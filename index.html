@@ -10,11 +10,14 @@
         margin: 0;
         padding: 0;
         width: 100%;
-        height: 100%;
+        min-height: 100%;
       }
-      body {
-        overflow: hidden;
-      }
+      /* NOTE: body no longer has overflow:hidden globally -- that was
+         breaking scrolling on every screen (Owner Panel, setup, etc),
+         not just the game board it was originally added for. The game
+         board's own fixed-viewport layout is scoped to its own
+         container (see styles.pagePlaying in GameBoard.jsx), which is
+         the correct place for that constraint to live. */
     </style>
   </head>
   <body>

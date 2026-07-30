@@ -2,17 +2,15 @@ import React, { useState, useEffect } from "react";
 import * as auth from "../lib/accessControlApi.js";
 
 // ---------------------------------------------------------------------------
-// AUTH SCREEN — shown when there's no valid session. Handles four flows:
-//   - Returning user: username + password -> login
-//   - New user (no invite): request access -> owner relays OTP out of
-//     band -> enter OTP -> set password -> logged in
-//   - New user (has an invite code from a friend): enter code + pick
-//     username/password -> logged in immediately, no OTP needed
-//   - Guest (only offered when the app is in public mode): just a name,
-//     no account created at all
+// AUTH SCREEN — shown when there's no valid session. Top-level choice is
+// Sign In vs Sign Up; Sign Up then splits into two paths:
+//   - Invite code from a friend -> instant account, no admin involved
+//   - Request access from the admin -> OTP relay, then set a password
+// Guest (only offered in public mode) is reachable from the Sign In view
+// as a lower-emphasis option, since it's not really "signing up."
 // ---------------------------------------------------------------------------
 export default function AuthScreen({ onAuthenticated }) {
-  const [mode, setMode] = useState("login"); // "login" | "request" | "verify" | "setPassword" | "inviteSignup" | "guest"
+  const [mode, setMode] = useState("landing"); // "landing" | "login" | "signupChoice" | "request" | "verify" | "setPassword" | "inviteSignup" | "guest"
   const [isPublic, setIsPublic] = useState(false);
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -52,7 +50,7 @@ export default function AuthScreen({ onAuthenticated }) {
     setErr("");
     try {
       await auth.requestAccess({ username: username.trim(), displayName: displayName.trim() });
-      setInfo("Request sent. The owner will share a one-time code with you directly.");
+      setInfo("Request sent. The admin will share a one-time code with you directly.");
       setMode("verify");
     } catch (e) {
       setErr(e.message);
@@ -128,7 +126,9 @@ export default function AuthScreen({ onAuthenticated }) {
       <div style={styles.card}>
         <h1 style={styles.title}>Scotland Yard</h1>
         <p style={styles.subtitle}>
+          {mode === "landing" && "Sign in or create an account"}
           {mode === "login" && "Sign in to play"}
+          {mode === "signupChoice" && "How would you like to sign up?"}
           {mode === "request" && "Request access"}
           {mode === "verify" && "Enter your one-time code"}
           {mode === "setPassword" && "Choose a password"}
@@ -138,6 +138,42 @@ export default function AuthScreen({ onAuthenticated }) {
 
         {info && <div style={styles.infoText}>{info}</div>}
         {err && <div style={styles.errText}>{err}</div>}
+
+        {mode === "landing" && (
+          <div style={styles.form}>
+            <button style={styles.primaryBtn} onClick={() => switchMode("login")}>
+              Sign In
+            </button>
+            <button style={styles.secondaryBtn} onClick={() => switchMode("signupChoice")}>
+              Sign Up
+            </button>
+            {isPublic && (
+              <button style={styles.linkBtn} onClick={() => switchMode("guest")}>
+                Continue as guest
+              </button>
+            )}
+          </div>
+        )}
+
+        {mode === "signupChoice" && (
+          <div style={styles.form}>
+            <button style={styles.choiceCard} onClick={() => switchMode("inviteSignup")}>
+              <div style={styles.choiceCardTitle}>I have an invite code</div>
+              <div style={styles.choiceCardDesc}>
+                A friend with an account shared a code with you. Sign up instantly, no waiting.
+              </div>
+            </button>
+            <button style={styles.choiceCard} onClick={() => switchMode("request")}>
+              <div style={styles.choiceCardTitle}>Request access from the admin</div>
+              <div style={styles.choiceCardDesc}>
+                Don't have a code? Ask the admin directly — they'll send you a one-time code to get started.
+              </div>
+            </button>
+            <button style={styles.linkBtn} onClick={() => switchMode("landing")}>
+              Back
+            </button>
+          </div>
+        )}
 
         {mode === "login" && (
           <div style={styles.form}>
@@ -154,20 +190,9 @@ export default function AuthScreen({ onAuthenticated }) {
             <button style={styles.primaryBtn} onClick={handleLogin} disabled={busy}>
               {busy ? "Signing in..." : "Sign In"}
             </button>
-
-            <div style={styles.divider} />
-
-            <button style={styles.secondaryBtn} onClick={() => switchMode("inviteSignup")}>
-              I have an invite code from a friend
+            <button style={styles.linkBtn} onClick={() => switchMode("landing")}>
+              Back
             </button>
-            <button style={styles.linkBtn} onClick={() => switchMode("request")}>
-              No invite code? Request access from the owner
-            </button>
-            {isPublic && (
-              <button style={styles.linkBtn} onClick={() => switchMode("guest")}>
-                Continue as guest
-              </button>
-            )}
           </div>
         )}
 
@@ -195,8 +220,8 @@ export default function AuthScreen({ onAuthenticated }) {
             <button style={styles.primaryBtn} onClick={handleInviteSignup} disabled={busy}>
               {busy ? "Creating account..." : "Create Account"}
             </button>
-            <button style={styles.linkBtn} onClick={() => switchMode("login")}>
-              Back to sign in
+            <button style={styles.linkBtn} onClick={() => switchMode("signupChoice")}>
+              Back
             </button>
           </div>
         )}
@@ -215,8 +240,8 @@ export default function AuthScreen({ onAuthenticated }) {
             <button style={styles.primaryBtn} onClick={handleRequestAccess} disabled={busy}>
               {busy ? "Sending..." : "Request Access"}
             </button>
-            <button style={styles.linkBtn} onClick={() => switchMode("login")}>
-              Back to sign in
+            <button style={styles.linkBtn} onClick={() => switchMode("signupChoice")}>
+              Back
             </button>
           </div>
         )}
@@ -234,8 +259,8 @@ export default function AuthScreen({ onAuthenticated }) {
             <button style={styles.primaryBtn} onClick={handleVerifyOtp} disabled={busy}>
               {busy ? "Verifying..." : "Verify Code"}
             </button>
-            <button style={styles.linkBtn} onClick={() => switchMode("login")}>
-              Back to sign in
+            <button style={styles.linkBtn} onClick={() => switchMode("request")}>
+              Back
             </button>
           </div>
         )}
@@ -269,8 +294,8 @@ export default function AuthScreen({ onAuthenticated }) {
             <button style={styles.primaryBtn} onClick={handleGuestContinue}>
               Continue
             </button>
-            <button style={styles.linkBtn} onClick={() => switchMode("login")}>
-              Back to sign in
+            <button style={styles.linkBtn} onClick={() => switchMode("landing")}>
+              Back
             </button>
           </div>
         )}
@@ -280,6 +305,17 @@ export default function AuthScreen({ onAuthenticated }) {
 }
 
 const styles = {
+  choiceCard: {
+    textAlign: "left",
+    border: "1.5px solid #ddd",
+    background: "#fff",
+    borderRadius: 12,
+    padding: "14px 16px",
+    cursor: "pointer",
+    marginTop: 6,
+  },
+  choiceCardTitle: { fontWeight: 700, fontSize: 14.5, marginBottom: 3 },
+  choiceCardDesc: { fontSize: 12.5, color: "#777", lineHeight: 1.4 },
   page: {
     fontFamily: "system-ui, -apple-system, sans-serif",
     minHeight: "100vh",

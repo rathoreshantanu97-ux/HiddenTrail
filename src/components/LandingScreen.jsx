@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { isSupabaseConfigured } from "../lib/supabaseClient.js";
 import { useActiveMaps } from "../lib/useActiveMaps.js";
 
@@ -8,7 +8,7 @@ import { useActiveMaps } from "../lib/useActiveMaps.js";
 //   2. Create an online room (host flow)
 //   3. Join an online room by code
 // ---------------------------------------------------------------------------
-export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom, onChooseJoinRoom, showOwnerPanelLink, onOpenOwnerPanel }) {
+export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom, onChooseJoinRoom, showAdminPanelLink, onOpenAdminPanel, accountDisplayName }) {
   const [mode, setMode] = useState(null); // null | "create" | "join"
   const configured = isSupabaseConfigured();
 
@@ -49,20 +49,21 @@ export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom,
           </div>
         )}
 
-        {mode === null && showOwnerPanelLink && (
-          <button style={styles.ownerLinkBtn} onClick={onOpenOwnerPanel}>
-            Owner Panel
+        {mode === null && showAdminPanelLink && (
+          <button style={styles.adminLinkBtn} onClick={onOpenAdminPanel}>
+            Admin Panel
           </button>
         )}
 
         {mode === "create" && (
-          <CreateRoomForm onBack={() => setMode(null)} onCreate={onChooseCreateRoom} />
+          <CreateRoomForm onBack={() => setMode(null)} onCreate={onChooseCreateRoom} accountDisplayName={accountDisplayName} />
         )}
 
         {mode === "join" && (
           <JoinRoomForm
             onBack={() => setMode(null)}
             onJoin={{ lookup: onChooseJoinRoom.lookup, confirm: onChooseJoinRoom.confirm }}
+            accountDisplayName={accountDisplayName}
           />
         )}
       </div>
@@ -70,14 +71,26 @@ export default function LandingScreen({ onChoosePassAndPlay, onChooseCreateRoom,
   );
 }
 
-function CreateRoomForm({ onBack, onCreate }) {
+function CreateRoomForm({ onBack, onCreate, accountDisplayName }) {
   const activeMaps = useActiveMaps();
-  const [displayName, setDisplayName] = useState("");
-  const [mapId, setMapId] = useState("city");
+  const [displayName, setDisplayName] = useState(accountDisplayName || "");
+  const [mapId, setMapId] = useState(null);
   const [numDetectives, setNumDetectives] = useState(3);
   const [hostRole, setHostRole] = useState("mrx");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+
+  // Same fix as SetupScreen.jsx: never default mapId to a hardcoded
+  // string like "city" -- if that specific map is deactivated, nothing
+  // in activeMaps would match it, silently breaking the picker (and, if
+  // any code assumed a match always exists, risking a crash). Snap to
+  // the first available active map instead.
+  useEffect(() => {
+    if (activeMaps.length === 0) return;
+    if (!mapId || !activeMaps.some((m) => m.id === mapId)) {
+      setMapId(activeMaps[0].id);
+    }
+  }, [activeMaps, mapId]);
 
   async function handleSubmit() {
     if (!displayName.trim()) {
@@ -166,8 +179,8 @@ function CreateRoomForm({ onBack, onCreate }) {
   );
 }
 
-function JoinRoomForm({ onBack, onJoin }) {
-  const [displayName, setDisplayName] = useState("");
+function JoinRoomForm({ onBack, onJoin, accountDisplayName }) {
+  const [displayName, setDisplayName] = useState(accountDisplayName || "");
   const [roomCode, setRoomCode] = useState("");
   const [roomInfo, setRoomInfo] = useState(null); // { numDetectives, takenRoles } once code is looked up
   const [role, setRole] = useState("");
@@ -282,7 +295,7 @@ function JoinRoomForm({ onBack, onJoin }) {
 }
 
 const styles = {
-  ownerLinkBtn: {
+  adminLinkBtn: {
     marginTop: 16,
     background: "none",
     border: "1px solid #ddd",

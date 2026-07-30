@@ -334,7 +334,7 @@ $$;
 -- regenerate_invite_code — invalidates an account's current code and
 -- issues a new one (e.g. if the old one got shared too widely). Resets
 -- the usage counter back to 0, since it's a fresh code. Callable by the
--- account owner themselves, or by an app owner on anyone's behalf.
+-- account owner themselves, or by an app admin on anyone's behalf.
 -- -----------------------------------------------------------------------------
 create or replace function regenerate_invite_code(
   p_caller_account_id uuid,
@@ -349,8 +349,8 @@ declare
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
   if v_caller.id is null then raise exception 'Caller account not found'; end if;
-  if p_caller_account_id <> p_target_account_id and not v_caller.is_owner then
-    raise exception 'Only the account owner or an app owner can regenerate this code';
+  if p_caller_account_id <> p_target_account_id and not v_caller.is_admin then
+    raise exception 'Only the account owner or an app admin can regenerate this code';
   end if;
 
   v_new_code := generate_unique_invite_code();
@@ -378,8 +378,8 @@ declare
   v_caller accounts%rowtype;
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
-  if v_caller.id is null or not v_caller.is_owner then
-    raise exception 'Only an app owner can change invite limits';
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can change invite limits';
   end if;
   if p_new_limit < 0 then
     raise exception 'Limit cannot be negative';
@@ -391,12 +391,12 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
--- list_accounts_for_owner — owner-only overview: every account, their
+-- list_accounts_for_admin — owner-only overview: every account, their
 -- invite usage, who invited them. Used by the owner-only admin panel.
 -- -----------------------------------------------------------------------------
-create or replace function list_accounts_for_owner(p_caller_account_id uuid)
+create or replace function list_accounts_for_admin(p_caller_account_id uuid)
 returns table (
-  out_id uuid, out_username text, out_display_name text, out_is_owner boolean,
+  out_id uuid, out_username text, out_display_name text, out_is_admin boolean,
   out_is_invite_created boolean, out_invited_by_username text,
   out_invite_code text, out_invite_code_limit int, out_invite_code_uses int,
   out_created_at timestamptz, out_last_login_at timestamptz
@@ -408,12 +408,12 @@ declare
   v_caller accounts%rowtype;
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
-  if v_caller.id is null or not v_caller.is_owner then
-    raise exception 'Only an app owner can view this';
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can view this';
   end if;
 
   return query
-    select a.id, a.username, a.display_name, a.is_owner, a.is_invite_created,
+    select a.id, a.username, a.display_name, a.is_admin, a.is_invite_created,
            inviter.username, a.invite_code, a.invite_code_limit, a.invite_code_uses,
            a.created_at, a.last_login_at
     from accounts a
@@ -424,12 +424,12 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
--- list_pending_requests_for_owner — owner-only: see pending access
+-- list_pending_requests_for_admin — owner-only: see pending access
 -- requests and upgrade requests awaiting an OTP relay. Does NOT return
 -- the OTP itself (it was only ever returned once, to the request-time
 -- caller, and emailed) -- this is just for visibility into what's pending.
 -- -----------------------------------------------------------------------------
-create or replace function list_pending_requests_for_owner(p_caller_account_id uuid)
+create or replace function list_pending_requests_for_admin(p_caller_account_id uuid)
 returns table (
   out_id uuid, out_request_type text, out_requested_username text,
   out_requester_display_name text, out_expires_at timestamptz, out_created_at timestamptz
@@ -441,8 +441,8 @@ declare
   v_caller accounts%rowtype;
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
-  if v_caller.id is null or not v_caller.is_owner then
-    raise exception 'Only an app owner can view this';
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can view this';
   end if;
 
   return query
@@ -480,8 +480,8 @@ declare
   v_caller accounts%rowtype;
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
-  if v_caller.id is null or not v_caller.is_owner then
-    raise exception 'Only an app owner can change this setting';
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can change this setting';
   end if;
 
   update app_settings set is_public = p_is_public, updated_at = now() where id = 1;
@@ -538,8 +538,8 @@ declare
   v_min int;
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
-  if v_caller.id is null or not v_caller.is_owner then
-    raise exception 'Only an app owner can change this setting';
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can change this setting';
   end if;
 
   v_min := greatest(p_turn_timer_min, 15);  -- hard floor, see comment above
@@ -596,8 +596,8 @@ declare
   v_caller accounts%rowtype;
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
-  if v_caller.id is null or not v_caller.is_owner then
-    raise exception 'Only an app owner can change this setting';
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can change this setting';
   end if;
 
   insert into map_settings (map_id, is_active, updated_at)

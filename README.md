@@ -118,6 +118,13 @@ them) or use an invite code from someone already approved.
 
 1. In Supabase SQL Editor, run `supabase/access_control_schema.sql`, then
    `supabase/access_control_functions.sql` (in that order).
+
+   **If you already ran these files before** (i.e. you're updating an
+   existing deployment, not setting one up fresh), also run
+   `supabase/migration_rename_owner_to_admin.sql` — this safely renames
+   the internal `is_owner` column to `is_admin` without losing any
+   existing data, then re-run `access_control_functions.sql` (the updated
+   version references `is_admin`, so the migration must run first).
 2. Sign up at [resend.com](https://resend.com) (free tier) and get an API key.
 3. In Supabase Dashboard → Edge Functions, deploy the function in
    `supabase/functions/notify-access-request/` (requires the
@@ -125,24 +132,27 @@ them) or use an invite code from someone already approved.
    ```bash
    supabase functions deploy notify-access-request
    ```
-4. In Supabase Dashboard → Edge Functions → Secrets, add:
+4. Set the two secrets it needs (via Terminal, using the Supabase CLI):
+   ```bash
+   supabase secrets set RESEND_API_KEY=your_resend_api_key
+   supabase secrets set OWNER_EMAIL=your_own_email@example.com
    ```
-   RESEND_API_KEY = <your Resend API key>
-   OWNER_EMAIL    = <your own email address>
-   ```
+   (`OWNER_EMAIL` must match the email address your Resend account is
+   registered under — Resend's free tier without a verified domain can
+   only send to that address.)
 5. Create your own account by using the normal "Request access" flow on
    the deployed app once — you'll get the OTP emailed to `OWNER_EMAIL`.
-6. In Supabase SQL Editor, mark your account as the owner:
+6. In Supabase SQL Editor, mark your account as an admin:
    ```sql
-   update accounts set is_owner = true where username = 'your_chosen_username';
+   update accounts set is_admin = true where username = 'your_chosen_username';
    ```
-7. Log back in — you'll now see an "Owner Panel" link on the landing
+7. Log back in — you'll now see an "Admin Panel" link on the landing
    screen, where you can adjust invite-code limits, review pending
    requests, toggle public/private mode, activate/deactivate individual
    maps, and set turn-timer bounds + the default invite-code limit for
    new accounts.
 
-**What the Owner Panel controls:**
+**What the Admin Panel controls:**
 - **Public/private mode** — toggle whether "Continue as guest" is offered.
 - **Maps** — deactivate a map (e.g. while it's being edited/tested) so it
   stops appearing in the map picker, without deleting its code. Reactivate
@@ -165,9 +175,9 @@ them) or use an invite code from someone already approved.
   in person), they enter it and set a password.
 - **Someone you approved invites their own friends**: every approved
   account gets a reusable invite code (default limit: 20 uses, adjustable
-  per-account in the Owner Panel). Their friends use "I have an invite
+  per-account in the Admin Panel). Their friends use "I have an invite
   code" instead of requesting access from you — no OTP needed.
-- **Public mode** (toggle in the Owner Panel): also allows anyone to
+- **Public mode** (toggle in the Admin Panel): also allows anyone to
   "Continue as guest" with just a name, no account at all. Useful for a
   one-off open game night; switch back to private afterward and existing
   guest sessions simply won't be re-honored on their next visit.

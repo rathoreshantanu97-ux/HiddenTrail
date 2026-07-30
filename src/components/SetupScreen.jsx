@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useActiveMaps } from "../lib/useActiveMaps.js";
 import { DETECTIVE_COLORS } from "../lib/gameEngine.js";
 import { styles } from "./GameBoard.jsx";
@@ -11,9 +11,25 @@ import { styles } from "./GameBoard.jsx";
 // ---------------------------------------------------------------------------
 export default function SetupScreen({ onStart }) {
   const MAP_LIST = useActiveMaps();
-  const [mapId, setMapId] = useState("city");
+  // IMPORTANT: mapId must never default to a hardcoded string like "city"
+  // -- if an owner deactivates that specific map, MAP_LIST.find() would
+  // return undefined and crash the whole screen (this was a real bug).
+  // Instead it starts null and snaps to the first available active map
+  // once MAP_LIST loads/changes.
+  const [mapId, setMapId] = useState(null);
   const [numDetectives, setNumDetectives] = useState(3);
   const [selectedDetectiveNames, setSelectedDetectiveNames] = useState(["", "", "", "", ""]);
+
+  useEffect(() => {
+    if (MAP_LIST.length === 0) return;
+    // if there's no selection yet, OR the previously selected map is no
+    // longer in the active list (e.g. it just got deactivated while this
+    // screen was open), snap to the first available map instead of
+    // silently pointing at something that no longer exists.
+    if (!mapId || !MAP_LIST.some((m) => m.id === mapId)) {
+      setMapId(MAP_LIST[0].id);
+    }
+  }, [MAP_LIST, mapId]);
 
   const map = MAP_LIST.find((m) => m.id === mapId);
 
@@ -27,6 +43,22 @@ export default function SetupScreen({ onStart }) {
       next[slotIdx] = newName;
       return next;
     });
+  }
+
+  // Guard against rendering before a map is ready (empty active-map list,
+  // or the very first render before the useEffect above has run) --
+  // shows a plain loading state instead of crashing on map.characterNames.
+  if (!map) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.setupCard}>
+          <h1 style={styles.title}>Scotland Yard</h1>
+          <p style={styles.subtitle}>
+            {MAP_LIST.length === 0 ? "No maps are currently available. Check back later." : "Loading..."}
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

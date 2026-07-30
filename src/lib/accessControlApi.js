@@ -2,7 +2,7 @@ import { supabase } from "./supabaseClient.js";
 
 // ---------------------------------------------------------------------------
 // ACCESS CONTROL API — wraps the RPCs in access_control_functions.sql, plus
-// the notify-access-request Edge Function that emails the owner an OTP.
+// the notify-access-request Edge Function that emails the admin an OTP.
 // ---------------------------------------------------------------------------
 
 const SESSION_TOKEN_KEY = "scotlandyard_session_token";
@@ -130,13 +130,13 @@ export async function setInviteCodeLimit({ callerAccountId, targetAccountId, new
   });
 }
 
-export async function listAccountsForOwner(callerAccountId) {
-  const rows = await callRpc("list_accounts_for_owner", { p_caller_account_id: callerAccountId });
+export async function listAccountsForAdmin(callerAccountId) {
+  const rows = await callRpc("list_accounts_for_admin", { p_caller_account_id: callerAccountId });
   return (rows || []).map((r) => ({
     id: r.out_id,
     username: r.out_username,
     displayName: r.out_display_name,
-    isOwner: r.out_is_owner,
+    isAdmin: r.out_is_admin,
     isInviteCreated: r.out_is_invite_created,
     invitedByUsername: r.out_invited_by_username,
     inviteCode: r.out_invite_code,
@@ -147,8 +147,8 @@ export async function listAccountsForOwner(callerAccountId) {
   }));
 }
 
-export async function listPendingRequestsForOwner(callerAccountId) {
-  const rows = await callRpc("list_pending_requests_for_owner", { p_caller_account_id: callerAccountId });
+export async function listPendingRequestsForAdmin(callerAccountId) {
+  const rows = await callRpc("list_pending_requests_for_admin", { p_caller_account_id: callerAccountId });
   return (rows || []).map((r) => ({
     id: r.out_id,
     requestType: r.out_request_type,

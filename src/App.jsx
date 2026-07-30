@@ -11,7 +11,7 @@ import HandoffScreen from "./components/HandoffScreen.jsx";
 import GameBoard from "./components/GameBoard.jsx";
 import EndedScreen from "./components/EndedScreen.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
-import OwnerPanel from "./components/OwnerPanel.jsx";
+import AdminPanel from "./components/AdminPanel.jsx";
 import { useRoomStatus } from "./lib/useRoomStatus.js";
 import { currentActor } from "./lib/gameEngine.js";
 
@@ -33,9 +33,9 @@ import { currentActor } from "./lib/gameEngine.js";
 //   - { accountId, displayName }         a real logged-in account
 //   - { isGuest: true, displayName }     a guest session (public mode only)
 //   - null                                Supabase not configured (dev mode)
-// An owner-panel entry point is shown only when a real account has
-// is_owner -- checked server-side by the panel's own RPCs regardless, but
-// we also avoid rendering the link at all for non-owners.
+// An admin-panel entry point is shown only when a real account has
+// is_admin -- checked server-side by the panel's own RPCs regardless, but
+// we also avoid rendering the link at all for non-admins.
 // ---------------------------------------------------------------------------
 
 const LOCAL_ROOM_KEY = "scotlandyard_room";
@@ -86,18 +86,18 @@ function LoadingOrDeadRoom({ onGiveUp, immediate }) {
 }
 
 export default function App({ account }) {
-  const [appMode, setAppMode] = useState("landing"); // "landing" | "passandplay" | "multiplayer" | "ownerPanel"
-  const [isOwner, setIsOwner] = useState(false);
+  const [appMode, setAppMode] = useState("landing"); // "landing" | "passandplay" | "multiplayer" | "adminPanel"
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     if (account?.accountId) {
-      // list_accounts_for_owner itself enforces the is_owner check --
+      // list_accounts_for_admin itself enforces the is_admin check --
       // calling it here is a cheap way to find out if THIS account is an
-      // owner (fails harmlessly for non-owners, we just don't show the link).
+      // admin (fails harmlessly for non-admins, we just don't show the link).
       auth
-        .listAccountsForOwner(account.accountId)
-        .then(() => setIsOwner(true))
-        .catch(() => setIsOwner(false));
+        .listAccountsForAdmin(account.accountId)
+        .then(() => setIsAdmin(true))
+        .catch(() => setIsAdmin(false));
     }
   }, [account]);
 
@@ -297,8 +297,8 @@ export default function App({ account }) {
   // RENDER
   // ---------------------------------------------------------------------------
 
-  if (appMode === "ownerPanel") {
-    return <OwnerPanel accountId={account.accountId} onBack={() => setAppMode("landing")} />;
+  if (appMode === "adminPanel") {
+    return <AdminPanel accountId={account.accountId} onBack={() => setAppMode("landing")} />;
   }
 
   if (appMode === "landing") {
@@ -307,8 +307,9 @@ export default function App({ account }) {
         onChoosePassAndPlay={handleChoosePassAndPlay}
         onChooseCreateRoom={handleCreateRoom}
         onChooseJoinRoom={{ lookup: handleLookupRoom, confirm: handleConfirmJoin }}
-        showOwnerPanelLink={isOwner}
-        onOpenOwnerPanel={() => setAppMode("ownerPanel")}
+        showAdminPanelLink={isAdmin}
+        onOpenAdminPanel={() => setAppMode("adminPanel")}
+        accountDisplayName={account?.displayName || ""}
       />
     );
   }

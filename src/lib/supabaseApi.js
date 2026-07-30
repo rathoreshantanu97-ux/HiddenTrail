@@ -197,6 +197,188 @@ export async function voteEndGame({ roomId, callerPlayerId, proposalId, vote }) 
   });
 }
 
+export async function flagInactivePlayer({ roomId, targetRole }) {
+  const rows = await callRpc("flag_inactive_player", { p_room_id: roomId, p_target_role: targetRole });
+  const row = rows?.[0];
+  return row ? { eventId: row.out_event_id } : null;
+}
+
+export async function getActiveTakeoverEvent(roomId) {
+  const rows = await callRpc("get_active_takeover_event", { p_room_id: roomId });
+  const row = rows?.[0];
+  if (!row) return null;
+  return {
+    eventId: row.out_event_id,
+    targetRole: row.out_target_role,
+    targetDisplayName: row.out_target_display_name,
+    status: row.out_status,
+    decisionDeadline: row.out_decision_deadline,
+    nomineeIds: row.out_nominee_ids || [],
+    nomineeNames: row.out_nominee_names || [],
+    voteCounts: row.out_vote_counts || {},
+  };
+}
+
+export async function hostDecideTakeover({ roomId, callerPlayerId, eventId, decision }) {
+  await callRpc("host_decide_takeover", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_event_id: eventId,
+    p_decision: decision,
+  });
+}
+
+export async function startTakeoverFromWaiting({ roomId, callerPlayerId, eventId }) {
+  await callRpc("start_takeover_from_waiting", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_event_id: eventId,
+  });
+}
+
+export async function nominateSelf({ roomId, callerPlayerId, eventId }) {
+  await callRpc("nominate_self", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_event_id: eventId });
+}
+
+export async function voteTakeoverNominee({ roomId, callerPlayerId, eventId, nomineePlayerId }) {
+  await callRpc("vote_takeover_nominee", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_event_id: eventId,
+    p_nominee_player_id: nomineePlayerId,
+  });
+}
+
+export async function cancelTakeoverEvent({ roomId, eventId }) {
+  await callRpc("cancel_takeover_event", { p_room_id: roomId, p_event_id: eventId });
+}
+
+export async function reassignVacatedSeat({ roomId, callerPlayerId, vacatedRole, recipientPlayerId }) {
+  await callRpc("reassign_vacated_seat", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_vacated_role: vacatedRole,
+    p_recipient_player_id: recipientPlayerId,
+  });
+}
+
+export async function proposePause({ roomId, callerPlayerId }) {
+  const rows = await callRpc("propose_pause", { p_room_id: roomId, p_caller_player_id: callerPlayerId });
+  const row = rows?.[0];
+  if (!row) throw new Error("Failed to propose pausing");
+  return { proposalId: row.out_proposal_id };
+}
+
+export async function getActivePauseProposal(roomId) {
+  const rows = await callRpc("get_active_pause_proposal", { p_room_id: roomId });
+  const row = rows?.[0];
+  if (!row) return null;
+  return {
+    proposalId: row.out_proposal_id,
+    proposedByName: row.out_proposed_by_name,
+    expiresAt: row.out_expires_at,
+    totalPlayers: row.out_total_players,
+    yesVotes: row.out_yes_votes,
+    noVotes: row.out_no_votes,
+    votedPlayerIds: row.out_voted_player_ids || [],
+  };
+}
+
+export async function votePause({ roomId, callerPlayerId, proposalId, vote }) {
+  await callRpc("vote_pause", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_proposal_id: proposalId,
+    p_vote: vote,
+  });
+}
+
+export async function resumeGame({ roomId, callerPlayerId }) {
+  await callRpc("resume_game", { p_room_id: roomId, p_caller_player_id: callerPlayerId });
+}
+
+export async function getPauseStatus(roomId) {
+  const rows = await callRpc("get_pause_status", { p_room_id: roomId });
+  const row = rows?.[0];
+  if (!row) return null;
+  return { pausedAt: row.out_paused_at, resumeDeadline: row.out_resume_deadline, pausedByName: row.out_paused_by_name };
+}
+
+export async function checkPlayerStillInRoom({ roomId, playerId }) {
+  const rows = await callRpc("check_player_still_in_room", { p_room_id: roomId, p_player_id: playerId });
+  const row = rows?.[0];
+  if (!row) return { stillInRoom: true, replacedRole: null };
+  return { stillInRoom: row.out_still_in_room, replacedRole: row.out_replaced_role };
+}
+
+export async function proposeTakeoverReversal({ roomId, callerPlayerId, takeoverEventId }) {
+  const rows = await callRpc("propose_takeover_reversal", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_takeover_event_id: takeoverEventId,
+  });
+  const row = rows?.[0];
+  if (!row) throw new Error("Failed to propose a reversal");
+  return { proposalId: row.out_proposal_id };
+}
+
+export async function getActiveTakeoverReversal(roomId) {
+  const rows = await callRpc("get_active_takeover_reversal", { p_room_id: roomId });
+  const row = rows?.[0];
+  if (!row) return null;
+  return {
+    proposalId: row.out_proposal_id,
+    proposedByName: row.out_proposed_by_name,
+    originalRole: row.out_original_role,
+    expiresAt: row.out_expires_at,
+    totalActive: row.out_total_active,
+    yesVotes: row.out_yes_votes,
+  };
+}
+
+export async function voteTakeoverReversal({ roomId, callerPlayerId, proposalId, vote }) {
+  await callRpc("vote_takeover_reversal", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_proposal_id: proposalId,
+    p_vote: vote,
+  });
+}
+
+export async function proposeRedistributeRoles({ roomId, callerPlayerId, newAssignments }) {
+  const rows = await callRpc("propose_redistribute_roles", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_new_assignments: newAssignments,
+  });
+  const row = rows?.[0];
+  if (!row) throw new Error("Failed to propose redistributing roles");
+  return { proposalId: row.out_proposal_id };
+}
+
+export async function getActiveRedistributeProposal(roomId) {
+  const rows = await callRpc("get_active_redistribute_proposal", { p_room_id: roomId });
+  const row = rows?.[0];
+  if (!row) return null;
+  return {
+    proposalId: row.out_proposal_id,
+    proposedByName: row.out_proposed_by_name,
+    newAssignments: row.out_new_assignments,
+    expiresAt: row.out_expires_at,
+    totalActive: row.out_total_active,
+    yesVotes: row.out_yes_votes,
+  };
+}
+
+export async function voteRedistributeRoles({ roomId, callerPlayerId, proposalId, vote }) {
+  await callRpc("vote_redistribute_roles", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_proposal_id: proposalId,
+    p_vote: vote,
+  });
+}
+
 export async function heartbeat({ playerId }) {
   await callRpc("heartbeat", { p_player_id: playerId });
 }

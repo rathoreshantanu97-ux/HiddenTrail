@@ -23,7 +23,7 @@
 create extension if not exists pgcrypto;
 
 -- -----------------------------------------------------------------------------
--- APP SETTINGS -- one global row of owner-adjustable configuration.
+-- APP SETTINGS -- one global row of admin-adjustable configuration.
 --   is_public: false (default) = only accounts can log in; true = also
 --     offers "Continue as Guest" (see AuthScreen.jsx / accessControlApi.js).
 --   turn_timer_min_seconds / turn_timer_max_seconds: bounds a host can
@@ -31,14 +31,26 @@ create extension if not exists pgcrypto;
 --     floor of 15s is enforced in the set_app_config() RPC below and
 --     cannot be lowered further from here -- this exists specifically to
 --     protect the "turn timer minimum >= inactivity grace period"
---     invariant the multiplayer design relies on (see project notes on
---     presence detection); an admin accidentally setting a 5s minimum
---     would silently reintroduce that conflict.
+--     invariant the multiplayer design relies on; an admin accidentally
+--     setting a 5s minimum would silently reintroduce that conflict.
 --   default_invite_code_limit: how many uses a NEWLY issued invite code
 --     starts with. Existing accounts' individual limits (accounts.
 --     invite_code_limit) are unaffected by later changes to this default.
+--   nomination_window_seconds: how long the "does anyone want to
+--     volunteer to take over Mr.X/a detective" step stays open before
+--     auto-resolving (default 30s, per project design).
+--   poll_window_seconds: how long the "vote for which nominee wins"
+--     step stays open when there are multiple volunteers (default 60s).
+--   min_detectives / max_detectives: bounds a host can pick when
+--     creating a room (previously hardcoded 3-20 in create_room()).
+--   min_total_players / max_total_players: bounds on total room size.
+--   presence_grace_period_seconds: how long after a player's connection
+--     drops before they're treated as genuinely inactive (absorbs brief
+--     blips like a phone screen lock or a wifi hiccup).
+--   pause_resume_deadline_hours: how long a paused game can sit
+--     unresumed before it's automatically treated as ended.
 -- Only an admin account (accounts.is_admin = true) can change any of
--- these, via the set_app_config() RPC.
+-- these, via the set_app_config() / set_timing_config() RPCs.
 -- -----------------------------------------------------------------------------
 create table if not exists app_settings (
   id int primary key default 1,
@@ -46,10 +58,70 @@ create table if not exists app_settings (
   turn_timer_min_seconds int not null default 30,
   turn_timer_max_seconds int not null default 300,
   default_invite_code_limit int not null default 20,
+  nomination_window_seconds int not null default 30,
+  poll_window_seconds int not null default 60,
+  min_detectives int not null default 3,
+  max_detectives int not null default 20,
+  min_total_players int not null default 2,
+  max_total_players int not null default 21,
+  presence_grace_period_seconds int not null default 25,
+  pause_resume_deadline_hours int not null default 36,
+  takeover_reversal_window_minutes int not null default 5,
+  -- Feature toggles -- each independently switches a whole feature on/off.
+  -- takeovers_enabled: if false, an inactive player's seat is simply left
+  --   inactive (no automated flag/nominate/vote flow at all -- the
+  --   turn-timer's auto-random-move logic keeps the game moving, but
+  --   nobody is ever offered control of that seat).
+  -- takeover_reversal_enabled: only meaningful when takeovers_enabled is
+  --   true -- lets a replaced player propose getting their seat back
+  --   (unanimous vote required) within takeover_reversal_window_minutes
+  --   of the takeover completing.
+  -- end_game_vote_enabled / pause_resume_enabled: self-explanatory,
+  --   same on/off pattern.
+  takeovers_enabled boolean not null default true,
+  takeover_reversal_enabled boolean not null default true,
+  end_game_vote_enabled boolean not null default true,
+  pause_resume_enabled boolean not null default true,
+  redistribute_roles_enabled boolean not null default true,
+  -- "Overridable by host" flags -- gate WHETHER a host is even offered
+  -- the choice to override a given feature for their own room. If
+  -- false, the host never sees that option at all when creating a room
+  -- -- the admin's global on/off setting simply applies unconditionally.
+  -- Defaults to true (admin can lock any of these down later if they
+  -- want tighter central control).
+  takeovers_overridable_by_host boolean not null default true,
+  takeover_reversal_overridable_by_host boolean not null default true,
+  end_game_vote_overridable_by_host boolean not null default true,
+  pause_resume_overridable_by_host boolean not null default true,
+  redistribute_roles_overridable_by_host boolean not null default true,
   updated_at timestamptz not null default now(),
   constraint app_settings_singleton check (id = 1)
 );
 insert into app_settings (id, is_public) values (1, false) on conflict (id) do nothing;
+
+-- Self-healing: if this table already existed before these columns were
+-- added to its definition above, `create table if not exists` would have
+-- silently skipped adding them (same gap the rooms.total_players issue
+-- hit earlier in this project) -- these lines actually add them either way.
+alter table app_settings add column if not exists nomination_window_seconds int not null default 30;
+alter table app_settings add column if not exists poll_window_seconds int not null default 60;
+alter table app_settings add column if not exists min_detectives int not null default 3;
+alter table app_settings add column if not exists max_detectives int not null default 20;
+alter table app_settings add column if not exists min_total_players int not null default 2;
+alter table app_settings add column if not exists max_total_players int not null default 21;
+alter table app_settings add column if not exists presence_grace_period_seconds int not null default 25;
+alter table app_settings add column if not exists pause_resume_deadline_hours int not null default 36;
+alter table app_settings add column if not exists takeover_reversal_window_minutes int not null default 5;
+alter table app_settings add column if not exists takeovers_enabled boolean not null default true;
+alter table app_settings add column if not exists takeover_reversal_enabled boolean not null default true;
+alter table app_settings add column if not exists end_game_vote_enabled boolean not null default true;
+alter table app_settings add column if not exists pause_resume_enabled boolean not null default true;
+alter table app_settings add column if not exists redistribute_roles_enabled boolean not null default true;
+alter table app_settings add column if not exists takeovers_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists takeover_reversal_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists end_game_vote_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists pause_resume_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists redistribute_roles_overridable_by_host boolean not null default true;
 
 -- -----------------------------------------------------------------------------
 -- MAP SETTINGS -- lets an owner deactivate a map without deleting its

@@ -17,18 +17,23 @@ export default function AdminPanel({ accountId, onBack }) {
   const [inactiveMapIds, setInactiveMapIds] = useState([]);
   const [config, setConfig] = useState({ turnTimerMin: 30, turnTimerMax: 300, defaultInviteLimit: 20 });
   const [configDraft, setConfigDraft] = useState(config);
+  const [timingConfig, setTimingConfigState] = useState(null);
+  const [timingDraft, setTimingDraft] = useState(null);
+  const [featureDraft, setFeatureDraft] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [savedNote, setSavedNote] = useState("");
 
   const refresh = useCallback(async () => {
     try {
-      const [pub, accts, reqs, inactiveIds, cfg] = await Promise.all([
+      const [pub, accts, reqs, inactiveIds, cfg, timing, features] = await Promise.all([
         auth.getAppPublicStatus(),
         auth.listAccountsForAdmin(accountId),
         auth.listPendingRequestsForAdmin(accountId),
         auth.getInactiveMapIds(),
         auth.getPublicConfig(),
+        auth.getTimingConfig(),
+        auth.getFeatureConfig(),
       ]);
       setIsPublicState(pub);
       setAccounts(accts);
@@ -36,6 +41,9 @@ export default function AdminPanel({ accountId, onBack }) {
       setInactiveMapIds(inactiveIds);
       setConfig(cfg);
       setConfigDraft(cfg);
+      setTimingConfigState(timing);
+      setTimingDraft(timing);
+      setFeatureDraft(features);
     } catch (e) {
       setErr(e.message);
     }
@@ -99,6 +107,50 @@ export default function AdminPanel({ accountId, onBack }) {
         turnTimerMax: Number(configDraft.turnTimerMax),
         defaultInviteLimit: Number(configDraft.defaultInviteLimit),
       });
+      await refresh();
+      setSavedNote("Saved.");
+      setTimeout(() => setSavedNote(""), 2000);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveTimingConfig() {
+    setBusy(true);
+    setErr("");
+    setSavedNote("");
+    try {
+      await auth.setTimingConfig({
+        callerAccountId: accountId,
+        config: {
+          nominationWindowSeconds: Number(timingDraft.nominationWindowSeconds),
+          pollWindowSeconds: Number(timingDraft.pollWindowSeconds),
+          minDetectives: Number(timingDraft.minDetectives),
+          maxDetectives: Number(timingDraft.maxDetectives),
+          minTotalPlayers: Number(timingDraft.minTotalPlayers),
+          maxTotalPlayers: Number(timingDraft.maxTotalPlayers),
+          presenceGracePeriodSeconds: Number(timingDraft.presenceGracePeriodSeconds),
+          pauseResumeDeadlineHours: Number(timingDraft.pauseResumeDeadlineHours),
+        },
+      });
+      await refresh();
+      setSavedNote("Saved.");
+      setTimeout(() => setSavedNote(""), 2000);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveFeatures() {
+    setBusy(true);
+    setErr("");
+    setSavedNote("");
+    try {
+      await auth.setFeatureToggles({ callerAccountId: accountId, config: featureDraft });
       await refresh();
       setSavedNote("Saved.");
       setTimeout(() => setSavedNote(""), 2000);
@@ -201,6 +253,142 @@ export default function AdminPanel({ accountId, onBack }) {
         </button>
         {savedNote && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{savedNote}</span>}
       </div>
+
+      {timingDraft && (
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Room size &amp; takeover timing</div>
+          <div style={styles.configGrid}>
+            <label style={styles.configLabel}>
+              Min detectives per room
+              <input
+                type="number"
+                min={3}
+                style={styles.configInput}
+                value={timingDraft.minDetectives}
+                onChange={(e) => setTimingDraft({ ...timingDraft, minDetectives: e.target.value })}
+              />
+            </label>
+            <label style={styles.configLabel}>
+              Max detectives per room
+              <input
+                type="number"
+                style={styles.configInput}
+                value={timingDraft.maxDetectives}
+                onChange={(e) => setTimingDraft({ ...timingDraft, maxDetectives: e.target.value })}
+              />
+            </label>
+            <label style={styles.configLabel}>
+              Min total players per room
+              <input
+                type="number"
+                min={2}
+                style={styles.configInput}
+                value={timingDraft.minTotalPlayers}
+                onChange={(e) => setTimingDraft({ ...timingDraft, minTotalPlayers: e.target.value })}
+              />
+            </label>
+            <label style={styles.configLabel}>
+              Max total players per room
+              <input
+                type="number"
+                style={styles.configInput}
+                value={timingDraft.maxTotalPlayers}
+                onChange={(e) => setTimingDraft({ ...timingDraft, maxTotalPlayers: e.target.value })}
+              />
+            </label>
+            <label style={styles.configLabel}>
+              Nomination window (seconds) — how long players have to volunteer for a takeover
+              <input
+                type="number"
+                min={10}
+                style={styles.configInput}
+                value={timingDraft.nominationWindowSeconds}
+                onChange={(e) => setTimingDraft({ ...timingDraft, nominationWindowSeconds: e.target.value })}
+              />
+            </label>
+            <label style={styles.configLabel}>
+              Poll window (seconds) — how long a vote between multiple volunteers stays open
+              <input
+                type="number"
+                min={15}
+                style={styles.configInput}
+                value={timingDraft.pollWindowSeconds}
+                onChange={(e) => setTimingDraft({ ...timingDraft, pollWindowSeconds: e.target.value })}
+              />
+            </label>
+            <label style={styles.configLabel}>
+              Presence grace period (seconds) — how long after disconnecting before someone is treated as inactive
+              <input
+                type="number"
+                min={5}
+                style={styles.configInput}
+                value={timingDraft.presenceGracePeriodSeconds}
+                onChange={(e) => setTimingDraft({ ...timingDraft, presenceGracePeriodSeconds: e.target.value })}
+              />
+            </label>
+            <label style={styles.configLabel}>
+              Pause resume deadline (hours) — how long a paused game can sit before auto-ending
+              <input
+                type="number"
+                min={1}
+                style={styles.configInput}
+                value={timingDraft.pauseResumeDeadlineHours}
+                onChange={(e) => setTimingDraft({ ...timingDraft, pauseResumeDeadlineHours: e.target.value })}
+              />
+            </label>
+          </div>
+          <div style={styles.smallNote}>
+            Nomination window can never go below 10s, poll window never below 15s, and presence grace period never
+            below 5s — even if entered lower, to keep these flows genuinely usable.
+          </div>
+          <button style={styles.toggleBtn} onClick={handleSaveTimingConfig} disabled={busy}>
+            {busy ? "Saving..." : "Save timing settings"}
+          </button>
+          {savedNote && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{savedNote}</span>}
+        </div>
+      )}
+
+      {featureDraft && (
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Features</div>
+          <div style={styles.smallNote}>
+            Turn a feature off entirely, or leave it on but let hosts choose per-room whether to use it (defaults to
+            on for every game unless the host explicitly opts out).
+          </div>
+          {[
+            { key: "takeovers", label: "Inactivity takeovers (Mr.X & detectives)" },
+            { key: "takeoverReversal", label: "Takeover reversal (unanimous vote to undo)" },
+            { key: "endGameVote", label: "Vote to end game" },
+            { key: "pauseResume", label: "Pause / resume" },
+            { key: "redistributeRoles", label: "Host: redistribute roles" },
+          ].map(({ key, label }) => (
+            <div key={key} style={styles.featureRow}>
+              <span style={styles.featureLabel}>{label}</span>
+              <label style={styles.featureCheckboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={featureDraft[`${key}Enabled`]}
+                  onChange={(e) => setFeatureDraft({ ...featureDraft, [`${key}Enabled`]: e.target.checked })}
+                />
+                Enabled
+              </label>
+              <label style={styles.featureCheckboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={featureDraft[`${key}Overridable`]}
+                  onChange={(e) => setFeatureDraft({ ...featureDraft, [`${key}Overridable`]: e.target.checked })}
+                  disabled={!featureDraft[`${key}Enabled`]}
+                />
+                Hosts can override per-room
+              </label>
+            </div>
+          ))}
+          <button style={styles.toggleBtn} onClick={handleSaveFeatures} disabled={busy}>
+            {busy ? "Saving..." : "Save feature settings"}
+          </button>
+          {savedNote && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{savedNote}</span>}
+        </div>
+      )}
 
       {pending.length > 0 && (
         <div style={styles.card}>
@@ -308,6 +496,16 @@ const styles = {
   },
   smallBtnInactive: { background: "#fdecea", borderColor: "#e0a8a8", color: "#a33" },
   configGrid: { display: "flex", flexDirection: "column", gap: 10, marginBottom: 10 },
+  featureRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 16,
+    padding: "8px 0",
+    borderBottom: "1px solid #f0f0f0",
+    flexWrap: "wrap",
+  },
+  featureLabel: { fontSize: 13, fontWeight: 600, flex: "1 1 220px" },
+  featureCheckboxLabel: { display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#555" },
   configLabel: { display: "flex", flexDirection: "column", gap: 4, fontSize: 12.5, color: "#555", fontWeight: 600 },
   configInput: { padding: "8px 10px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 13, width: 120 },
   pendingRow: { padding: "8px 0", borderBottom: "1px solid #eee", fontSize: 13 },

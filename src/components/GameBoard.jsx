@@ -59,10 +59,14 @@ export default function GameBoard({
   // In pass-and-play, myRole is null, so "it's my turn to act" collapses
   // to "it's this device's turn" (== whoever the current actor is, since
   // the device controls everyone). In multiplayer, only the player whose
-  // role matches the current actor can act.
-  const isMyTurnToAct = myRole === null || myRole === actor;
-  const iAmMrX = myRole === "mrx";
-  const iAmDetective = myRole && myRole !== "mrx";
+  // role matches the current actor can act. A third case, isSpectator,
+  // means "no role at all, and no permission to act as anyone" -- unlike
+  // pass-and-play's myRole===null (which means "this device controls
+  // everyone"), a spectator controls nobody.
+  const isSpectator = myRole === "__spectator__";
+  const isMyTurnToAct = !isSpectator && (myRole === null || myRole === actor);
+  const iAmMrX = !isSpectator && myRole === "mrx";
+  const iAmDetective = !isSpectator && myRole && myRole !== "mrx";
   const myDetective = iAmDetective ? match.detectives[parseInt(myRole.slice(1))] : null;
 
   const MIN_ZOOM = 1;
@@ -245,6 +249,9 @@ export default function GameBoard({
                 Round {match.round} / {MAX_ROUNDS}
               </div>
               <div style={styles.turnLabel}>
+                {!isMrXTurn && (
+                  <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />
+                )}
                 {isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}
               </div>
             </div>
@@ -541,6 +548,11 @@ export default function GameBoard({
                 const mrXHere = showMrXPos && match.mrX.pos != null && numId === match.mrX.pos;
                 const isLastKnown = !isMrXTurn && match.mrX.revealedPos === numId;
                 const dangerTarget = isMrXTurn && isLegal && detHere;
+                // Turn indicator: only for a detective's turn (their
+                // position is always public) -- Mr.X's turn never blinks
+                // his node, since that would leak his hidden position to
+                // everyone, defeating the entire point of hiding it.
+                const isCurrentTurnStation = !isMrXTurn && activeDetective && numId === activeDetective.pos;
                 let fill = "#ffffff";
                 let stroke = "#8a8375";
                 if (detHere) {
@@ -595,6 +607,12 @@ export default function GameBoard({
                       <circle cx={x} cy={y} r={nodeR + 1.4} fill="none" stroke="#e11" strokeWidth={0.35} opacity={0.8}>
                         <animate attributeName="r" values={`${nodeR + 1}; ${nodeR + 2.2}; ${nodeR + 1}`} dur="1.6s" repeatCount="indefinite" />
                         <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.6s" repeatCount="indefinite" />
+                      </circle>
+                    )}
+                    {isCurrentTurnStation && (
+                      <circle cx={x} cy={y} r={nodeR + 1.2} fill="none" stroke={activeDetective.color} strokeWidth={0.4} opacity={0.9}>
+                        <animate attributeName="r" values={`${nodeR + 0.9}; ${nodeR + 2}; ${nodeR + 0.9}`} dur="1.2s" repeatCount="indefinite" />
+                        <animate attributeName="opacity" values="0.9;0.25;0.9" dur="1.2s" repeatCount="indefinite" />
                       </circle>
                     )}
                     <circle cx={x} cy={y} r={nodeR} fill={fill} stroke={stroke} strokeWidth={0.35} filter="url(#softShadow)" />
@@ -847,7 +865,8 @@ export const styles = {
     marginBottom: 10,
   },
   roundLabel: { fontSize: 12, color: "#888" },
-  turnLabel: { fontSize: 18, fontWeight: 700 },
+  turnLabel: { fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 },
+  turnColorDot: { width: 12, height: 12, borderRadius: "50%", display: "inline-block", flexShrink: 0 },
   ticketsPanel: { display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 },
   chip: {
     border: "1.5px solid #ccc",

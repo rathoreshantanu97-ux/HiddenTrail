@@ -626,6 +626,106 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
+-- get_timing_config — anyone (even logged out) can read the timing/room-
+-- size bounds that affect what they see: nomination/poll windows (shown
+-- during a takeover flow), detective/player count bounds (shown in the
+-- Create Room form), presence grace period, and pause resume deadline.
+-- -----------------------------------------------------------------------------
+drop function if exists get_timing_config();
+create or replace function get_timing_config()
+returns table (
+  out_nomination_window_seconds int, out_poll_window_seconds int,
+  out_min_detectives int, out_max_detectives int,
+  out_min_total_players int, out_max_total_players int,
+  out_presence_grace_period_seconds int, out_pause_resume_deadline_hours int
+)
+language sql
+security definer
+as $$
+  select nomination_window_seconds, poll_window_seconds,
+         min_detectives, max_detectives,
+         min_total_players, max_total_players,
+         presence_grace_period_seconds, pause_resume_deadline_hours
+  from app_settings where id = 1;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- set_timing_config — admin-only: adjust the nomination/poll windows,
+-- detective/player count bounds, presence grace period, and pause resume
+-- deadline. Kept as a separate function from set_app_config (which
+-- covers turn-timer bounds and invite limits) so each function stays
+-- focused on one related group of settings rather than one giant
+-- do-everything config call.
+--
+-- Sanity bounds are enforced here regardless of what's requested, same
+-- spirit as set_app_config's 15-second turn-timer floor: these prevent
+-- an admin from accidentally configuring something that would break the
+-- game (e.g. max_detectives < min_detectives, or a 0-second nomination
+-- window that nobody could ever respond within).
+-- -----------------------------------------------------------------------------
+drop function if exists set_timing_config(uuid, int, int, int, int, int, int, int, int);
+create or replace function set_timing_config(
+  p_caller_account_id uuid,
+  p_nomination_window_seconds int,
+  p_poll_window_seconds int,
+  p_min_detectives int,
+  p_max_detectives int,
+  p_min_total_players int,
+  p_max_total_players int,
+  p_presence_grace_period_seconds int,
+  p_pause_resume_deadline_hours int
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller accounts%rowtype;
+  v_nomination int;
+  v_poll int;
+  v_grace int;
+begin
+  select * into v_caller from accounts a where a.id = p_caller_account_id;
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can change this setting';
+  end if;
+
+  v_nomination := greatest(p_nomination_window_seconds, 10);   -- floor: needs to be respondable
+  v_poll := greatest(p_poll_window_seconds, 15);
+  v_grace := greatest(p_presence_grace_period_seconds, 5);     -- floor: avoid false positives from normal blips
+
+  if p_min_detectives < 3 then
+    raise exception 'Minimum detectives cannot go below 3 (base game rule)';
+  end if;
+  if p_max_detectives < p_min_detectives then
+    raise exception 'Maximum detectives must be greater than or equal to the minimum';
+  end if;
+  if p_min_total_players < 2 then
+    raise exception 'Minimum total players cannot go below 2';
+  end if;
+  if p_max_total_players < p_min_total_players then
+    raise exception 'Maximum total players must be greater than or equal to the minimum';
+  end if;
+  if p_pause_resume_deadline_hours < 1 or p_pause_resume_deadline_hours > 336 then
+    raise exception 'Pause resume deadline must be between 1 and 336 hours (2 weeks)';
+  end if;
+
+  update app_settings
+  set nomination_window_seconds = v_nomination,
+      poll_window_seconds = v_poll,
+      min_detectives = p_min_detectives,
+      max_detectives = p_max_detectives,
+      min_total_players = p_min_total_players,
+      max_total_players = p_max_total_players,
+      presence_grace_period_seconds = v_grace,
+      pause_resume_deadline_hours = p_pause_resume_deadline_hours,
+      updated_at = now()
+  where id = 1;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
 -- login — username + password, returns a session token on success.
 -- -----------------------------------------------------------------------------
 drop function if exists login(text, text);
@@ -701,3 +801,78 @@ $$;
 grant execute on function get_app_public_status() to anon, authenticated;
 grant execute on function get_public_config() to anon, authenticated;
 grant execute on function get_inactive_map_ids() to anon, authenticated;
+grant execute on function get_timing_config() to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- get_feature_config -- anyone (even logged out) reads the full feature
+-- config: each feature's global on/off state, AND whether the admin has
+-- permitted hosts to override it per-room. The Create Room form uses this
+-- to decide which override toggles to even show the host -- if a feature
+-- isn't overridable, the host never sees a choice for it at all, and the
+-- admin's global setting simply applies.
+-- -----------------------------------------------------------------------------
+drop function if exists get_feature_config();
+create or replace function get_feature_config()
+returns table (
+  out_takeovers_enabled boolean, out_takeovers_overridable boolean,
+  out_takeover_reversal_enabled boolean, out_takeover_reversal_overridable boolean,
+  out_end_game_vote_enabled boolean, out_end_game_vote_overridable boolean,
+  out_pause_resume_enabled boolean, out_pause_resume_overridable boolean,
+  out_redistribute_roles_enabled boolean, out_redistribute_roles_overridable boolean
+)
+language sql
+security definer
+as $$
+  select
+    takeovers_enabled, takeovers_overridable_by_host,
+    takeover_reversal_enabled, takeover_reversal_overridable_by_host,
+    end_game_vote_enabled, end_game_vote_overridable_by_host,
+    pause_resume_enabled, pause_resume_overridable_by_host,
+    redistribute_roles_enabled, redistribute_roles_overridable_by_host
+  from app_settings where id = 1;
+$$;
+
+
+grant execute on function get_feature_config() to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- set_feature_toggles -- admin-only: set each feature's global on/off
+-- state AND whether it's overridable by hosts, in one call.
+-- -----------------------------------------------------------------------------
+drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean);
+create or replace function set_feature_toggles(
+  p_caller_account_id uuid,
+  p_takeovers_enabled boolean, p_takeovers_overridable boolean,
+  p_takeover_reversal_enabled boolean, p_takeover_reversal_overridable boolean,
+  p_end_game_vote_enabled boolean, p_end_game_vote_overridable boolean,
+  p_pause_resume_enabled boolean, p_pause_resume_overridable boolean,
+  p_redistribute_roles_enabled boolean, p_redistribute_roles_overridable boolean
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller accounts%rowtype;
+begin
+  select * into v_caller from accounts a where a.id = p_caller_account_id;
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can change this setting';
+  end if;
+
+  update app_settings
+  set takeovers_enabled = p_takeovers_enabled,
+      takeovers_overridable_by_host = p_takeovers_overridable,
+      takeover_reversal_enabled = p_takeover_reversal_enabled,
+      takeover_reversal_overridable_by_host = p_takeover_reversal_overridable,
+      end_game_vote_enabled = p_end_game_vote_enabled,
+      end_game_vote_overridable_by_host = p_end_game_vote_overridable,
+      pause_resume_enabled = p_pause_resume_enabled,
+      pause_resume_overridable_by_host = p_pause_resume_overridable,
+      redistribute_roles_enabled = p_redistribute_roles_enabled,
+      redistribute_roles_overridable_by_host = p_redistribute_roles_overridable,
+      updated_at = now()
+  where id = 1;
+end;
+$$;

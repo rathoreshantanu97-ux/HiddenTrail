@@ -26,6 +26,10 @@ export function useLocalGameStore() {
     setMatch((prev) => (prev ? E.applyActivateDoubleMove(prev) : prev));
   }, []);
 
+  const endGameEarly = useCallback(() => {
+    setMatch((prev) => (prev ? E.applyEndGameEarly(prev) : prev));
+  }, []);
+
   const beginTurnScreen = useCallback(() => {
     setMatch((prev) => (prev ? { ...prev, phase: "playing" } : prev));
   }, []);
@@ -42,6 +46,7 @@ export function useLocalGameStore() {
     submitDetectiveMove,
     submitMrXMove,
     activateDoubleMove,
+    endGameEarly,
     beginTurnScreen,
     resetToSetup,
   };

@@ -70,6 +70,16 @@ export function formatLogEntry(entry, theme) {
       return `Round limit reached \u2014 ${mrxName()} wins by evasion!`;
     case "ended_by_vote":
       return `All players voted to end the game.`;
+    case "ended_early":
+      return `The game was ended early.`;
+    case "game_paused":
+      return `The game was paused.`;
+    case "game_resumed":
+      return `The game was resumed${payload.by ? ` by ${payload.by}` : ""}.`;
+    case "ended_no_takeover":
+      return `The game ended — nobody volunteered to take over ${mrxName()}.`;
+    case "ended_pause_expired":
+      return `The game ended automatically after being paused too long.`;
     default:
       return "";
   }
@@ -240,5 +250,20 @@ export function applyActivateDoubleMove(match) {
       doubleMoveLegsRemaining: 2,
     },
     log: [...match.log, { kind: "double_move_activated" }],
+  };
+}
+
+// Ends a pass-and-play game immediately, no vote needed (unlike
+// multiplayer's end-game vote, a single device has one decision-maker at
+// the keyboard, so a confirm step in the UI is enough safety). Reuses the
+// same winner:null convention multiplayer's "ended by vote" case uses --
+// EndedScreen and formatLogEntry already handle this correctly.
+export function applyEndGameEarly(match) {
+  if (match.phase === "ended") return match;
+  return {
+    ...match,
+    phase: "ended",
+    winner: null,
+    log: [...match.log, { kind: "ended_early" }],
   };
 }

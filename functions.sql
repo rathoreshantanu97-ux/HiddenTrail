@@ -81,13 +81,27 @@ $$;
 -- seat now (either "mrx" or one of the computed detective seats);
 -- everyone else claims a remaining seat when they join.
 -- -----------------------------------------------------------------------------
-drop function if exists create_room(text, int, int, text, text);
+drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int);
 create or replace function create_room(
   p_map_id text,
   p_num_detectives int,
   p_total_players int,
   p_host_display_name text,
-  p_host_role text default 'mrx'
+  p_host_role text default 'mrx',
+  -- Host-chosen overrides -- NULL means "use the admin's global
+  -- default", and is always accepted regardless of overridability
+  -- (choosing not to override is never restricted). A non-null value is
+  -- only honored if the admin has actually marked that feature
+  -- overridable-by-host -- otherwise it's silently ignored and the
+  -- admin's global setting is used instead, since the client should
+  -- never have offered that choice in the first place, and the server
+  -- must not trust that it didn't.
+  p_takeovers_override boolean default null,
+  p_takeover_reversal_override boolean default null,
+  p_end_game_vote_override boolean default null,
+  p_pause_resume_override boolean default null,
+  p_redistribute_roles_override boolean default null,
+  p_turn_timer_seconds int default null
 ) returns table (out_room_id uuid, out_room_code text, out_host_player_id uuid)
 language plpgsql
 security definer
@@ -98,15 +112,50 @@ declare
   v_host_id uuid;
   v_attempt int := 0;
   v_valid_roles text[];
+  v_min_det int := 3;
+  v_max_det int := 20;
+  v_min_players int := 2;
+  v_max_players int := 21;
+  v_turn_min int := 30;
+  v_turn_max int := 300;
+  v_takeovers_overridable boolean := true;
+  v_reversal_overridable boolean := true;
+  v_endgame_overridable boolean := true;
+  v_pause_overridable boolean := true;
+  v_redistribute_overridable boolean := true;
+  v_final_takeovers_override boolean;
+  v_final_reversal_override boolean;
+  v_final_endgame_override boolean;
+  v_final_pause_override boolean;
+  v_final_redistribute_override boolean;
 begin
-  if p_num_detectives < 3 or p_num_detectives > 20 then
-    raise exception 'num_detectives must be between 3 and 20';
+  -- Read configurable bounds from app_settings if that table exists (it's
+  -- part of the access-control system in access_control_schema.sql,
+  -- which is optional -- multiplayer works without it, just with these
+  -- hardcoded fallback bounds instead of admin-configurable ones).
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select min_detectives, max_detectives, min_total_players, max_total_players,
+           turn_timer_min_seconds, turn_timer_max_seconds,
+           takeovers_overridable_by_host, takeover_reversal_overridable_by_host,
+           end_game_vote_overridable_by_host, pause_resume_overridable_by_host,
+           redistribute_roles_overridable_by_host
+      into v_min_det, v_max_det, v_min_players, v_max_players, v_turn_min, v_turn_max,
+           v_takeovers_overridable, v_reversal_overridable, v_endgame_overridable,
+           v_pause_overridable, v_redistribute_overridable
+      from app_settings where id = 1;
   end if;
-  if p_total_players < 2 then
-    raise exception 'total_players must be at least 2';
+
+  if p_num_detectives < v_min_det or p_num_detectives > v_max_det then
+    raise exception 'num_detectives must be between % and %', v_min_det, v_max_det;
+  end if;
+  if p_total_players < v_min_players or p_total_players > v_max_players then
+    raise exception 'total_players must be between % and %', v_min_players, v_max_players;
   end if;
   if p_total_players - 1 > p_num_detectives then
     raise exception 'Cannot have more detective-controllers than detectives';
+  end if;
+  if p_turn_timer_seconds is not null and (p_turn_timer_seconds < v_turn_min or p_turn_timer_seconds > v_turn_max) then
+    raise exception 'turn_timer_seconds must be between % and %, or null for no limit', v_turn_min, v_turn_max;
   end if;
 
   -- validate the host's chosen role is actually one of the computed seats
@@ -117,14 +166,30 @@ begin
     raise exception 'Invalid role % for this room''s seat layout', p_host_role;
   end if;
 
+  -- silently drop any override the admin hasn't permitted -- see comment
+  -- on the parameters above for why this must be re-checked server-side
+  v_final_takeovers_override := case when v_takeovers_overridable then p_takeovers_override else null end;
+  v_final_reversal_override := case when v_reversal_overridable then p_takeover_reversal_override else null end;
+  v_final_endgame_override := case when v_endgame_overridable then p_end_game_vote_override else null end;
+  v_final_pause_override := case when v_pause_overridable then p_pause_resume_override else null end;
+  v_final_redistribute_override := case when v_redistribute_overridable then p_redistribute_roles_override else null end;
+
   loop
     v_code := upper(substr(md5(random()::text), 1, 6));
     v_attempt := v_attempt + 1;
     exit when not exists (select 1 from rooms r where r.code = v_code) or v_attempt > 10;
   end loop;
 
-  insert into rooms (map_id, num_detectives, total_players, code, status)
-  values (p_map_id, p_num_detectives, p_total_players, v_code, 'lobby')
+  insert into rooms (
+    map_id, num_detectives, total_players, code, status, turn_timer_seconds,
+    takeovers_enabled_override, takeover_reversal_enabled_override,
+    end_game_vote_enabled_override, pause_resume_enabled_override, redistribute_roles_enabled_override
+  )
+  values (
+    p_map_id, p_num_detectives, p_total_players, v_code, 'lobby', p_turn_timer_seconds,
+    v_final_takeovers_override, v_final_reversal_override,
+    v_final_endgame_override, v_final_pause_override, v_final_redistribute_override
+  )
   returning id into v_room_id;
 
   insert into players (room_id, role, display_name)
@@ -973,6 +1038,10 @@ declare
   v_caller players%rowtype;
   v_proposal_id uuid;
 begin
+  if not is_feature_enabled('end_game_vote_enabled', p_room_id) then
+    raise exception 'The end-game vote feature is currently disabled';
+  end if;
+
   select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
   if v_caller.id is null then raise exception 'Not a player in this room'; end if;
 
@@ -1062,6 +1131,7 @@ declare
   v_proposal end_game_proposals%rowtype;
   v_total_players int;
   v_yes_votes int;
+  v_active_ids uuid[];
 begin
   select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
   if v_caller.id is null then raise exception 'Not a player in this room'; end if;
@@ -1084,8 +1154,10 @@ begin
     return;
   end if;
 
-  select count(*) into v_total_players from players where room_id = p_room_id;
-  select count(*) into v_yes_votes from end_game_votes where proposal_id = p_proposal_id and vote = true;
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+  select count(*) into v_total_players from players where room_id = p_room_id and id = any(v_active_ids);
+  select count(*) into v_yes_votes from end_game_votes where proposal_id = p_proposal_id and vote = true
+    and player_id = any(v_active_ids);
 
   if v_yes_votes >= v_total_players then
     update end_game_proposals set status = 'accepted' where id = p_proposal_id;
@@ -1108,4 +1180,1256 @@ language sql
 security definer
 as $$
   update players set last_seen_at = now() where id = p_player_id;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- flag_inactive_player -- any client can call this once it's determined
+-- (via Presence, client-side) that a player has been gone past the grace
+-- period. Creates a takeover_events row if one doesn't already exist for
+-- that seat. Idempotent: if an event is already active for this seat,
+-- just returns its id rather than erroring (many clients might notice
+-- the same inactivity around the same time).
+-- -----------------------------------------------------------------------------
+drop function if exists flag_inactive_player(uuid, text);
+create or replace function flag_inactive_player(
+  p_room_id uuid,
+  p_target_role text
+) returns table (out_event_id uuid)
+language plpgsql
+security definer
+as $$
+declare
+  v_existing takeover_events%rowtype;
+  v_target players%rowtype;
+  v_event_id uuid;
+  v_nomination_window int := 30;
+begin
+  if not is_feature_enabled('takeovers_enabled', p_room_id) then
+    return; -- feature disabled -- inactive seats just sit inactive, turn-timer keeps the game moving
+  end if;
+  select * into v_existing
+  from takeover_events e
+  where e.room_id = p_room_id and e.target_role = p_target_role
+    and e.status not in ('completed', 'cancelled', 'expired');
+  if v_existing.id is not null then
+    return query select v_existing.id;
+    return;
+  end if;
+
+  select * into v_target from players p where p.room_id = p_room_id and p.role = p_target_role;
+  if v_target.id is null then
+    raise exception 'No player currently holds that seat';
+  end if;
+
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select nomination_window_seconds into v_nomination_window from app_settings where id = 1;
+  end if;
+
+  if p_target_role = 'mrx' then
+    -- Mr.X: goes to the host first, per project design (scarcer/more
+    -- contentious seat -- the host gets to decide wait vs. takeover
+    -- before opening it up to nominations).
+    insert into takeover_events (room_id, target_role, target_player_id, target_display_name, status)
+    values (p_room_id, p_target_role, v_target.id, v_target.display_name, 'awaiting_host_decision')
+    returning id into v_event_id;
+  else
+    -- Detective seat: skip the host-decision step entirely and open
+    -- nominations immediately -- first person to click "I'll take over"
+    -- wins as soon as they're the sole nominee (see nominate_self, which
+    -- resolves a detective-seat event immediately on the first
+    -- nomination rather than waiting for the window to close).
+    insert into takeover_events (room_id, target_role, target_player_id, target_display_name, status, decision_deadline)
+    values (p_room_id, p_target_role, v_target.id, v_target.display_name, 'nominating', now() + (v_nomination_window || ' seconds')::interval)
+    returning id into v_event_id;
+  end if;
+
+  return query select v_event_id;
+exception
+  when unique_violation then
+    select id into v_event_id from takeover_events
+    where room_id = p_room_id and target_role = p_target_role
+      and status not in ('completed', 'cancelled', 'expired')
+    limit 1;
+    return query select v_event_id;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_active_takeover_event -- fetch the current takeover event (if any)
+-- for a room, plus nomination/vote tallies, so the client can render the
+-- right UI state (host decision prompt, nomination window, voting, etc).
+-- Also auto-expires an event whose decision_deadline has passed, same
+-- pattern as get_active_end_game_proposal.
+-- -----------------------------------------------------------------------------
+drop function if exists get_active_takeover_event(uuid);
+create or replace function get_active_takeover_event(p_room_id uuid)
+returns table (
+  out_event_id uuid, out_target_role text, out_target_display_name text,
+  out_status text, out_decision_deadline timestamptz,
+  out_nominee_ids uuid[], out_nominee_names text[],
+  out_vote_counts jsonb -- {nominee_player_id: count}
+)
+language plpgsql
+security definer
+as $$
+declare
+  v_event takeover_events%rowtype;
+begin
+  select * into v_event
+  from takeover_events e
+  where e.room_id = p_room_id and e.status not in ('completed', 'cancelled', 'expired')
+  order by e.created_at desc
+  limit 1;
+
+  if v_event.id is null then
+    return;
+  end if;
+
+  if v_event.decision_deadline is not null and v_event.decision_deadline < now() then
+    -- deadline passed with no resolution -- resolve it here rather than
+    -- leaving it dangling (see resolve_expired_takeover for the logic)
+    perform resolve_expired_takeover(v_event.id);
+    select * into v_event from takeover_events where id = v_event.id;
+    if v_event.status in ('completed', 'cancelled', 'expired') then
+      return;
+    end if;
+  end if;
+
+  return query
+    select
+      v_event.id, v_event.target_role, v_event.target_display_name,
+      v_event.status, v_event.decision_deadline,
+      (select coalesce(array_agg(n.player_id), '{}') from takeover_nominations n where n.event_id = v_event.id),
+      (select coalesce(array_agg(pl.display_name), '{}')
+         from takeover_nominations n join players pl on pl.id = n.player_id
+         where n.event_id = v_event.id),
+      (select coalesce(jsonb_object_agg(v.nominee_player_id::text, cnt), '{}'::jsonb)
+         from (select nominee_player_id, count(*) cnt from takeover_votes where event_id = v_event.id group by nominee_player_id) v);
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- host_decide_takeover -- the host chooses "wait" or "takeover" for a
+-- pending event. "wait" moves to a waiting state (stalled turns auto-play
+-- via the existing turn-timer logic, handled client-side/by the normal
+-- turn-timeout mechanism -- no special-casing needed here since a
+-- stalled Mr.X's turn just times out like any other). "takeover" opens
+-- the nomination window.
+-- -----------------------------------------------------------------------------
+drop function if exists host_decide_takeover(uuid, uuid, uuid, text);
+create or replace function host_decide_takeover(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_event_id uuid,
+  p_decision text -- 'wait' | 'takeover'
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_event takeover_events%rowtype;
+  v_nomination_window int := 30;
+begin
+  select * into v_room from rooms r where r.id = p_room_id;
+  if v_room.id is null or v_room.host_player_id <> p_caller_player_id then
+    raise exception 'Only the host can make this decision';
+  end if;
+
+  select * into v_event from takeover_events e where e.id = p_event_id and e.room_id = p_room_id for update;
+  if v_event.id is null or v_event.status <> 'awaiting_host_decision' then
+    raise exception 'This event is no longer awaiting a decision';
+  end if;
+
+  -- Only Mr.X's inactivity goes through the host wait-or-takeover
+  -- decision + nomination/vote sequence. Detective seats use a simpler
+  -- flow (flag_inactive_player routes them straight to 'nominating' with
+  -- first-click-wins semantics -- see that function and
+  -- resolve_expired_takeover's single-nominee-wins-immediately path,
+  -- which already covers "first to click gets it" for a detective seat
+  -- without needing a separate code path here). This function should
+  -- never actually be called for a detective-seat event in practice
+  -- (the client only shows the host-decision UI for target_role='mrx'),
+  -- but this check exists as a server-side backstop against that
+  -- assumption being violated.
+  if v_event.target_role <> 'mrx' then
+    raise exception 'Detective seat takeovers do not use a host decision step';
+  end if;
+
+  if p_decision = 'wait' then
+    update takeover_events set status = 'waiting', updated_at = now() where id = p_event_id;
+  elsif p_decision = 'takeover' then
+    if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+      select nomination_window_seconds into v_nomination_window from app_settings where id = 1;
+    end if;
+    update takeover_events
+    set status = 'nominating',
+        decision_deadline = now() + (v_nomination_window || ' seconds')::interval,
+        updated_at = now()
+    where id = p_event_id;
+  else
+    raise exception 'Invalid decision: %', p_decision;
+  end if;
+end;
+$$;
+
+
+
+-- -----------------------------------------------------------------------------
+-- start_takeover_from_waiting -- escalates a 'waiting' event into
+-- 'nominating', usable by ANY player (not just the host) -- this is the
+-- persistent "start takeover" button that stays available even after the
+-- host initially chose "wait".
+-- -----------------------------------------------------------------------------
+drop function if exists start_takeover_from_waiting(uuid, uuid, uuid);
+create or replace function start_takeover_from_waiting(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_event_id uuid
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_event takeover_events%rowtype;
+  v_nomination_window int := 30;
+begin
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  select * into v_event from takeover_events e where e.id = p_event_id and e.room_id = p_room_id for update;
+  if v_event.id is null or v_event.status <> 'waiting' then
+    raise exception 'This event is not currently in a waiting state';
+  end if;
+
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select nomination_window_seconds into v_nomination_window from app_settings where id = 1;
+  end if;
+
+  update takeover_events
+  set status = 'nominating',
+      decision_deadline = now() + (v_nomination_window || ' seconds')::interval,
+      updated_at = now()
+  where id = p_event_id;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- nominate_self -- a player volunteers to take over during the
+-- nominating window. Anyone (including the target's own former self, if
+-- they've come back -- though that's an edge case; auto-heal handles the
+-- more common "came back before anyone confirmed" path separately) can
+-- nominate themselves once.
+-- -----------------------------------------------------------------------------
+drop function if exists nominate_self(uuid, uuid, uuid);
+create or replace function nominate_self(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_event_id uuid
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_event takeover_events%rowtype;
+begin
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  select * into v_event from takeover_events e where e.id = p_event_id and e.room_id = p_room_id for update;
+  if v_event.id is null or v_event.status <> 'nominating' then
+    raise exception 'Nominations are not currently open for this event';
+  end if;
+  if v_event.decision_deadline < now() then
+    raise exception 'The nomination window has closed';
+  end if;
+
+  insert into takeover_nominations (event_id, player_id)
+  values (p_event_id, p_caller_player_id)
+  on conflict (event_id, player_id) do nothing;
+
+  -- Detective seats: first-to-click-wins, per project design (not
+  -- scarce/contentious like Mr.X) -- resolve IMMEDIATELY on the first
+  -- nomination rather than waiting for the window to close. Mr.X's
+  -- events still wait out the full nomination window, since multiple
+  -- people might want to volunteer and a vote may be needed.
+  if v_event.target_role <> 'mrx' then
+    perform complete_takeover(p_event_id, p_caller_player_id);
+  end if;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- vote_takeover_nominee -- during the voting stage (multiple nominees),
+-- every player votes for exactly one nominee. Cannot vote for yourself.
+-- -----------------------------------------------------------------------------
+drop function if exists vote_takeover_nominee(uuid, uuid, uuid, uuid);
+create or replace function vote_takeover_nominee(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_event_id uuid,
+  p_nominee_player_id uuid
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_event takeover_events%rowtype;
+begin
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  if p_caller_player_id = p_nominee_player_id then
+    raise exception 'You cannot vote for yourself';
+  end if;
+
+  select * into v_event from takeover_events e where e.id = p_event_id and e.room_id = p_room_id;
+  if v_event.id is null or v_event.status <> 'voting' then
+    raise exception 'Voting is not currently open for this event';
+  end if;
+  if v_event.decision_deadline < now() then
+    raise exception 'The voting window has closed';
+  end if;
+  if not exists (select 1 from takeover_nominations n where n.event_id = p_event_id and n.player_id = p_nominee_player_id) then
+    raise exception 'That player is not a nominee for this event';
+  end if;
+
+  insert into takeover_votes (event_id, voter_player_id, nominee_player_id)
+  values (p_event_id, p_caller_player_id, p_nominee_player_id)
+  on conflict (event_id, voter_player_id) do update set nominee_player_id = excluded.nominee_player_id, voted_at = now();
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- resolve_expired_takeover -- internal helper (not called directly by
+-- clients; invoked from get_active_takeover_event when a deadline has
+-- passed). Decides what happens when a nomination or voting window
+-- closes with no further input:
+--   - nominating window closed, 0 nominees: no volunteers -> for Mr.X,
+--     the game ends (abandoned/inconclusive, per project design); for a
+--     detective seat, the event just expires and the "start takeover"
+--     button remains available to try again later.
+--   - nominating window closed, exactly 1 nominee: they win directly, no
+--     vote needed.
+--   - nominating window closed, 2+ nominees: move to voting stage.
+--   - voting window closed: whoever has the most votes wins (ties broken
+--     by whoever was nominated first, for determinism).
+-- -----------------------------------------------------------------------------
+drop function if exists resolve_expired_takeover(uuid);
+create or replace function resolve_expired_takeover(p_event_id uuid) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_event takeover_events%rowtype;
+  v_nominee_count int;
+  v_sole_nominee uuid;
+  v_poll_window int := 60;
+  v_winner uuid;
+begin
+  select * into v_event from takeover_events e where e.id = p_event_id for update;
+  if v_event.id is null then return; end if;
+
+  if v_event.status = 'nominating' then
+    select count(*) into v_nominee_count from takeover_nominations where event_id = p_event_id;
+
+    if v_nominee_count = 0 then
+      if v_event.target_role = 'mrx' then
+        update game_state_public set phase = 'ended', winner = null,
+          log = log || jsonb_build_array(jsonb_build_object('kind', 'ended_no_takeover'))
+        where room_id = v_event.room_id;
+      end if;
+      update takeover_events set status = 'expired', updated_at = now() where id = p_event_id;
+      return;
+    end if;
+
+    if v_nominee_count = 1 then
+      select player_id into v_sole_nominee from takeover_nominations where event_id = p_event_id limit 1;
+      perform complete_takeover(p_event_id, v_sole_nominee);
+      return;
+    end if;
+
+    -- 2+ nominees -> move to voting
+    if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+      select poll_window_seconds into v_poll_window from app_settings where id = 1;
+    end if;
+    update takeover_events
+    set status = 'voting', decision_deadline = now() + (v_poll_window || ' seconds')::interval, updated_at = now()
+    where id = p_event_id;
+    return;
+  end if;
+
+  if v_event.status = 'voting' then
+    select nominee_player_id into v_winner
+    from takeover_votes
+    where event_id = p_event_id
+    group by nominee_player_id
+    order by count(*) desc,
+             min((select nominated_at from takeover_nominations n where n.event_id = p_event_id and n.player_id = nominee_player_id)) asc
+    limit 1;
+
+    if v_winner is null then
+      -- nobody voted at all -- fall back to whoever was nominated first
+      select player_id into v_winner from takeover_nominations where event_id = p_event_id order by nominated_at asc limit 1;
+    end if;
+
+    perform complete_takeover(p_event_id, v_winner);
+    return;
+  end if;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- complete_takeover -- internal helper: actually transfers the seat.
+--   - Mr.X: winner's OLD role (if they controlled detectives) becomes
+--     unassigned; game_state_secret / game_state_public are untouched
+--     (Mr.X's hidden state carries over as-is, just under new control);
+--     the winner's players.role becomes 'mrx'. The vacated detective
+--     seat(s), if any, are left ownerless until reassign_vacated_seat()
+--     is called (the "new Mr.X picks someone to inherit their old
+--     detectives" step) -- a separate explicit action, not automatic,
+--     since the design calls for the new Mr.X to choose.
+--   - Detective seat: winner's role becomes the target_role directly
+--     (they now control this in ADDITION to whatever they already
+--     controlled -- see the note on merging below).
+-- -----------------------------------------------------------------------------
+drop function if exists complete_takeover(uuid, uuid);
+create or replace function complete_takeover(p_event_id uuid, p_winner_player_id uuid) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_event takeover_events%rowtype;
+  v_winner players%rowtype;
+  v_merged_role text;
+begin
+  select * into v_event from takeover_events e where e.id = p_event_id;
+  if v_event.id is null then return; end if;
+
+  select * into v_winner from players p where p.id = p_winner_player_id;
+  if v_winner.id is null then
+    update takeover_events set status = 'cancelled', updated_at = now() where id = p_event_id;
+    return;
+  end if;
+
+  -- Auto-heal check: if the ORIGINAL target player's presence has
+  -- resumed by now, don't actually transfer -- cancel the takeover and
+  -- leave them in place. This is enforced here (at confirmation time),
+  -- not just when the event was opened, per the project design ("keep
+  -- their seat if not yet confirmed"). NOTE: presence itself is tracked
+  -- client-side (Supabase Realtime Presence channels aren't queryable
+  -- from SQL) -- so this specific check is performed by the CALLING
+  -- client before invoking whichever RPC ultimately calls this function,
+  -- not inside this function itself. This comment exists so that
+  -- invariant is documented at the point where it matters, even though
+  -- the actual guard lives in the client (src/lib/usePresence.js +
+  -- the takeover UI components).
+
+  if v_event.target_role = 'mrx' then
+    -- winner becomes mrx; their old role (if any) is simply left behind
+    -- on their own players row being overwritten -- but we want to KEEP
+    -- track of what they used to control so it can be offered onward.
+    -- We stash it in target_display_name's counterpart via a temp swap:
+    -- simplest correct approach is to just update players.role directly.
+    update players set role = 'mrx' where id = p_winner_player_id;
+  else
+    -- detective seat: merge the vacated seat's detectives into whatever
+    -- the winner already controls (a player can hold multiple detective
+    -- seats' worth of detectives as one comma-joined role).
+    if v_winner.role = 'mrx' then
+      raise exception 'Mr. X cannot also take over a detective seat';
+    end if;
+    v_merged_role := case
+      when v_winner.role is null or v_winner.role = '' then v_event.target_role
+      else v_winner.role || ',' || v_event.target_role
+    end;
+    update players set role = v_merged_role where id = p_winner_player_id;
+  end if;
+
+  -- the original (inactive) player's row, if it still exists and still
+  -- holds the OLD role, is removed -- their seat has been reassigned.
+  if v_event.target_player_id is not null then
+    delete from players where id = v_event.target_player_id and role = v_event.target_role;
+  end if;
+
+  update takeover_events
+  set status = 'completed', winner_player_id = p_winner_player_id, updated_at = now()
+  where id = p_event_id;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- cancel_takeover_event -- called when auto-heal detects the original
+-- player has returned before a takeover was confirmed (State C/D from
+-- the design: grace period or open nomination/voting, nobody's won yet).
+-- Client-side presence detection triggers this; it just marks the event
+-- cancelled so it stops showing to anyone.
+-- -----------------------------------------------------------------------------
+drop function if exists cancel_takeover_event(uuid, uuid);
+create or replace function cancel_takeover_event(p_room_id uuid, p_event_id uuid) returns void
+language plpgsql
+security definer
+as $$
+begin
+  update takeover_events
+  set status = 'cancelled', updated_at = now()
+  where id = p_event_id and room_id = p_room_id and status not in ('completed', 'cancelled', 'expired');
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- reassign_vacated_seat -- after a new Mr.X takes over, if they
+-- previously controlled detective seat(s), this is the explicit "pick
+-- one active player to receive them" step.
+-- -----------------------------------------------------------------------------
+drop function if exists reassign_vacated_seat(uuid, uuid, text, uuid);
+create or replace function reassign_vacated_seat(
+  p_room_id uuid,
+  p_caller_player_id uuid,   -- must be the new Mr.X making this choice
+  p_vacated_role text,       -- the detective role string the new Mr.X used to hold
+  p_recipient_player_id uuid
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_caller players%rowtype;
+  v_recipient players%rowtype;
+  v_merged_role text;
+begin
+  select * into v_room from rooms r where r.id = p_room_id;
+  if v_room.id is null then raise exception 'Room not found'; end if;
+
+  select * into v_caller from players p where p.id = p_caller_player_id and p.room_id = p_room_id;
+  if v_caller.id is null or v_caller.role <> 'mrx' then
+    raise exception 'Only the current Mr. X can reassign a vacated detective seat';
+  end if;
+
+  select * into v_recipient from players p where p.id = p_recipient_player_id and p.room_id = p_room_id;
+  if v_recipient.id is null then raise exception 'Recipient is not a player in this room'; end if;
+  if v_recipient.role = 'mrx' then raise exception 'Cannot assign detectives to Mr. X'; end if;
+
+  v_merged_role := case
+    when v_recipient.role is null or v_recipient.role = '' then p_vacated_role
+    else v_recipient.role || ',' || p_vacated_role
+  end;
+
+  update players set role = v_merged_role where id = p_recipient_player_id;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- propose_pause -- any player proposes pausing the game. Same
+-- proposal/vote shape as propose_end_game. Fails if one's already
+-- pending, or if the game is already paused.
+-- -----------------------------------------------------------------------------
+drop function if exists propose_pause(uuid, uuid);
+create or replace function propose_pause(
+  p_room_id uuid,
+  p_caller_player_id uuid
+) returns table (out_proposal_id uuid)
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_gs game_state_public%rowtype;
+  v_proposal_id uuid;
+begin
+  if not is_feature_enabled('pause_resume_enabled', p_room_id) then
+    raise exception 'The pause/resume feature is currently disabled';
+  end if;
+
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  select * into v_gs from game_state_public where room_id = p_room_id;
+  if v_gs.phase = 'paused' then raise exception 'The game is already paused'; end if;
+  if v_gs.phase = 'ended' then raise exception 'The game has already ended'; end if;
+
+  insert into pause_proposals (room_id, proposed_by_player_id, proposed_by_name)
+  values (p_room_id, p_caller_player_id, v_caller.display_name)
+  returning id into v_proposal_id;
+
+  insert into pause_votes (proposal_id, player_id, vote)
+  values (v_proposal_id, p_caller_player_id, true);
+
+  return query select v_proposal_id;
+exception
+  when unique_violation then
+    raise exception 'A proposal to pause the game is already pending';
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_active_pause_proposal -- same shape as get_active_end_game_proposal.
+-- -----------------------------------------------------------------------------
+drop function if exists get_active_pause_proposal(uuid);
+create or replace function get_active_pause_proposal(p_room_id uuid)
+returns table (out_proposal_id uuid, out_proposed_by_name text, out_expires_at timestamptz,
+               out_total_players int, out_yes_votes int, out_no_votes int, out_voted_player_ids uuid[])
+language plpgsql
+security definer
+as $$
+declare
+  v_proposal pause_proposals%rowtype;
+  v_total_players int;
+begin
+  select * into v_proposal from pause_proposals p where p.room_id = p_room_id and p.status = 'pending'
+    order by p.created_at desc limit 1;
+  if v_proposal.id is null then return; end if;
+  if v_proposal.expires_at < now() then
+    update pause_proposals set status = 'expired' where id = v_proposal.id;
+    return;
+  end if;
+
+  select count(*) into v_total_players from players where room_id = p_room_id;
+
+  return query
+    select v_proposal.id, v_proposal.proposed_by_name, v_proposal.expires_at, v_total_players,
+      (select count(*)::int from pause_votes v where v.proposal_id = v_proposal.id and v.vote = true),
+      (select count(*)::int from pause_votes v where v.proposal_id = v_proposal.id and v.vote = false),
+      (select coalesce(array_agg(v.player_id), '{}') from pause_votes v where v.proposal_id = v_proposal.id);
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- vote_pause -- same shape as vote_end_game. On unanimous yes, actually
+-- pauses the game: sets game_state_public.phase = 'paused' and records
+-- the resume deadline in room_pauses (admin-configurable hours, default 36).
+-- -----------------------------------------------------------------------------
+drop function if exists vote_pause(uuid, uuid, uuid, boolean);
+create or replace function vote_pause(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_proposal_id uuid,
+  p_vote boolean
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_proposal pause_proposals%rowtype;
+  v_total_players int;
+  v_yes_votes int;
+  v_deadline_hours int := 36;
+  v_active_ids uuid[];
+begin
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  select * into v_proposal from pause_proposals p where p.id = p_proposal_id and p.room_id = p_room_id for update;
+  if v_proposal.id is null or v_proposal.status <> 'pending' then
+    raise exception 'This proposal is no longer active';
+  end if;
+  if v_proposal.expires_at < now() then
+    update pause_proposals set status = 'expired' where id = v_proposal.id;
+    raise exception 'This proposal has expired';
+  end if;
+
+  insert into pause_votes (proposal_id, player_id, vote)
+  values (p_proposal_id, p_caller_player_id, p_vote)
+  on conflict (proposal_id, player_id) do update set vote = excluded.vote, voted_at = now();
+
+  if not p_vote then
+    update pause_proposals set status = 'rejected' where id = p_proposal_id;
+    return;
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+  select count(*) into v_total_players from players where room_id = p_room_id and id = any(v_active_ids);
+  select count(*) into v_yes_votes from pause_votes where proposal_id = p_proposal_id and vote = true
+    and player_id = any(v_active_ids);
+
+  if v_yes_votes >= v_total_players then
+    update pause_proposals set status = 'accepted' where id = p_proposal_id;
+
+    if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+      select pause_resume_deadline_hours into v_deadline_hours from app_settings where id = 1;
+    end if;
+
+    update game_state_public
+    set phase = 'paused',
+        log = log || jsonb_build_array(jsonb_build_object('kind', 'game_paused'))
+    where room_id = p_room_id;
+
+    insert into room_pauses (room_id, resume_deadline, paused_by_name)
+    values (p_room_id, now() + (v_deadline_hours || ' hours')::interval, v_caller.display_name)
+    on conflict (room_id) do update set
+      paused_at = now(), resume_deadline = excluded.resume_deadline, paused_by_name = excluded.paused_by_name;
+  end if;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- resume_game -- any single active player can resume (lower stakes than
+-- pausing, per project design -- no vote needed). Sets phase back to
+-- 'playing' and clears the room_pauses row.
+-- -----------------------------------------------------------------------------
+drop function if exists resume_game(uuid, uuid);
+create or replace function resume_game(
+  p_room_id uuid,
+  p_caller_player_id uuid
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_gs game_state_public%rowtype;
+begin
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  select * into v_gs from game_state_public where room_id = p_room_id;
+  if v_gs.phase <> 'paused' then raise exception 'The game is not currently paused'; end if;
+
+  update game_state_public
+  set phase = 'playing',
+      log = log || jsonb_build_array(jsonb_build_object('kind', 'game_resumed', 'payload', jsonb_build_object('by', v_caller.display_name)))
+  where room_id = p_room_id;
+
+  delete from room_pauses where room_id = p_room_id;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_pause_status -- lets the client show "paused, resumes-or-ends in Xh"
+-- countdown. Returns nothing if the room isn't currently paused.
+-- -----------------------------------------------------------------------------
+drop function if exists get_pause_status(uuid);
+create or replace function get_pause_status(p_room_id uuid)
+returns table (out_paused_at timestamptz, out_resume_deadline timestamptz, out_paused_by_name text)
+language sql
+security definer
+as $$
+  select paused_at, resume_deadline, paused_by_name from room_pauses where room_id = p_room_id;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- check_player_still_in_room -- lets a client verify its own stored
+-- player_id still corresponds to a real seat in the room. Used to detect
+-- "I've been replaced by a takeover while I was gone" -- if this returns
+-- false, the client shows a clear "you were replaced, now spectating"
+-- screen instead of silently continuing to believe it still controls a
+-- seat that's actually been reassigned to someone else.
+-- -----------------------------------------------------------------------------
+drop function if exists check_player_still_in_room(uuid, uuid);
+create or replace function check_player_still_in_room(
+  p_room_id uuid,
+  p_player_id uuid
+) returns table (out_still_in_room boolean, out_replaced_role text)
+language plpgsql
+security definer
+as $$
+declare
+  v_exists boolean;
+  v_last_known_role text;
+begin
+  select exists(select 1 from players where id = p_player_id and room_id = p_room_id) into v_exists;
+
+  if v_exists then
+    return query select true, null::text;
+    return;
+  end if;
+
+  -- player row is gone -- try to find what role they used to hold, via
+  -- the most recent completed takeover event that targeted them, purely
+  -- so the "you were replaced" message can say what they lost (e.g.
+  -- "Mr. X" or "Detectives 2 & 3") rather than a generic message.
+  select target_role into v_last_known_role
+  from takeover_events
+  where room_id = p_room_id and target_player_id = p_player_id and status = 'completed'
+  order by updated_at desc
+  limit 1;
+
+  return query select false, v_last_known_role;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- is_feature_enabled -- internal helper: checks a named feature toggle in
+-- app_settings, defaulting to TRUE if app_settings doesn't exist (the
+-- access-control system is optional; multiplayer works without it, with
+-- every feature enabled by default in that case).
+-- -----------------------------------------------------------------------------
+drop function if exists is_feature_enabled(text, uuid);
+create or replace function is_feature_enabled(p_feature_name text, p_room_id uuid default null) returns boolean
+language plpgsql
+security definer
+as $$
+declare
+  v_enabled boolean := true;
+  v_override boolean;
+  v_override_column text;
+begin
+  if not exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    return true;
+  end if;
+
+  -- Check the room-level override first, if a room was given. The
+  -- override column naming convention is always "<feature_name>_override"
+  -- (e.g. takeovers_enabled -> takeovers_enabled_override), matching the
+  -- columns added to `rooms` for exactly this purpose.
+  if p_room_id is not null then
+    v_override_column := p_feature_name || '_override';
+    begin
+      execute format('select %I from rooms where id = %L', v_override_column, p_room_id) into v_override;
+      if v_override is not null then
+        return v_override;
+      end if;
+    exception
+      when others then
+        null; -- column doesn't exist or room not found -- fall through to the global setting
+    end;
+  end if;
+
+  execute format('select %I from app_settings where id = 1', p_feature_name) into v_enabled;
+  return coalesce(v_enabled, true);
+exception
+  when others then
+    return true; -- unknown feature name or column missing -- fail open rather than break the game
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_active_player_ids -- internal helper: which players in a room are
+-- considered "active" server-side, using last_seen_at (heartbeat) against
+-- presence_grace_period_seconds as the threshold. This is the
+-- server-visible proxy for Presence (which itself lives client-side and
+-- isn't queryable from SQL) -- used by vote-resolution logic so
+-- "auto-skip inactive players" has something concrete to check.
+-- -----------------------------------------------------------------------------
+drop function if exists get_active_player_ids(uuid);
+create or replace function get_active_player_ids(p_room_id uuid) returns table (out_player_id uuid)
+language plpgsql
+security definer
+as $$
+declare
+  v_grace_seconds int := 25;
+begin
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select presence_grace_period_seconds into v_grace_seconds from app_settings where id = 1;
+  end if;
+  return query
+    select id from players
+    where room_id = p_room_id and last_seen_at > now() - (v_grace_seconds || ' seconds')::interval;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- propose_takeover_reversal -- the REPLACED player proposes getting their
+-- seat back, within takeover_reversal_window_minutes of the takeover
+-- completing. Requires takeover_reversal_enabled (subject to room
+-- override). Anyone currently active must unanimously agree (including
+-- whoever currently holds the seat) for it to pass.
+-- -----------------------------------------------------------------------------
+drop function if exists propose_takeover_reversal(uuid, uuid, uuid);
+create or replace function propose_takeover_reversal(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_takeover_event_id uuid
+) returns table (out_proposal_id uuid)
+language plpgsql
+security definer
+as $$
+declare
+  v_event takeover_events%rowtype;
+  v_window_minutes int := 5;
+  v_proposal_id uuid;
+begin
+  if not is_feature_enabled('takeover_reversal_enabled', p_room_id) then
+    raise exception 'The takeover reversal feature is currently disabled';
+  end if;
+
+  select * into v_event from takeover_events e where e.id = p_takeover_event_id and e.room_id = p_room_id;
+  if v_event.id is null or v_event.status <> 'completed' then
+    raise exception 'That takeover is not in a completed state';
+  end if;
+  if v_event.target_player_id <> p_caller_player_id then
+    raise exception 'Only the player who was replaced can propose reversing this takeover';
+  end if;
+
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select takeover_reversal_window_minutes into v_window_minutes from app_settings where id = 1;
+  end if;
+  if v_event.updated_at < now() - (v_window_minutes || ' minutes')::interval then
+    raise exception 'The window to request a reversal has passed';
+  end if;
+
+  insert into takeover_reversal_proposals (room_id, takeover_event_id, proposed_by_player_id, proposed_by_name, original_role)
+  values (p_room_id, p_takeover_event_id, p_caller_player_id, v_event.target_display_name, v_event.target_role)
+  returning id into v_proposal_id;
+
+  insert into takeover_reversal_votes (proposal_id, player_id, vote)
+  values (v_proposal_id, p_caller_player_id, true);
+
+  return query select v_proposal_id;
+exception
+  when unique_violation then
+    raise exception 'A reversal proposal for this takeover is already pending';
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_active_takeover_reversal -- lets the client show a pending
+-- reversal vote, same shape as get_active_end_game_proposal.
+-- -----------------------------------------------------------------------------
+drop function if exists get_active_takeover_reversal(uuid);
+create or replace function get_active_takeover_reversal(p_room_id uuid)
+returns table (out_proposal_id uuid, out_proposed_by_name text, out_original_role text, out_expires_at timestamptz,
+               out_total_active int, out_yes_votes int)
+language plpgsql
+security definer
+as $$
+declare
+  v_proposal takeover_reversal_proposals%rowtype;
+  v_active_ids uuid[];
+begin
+  select * into v_proposal from takeover_reversal_proposals p
+    where p.room_id = p_room_id and p.status = 'pending' order by p.created_at desc limit 1;
+  if v_proposal.id is null then return; end if;
+  if v_proposal.expires_at < now() then
+    update takeover_reversal_proposals set status = 'expired' where id = v_proposal.id;
+    return;
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+
+  return query
+    select v_proposal.id, v_proposal.proposed_by_name, v_proposal.original_role, v_proposal.expires_at,
+      (select count(*)::int from players where room_id = p_room_id and id = any(v_active_ids)),
+      (select count(*)::int from takeover_reversal_votes v where v.proposal_id = v_proposal.id and v.vote = true
+         and v.player_id = any(v_active_ids));
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- vote_takeover_reversal -- unanimous active-players-agree, same pattern
+-- as vote_end_game/vote_pause. On success, transfers the seat back to
+-- the original player (role-only, no state rewind -- any moves already
+-- made under the new controller stand as-is).
+-- -----------------------------------------------------------------------------
+drop function if exists vote_takeover_reversal(uuid, uuid, uuid, boolean);
+create or replace function vote_takeover_reversal(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_proposal_id uuid,
+  p_vote boolean
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_proposal takeover_reversal_proposals%rowtype;
+  v_active_ids uuid[];
+  v_total_active int;
+  v_yes_votes int;
+  v_current_holder players%rowtype;
+begin
+  select * into v_proposal from takeover_reversal_proposals p where p.id = p_proposal_id and p.room_id = p_room_id for update;
+  if v_proposal.id is null or v_proposal.status <> 'pending' then
+    raise exception 'This proposal is no longer active';
+  end if;
+  if v_proposal.expires_at < now() then
+    update takeover_reversal_proposals set status = 'expired' where id = v_proposal.id;
+    raise exception 'This proposal has expired';
+  end if;
+
+  insert into takeover_reversal_votes (proposal_id, player_id, vote)
+  values (p_proposal_id, p_caller_player_id, p_vote)
+  on conflict (proposal_id, player_id) do update set vote = excluded.vote, voted_at = now();
+
+  if not p_vote then
+    update takeover_reversal_proposals set status = 'rejected' where id = p_proposal_id;
+    return;
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+  select count(*) into v_total_active from players where room_id = p_room_id and id = any(v_active_ids);
+  select count(*) into v_yes_votes from takeover_reversal_votes where proposal_id = p_proposal_id and vote = true
+    and player_id = any(v_active_ids);
+
+  if v_yes_votes >= v_total_active then
+    update takeover_reversal_proposals set status = 'accepted' where id = p_proposal_id;
+
+    -- transfer the seat back: whoever currently holds original_role loses
+    -- it (or has it stripped out of their merged detective role string),
+    -- and the original player's row (still present -- they're spectating,
+    -- not deleted) gets it reassigned.
+    select * into v_current_holder from players where room_id = p_room_id and (
+      role = v_proposal.original_role or role like '%' || v_proposal.original_role || '%'
+    ) limit 1;
+
+    if v_current_holder.id is not null then
+      if v_current_holder.role = v_proposal.original_role then
+        delete from players where id = v_current_holder.id;
+      else
+        -- current holder has merged roles (e.g. "d0,d1,d2" and only
+        -- "d1" should be given back) -- strip just that piece out
+        update players
+        set role = array_to_string(
+          array(select unnest(string_to_array(role, ',')) except select v_proposal.original_role),
+          ','
+        )
+        where id = v_current_holder.id;
+      end if;
+    end if;
+
+    update players set role = v_proposal.original_role
+    where room_id = p_room_id and id = (
+      select target_player_id from takeover_events where id = v_proposal.takeover_event_id
+    );
+  end if;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- REDISTRIBUTE ROLES -- same propose/vote pattern, but instead of a
+-- simple yes/no, the host proposes a FULL new seat mapping (every player
+-- ID -> new role, covering every seat including Mr.X). Stored as JSONB
+-- so we don't need a whole extra table for "proposed assignments".
+-- Requires redistribute_roles_enabled. Unanimous ACTIVE-players-agree,
+-- same as every other vote in this project. On success, applies every
+-- seat transfer atomically -- game state (positions, tickets, hidden
+-- Mr.X data) is completely untouched, only players.role changes.
+-- -----------------------------------------------------------------------------
+create table if not exists redistribute_proposals (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references rooms(id) on delete cascade,
+  proposed_by_player_id uuid references players(id) on delete set null,
+  proposed_by_name text not null,
+  new_assignments jsonb not null, -- {player_id: new_role, ...} covering every seat
+  status text not null default 'pending',
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '60 seconds')
+);
+
+create unique index if not exists redistribute_proposals_pending_unique
+  on redistribute_proposals(room_id)
+  where status = 'pending';
+
+create table if not exists redistribute_votes (
+  proposal_id uuid not null references redistribute_proposals(id) on delete cascade,
+  player_id uuid not null references players(id) on delete cascade,
+  vote boolean not null,
+  voted_at timestamptz not null default now(),
+  primary key (proposal_id, player_id)
+);
+
+alter table redistribute_proposals enable row level security;
+alter table redistribute_votes enable row level security;
+
+drop policy if exists redistribute_proposals_select_all on redistribute_proposals;
+create policy redistribute_proposals_select_all on redistribute_proposals for select using (true);
+drop policy if exists redistribute_proposals_deny_direct_write on redistribute_proposals;
+create policy redistribute_proposals_deny_direct_write on redistribute_proposals for all using (false) with check (false);
+
+drop policy if exists redistribute_votes_select_all on redistribute_votes;
+create policy redistribute_votes_select_all on redistribute_votes for select using (true);
+drop policy if exists redistribute_votes_deny_direct_write on redistribute_votes;
+create policy redistribute_votes_deny_direct_write on redistribute_votes for all using (false) with check (false);
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'redistribute_proposals') then
+    alter publication supabase_realtime add table redistribute_proposals;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'redistribute_votes') then
+    alter publication supabase_realtime add table redistribute_votes;
+  end if;
+end $$;
+
+
+-- -----------------------------------------------------------------------------
+-- propose_redistribute_roles -- host-only. p_new_assignments is a JSON
+-- object mapping player_id (as text) -> new role string. Must cover
+-- every player currently in the room, exactly once, using a valid seat
+-- layout (same validation as create_room/join_room's role checks).
+-- -----------------------------------------------------------------------------
+drop function if exists propose_redistribute_roles(uuid, uuid, jsonb);
+create or replace function propose_redistribute_roles(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_new_assignments jsonb
+) returns table (out_proposal_id uuid)
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_caller players%rowtype;
+  v_proposal_id uuid;
+  v_all_player_ids uuid[];
+  v_assigned_player_ids uuid[];
+  v_valid_roles text[];
+  v_assigned_roles text[];
+  v_key text;
+  v_val text;
+begin
+  if not is_feature_enabled('redistribute_roles_enabled', p_room_id) then
+    raise exception 'The redistribute roles feature is currently disabled';
+  end if;
+
+  select * into v_room from rooms r where r.id = p_room_id;
+  if v_room.id is null or v_room.host_player_id <> p_caller_player_id then
+    raise exception 'Only the host can propose redistributing roles';
+  end if;
+
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  -- validate: every current player appears exactly once, and every
+  -- assigned role is a legal seat for this room's layout
+  select array_agg(id) into v_all_player_ids from players where room_id = p_room_id;
+  select array_cat(array['mrx'], array_agg(out_seat_role)) into v_valid_roles
+    from compute_seat_layout(v_room.num_detectives, v_room.total_players);
+
+  v_assigned_player_ids := '{}';
+  v_assigned_roles := '{}';
+  for v_key, v_val in select * from jsonb_each_text(p_new_assignments) loop
+    v_assigned_player_ids := array_append(v_assigned_player_ids, v_key::uuid);
+    v_assigned_roles := array_append(v_assigned_roles, v_val);
+    if not (v_val = any(v_valid_roles)) then
+      raise exception 'Invalid role % in proposed assignment', v_val;
+    end if;
+  end loop;
+
+  if (select array_agg(x order by x) from unnest(v_all_player_ids) x) <> (select array_agg(x order by x) from unnest(v_assigned_player_ids) x) then
+    raise exception 'Proposed assignment must cover every current player exactly once';
+  end if;
+  if (select array_agg(x order by x) from unnest(v_valid_roles) x) <> (select array_agg(x order by x) from unnest(v_assigned_roles) x) then
+    raise exception 'Proposed assignment must use every seat in this room''s layout exactly once';
+  end if;
+
+  insert into redistribute_proposals (room_id, proposed_by_player_id, proposed_by_name, new_assignments)
+  values (p_room_id, p_caller_player_id, v_caller.display_name, p_new_assignments)
+  returning id into v_proposal_id;
+
+  insert into redistribute_votes (proposal_id, player_id, vote)
+  values (v_proposal_id, p_caller_player_id, true);
+
+  return query select v_proposal_id;
+exception
+  when unique_violation then
+    raise exception 'A redistribute-roles proposal is already pending';
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_active_redistribute_proposal -- same shape as other active-proposal getters.
+-- -----------------------------------------------------------------------------
+drop function if exists get_active_redistribute_proposal(uuid);
+create or replace function get_active_redistribute_proposal(p_room_id uuid)
+returns table (out_proposal_id uuid, out_proposed_by_name text, out_new_assignments jsonb, out_expires_at timestamptz,
+               out_total_active int, out_yes_votes int)
+language plpgsql
+security definer
+as $$
+declare
+  v_proposal redistribute_proposals%rowtype;
+  v_active_ids uuid[];
+begin
+  select * into v_proposal from redistribute_proposals p
+    where p.room_id = p_room_id and p.status = 'pending' order by p.created_at desc limit 1;
+  if v_proposal.id is null then return; end if;
+  if v_proposal.expires_at < now() then
+    update redistribute_proposals set status = 'expired' where id = v_proposal.id;
+    return;
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+
+  return query
+    select v_proposal.id, v_proposal.proposed_by_name, v_proposal.new_assignments, v_proposal.expires_at,
+      (select count(*)::int from players where room_id = p_room_id and id = any(v_active_ids)),
+      (select count(*)::int from redistribute_votes v where v.proposal_id = v_proposal.id and v.vote = true
+         and v.player_id = any(v_active_ids));
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- vote_redistribute_roles -- unanimous active-agree. On success, applies
+-- every seat reassignment atomically in one transaction.
+-- -----------------------------------------------------------------------------
+drop function if exists vote_redistribute_roles(uuid, uuid, uuid, boolean);
+create or replace function vote_redistribute_roles(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_proposal_id uuid,
+  p_vote boolean
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_proposal redistribute_proposals%rowtype;
+  v_active_ids uuid[];
+  v_total_active int;
+  v_yes_votes int;
+  v_key text;
+  v_val text;
+begin
+  select * into v_proposal from redistribute_proposals p where p.id = p_proposal_id and p.room_id = p_room_id for update;
+  if v_proposal.id is null or v_proposal.status <> 'pending' then
+    raise exception 'This proposal is no longer active';
+  end if;
+  if v_proposal.expires_at < now() then
+    update redistribute_proposals set status = 'expired' where id = v_proposal.id;
+    raise exception 'This proposal has expired';
+  end if;
+
+  insert into redistribute_votes (proposal_id, player_id, vote)
+  values (p_proposal_id, p_caller_player_id, p_vote)
+  on conflict (proposal_id, player_id) do update set vote = excluded.vote, voted_at = now();
+
+  if not p_vote then
+    update redistribute_proposals set status = 'rejected' where id = p_proposal_id;
+    return;
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+  select count(*) into v_total_active from players where room_id = p_room_id and id = any(v_active_ids);
+  select count(*) into v_yes_votes from redistribute_votes where proposal_id = p_proposal_id and vote = true
+    and player_id = any(v_active_ids);
+
+  if v_yes_votes >= v_total_active then
+    update redistribute_proposals set status = 'accepted' where id = p_proposal_id;
+
+    for v_key, v_val in select * from jsonb_each_text(v_proposal.new_assignments) loop
+      update players set role = v_val where id = v_key::uuid and room_id = p_room_id;
+    end loop;
+  end if;
+end;
 $$;

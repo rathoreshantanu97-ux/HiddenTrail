@@ -12,11 +12,12 @@
 --     (including the full-route reveal) before the room's data disappears.
 --   - Rooms stuck in 'lobby' status for more than 24 hours with nobody
 --     having started a game -- an abandoned lobby nobody ever used.
---   - (Paused-game cleanup, per the original design -- "36 hours after an
---     unresumed pause" -- is NOT included yet, since the pause feature
---     itself hasn't been built. This job's structure is written so
---     adding that condition later is a one-line addition to the WHERE
---     clause in cleanup_stale_rooms(), once a paused_at column exists.)
+--   - Rooms paused (via room_pauses.resume_deadline) past their deadline
+--     with nobody having resumed -- these are auto-ENDED (phase set to
+--     'ended', same as a normal game conclusion) rather than deleted
+--     immediately, so they then follow the same "cleaned up 1 hour after
+--     ending" rule as every other ended game, giving players a
+--     consistent final-state screen instead of the room just vanishing.
 --
 -- Deleting a room cascades (via foreign keys) to its players,
 -- game_state_public, game_state_secret, moves, messages, and end-game
@@ -36,6 +37,24 @@ as $$
 declare
   v_deleted uuid[];
 begin
+  -- Step 1: any room paused past its resume deadline gets auto-ended
+  -- (not deleted yet) -- this reuses the exact same "ended" path a normal
+  -- game conclusion takes, so it then gets cleaned up by the SAME rule
+  -- below (1 hour after ending) rather than needing a separate immediate
+  -- delete, and gives players a consistent final screen either way.
+  update game_state_public gs
+  set phase = 'ended',
+      log = gs.log || jsonb_build_array(jsonb_build_object('kind', 'ended_pause_expired'))
+  from room_pauses rp
+  where gs.room_id = rp.room_id and gs.phase = 'paused' and rp.resume_deadline < now();
+
+  delete from room_pauses rp
+  where rp.resume_deadline < now()
+    and exists (select 1 from game_state_public gs where gs.room_id = rp.room_id and gs.phase = 'ended');
+
+  -- Step 2: the usual cleanup -- ended games (including ones just ended
+  -- above by the expired-pause rule) after their grace period, plus
+  -- abandoned lobbies nobody ever started.
   with ended_rooms as (
     select r.id
     from rooms r

@@ -12,8 +12,14 @@ import GameBoard from "./components/GameBoard.jsx";
 import EndedScreen from "./components/EndedScreen.jsx";
 import ChatPanel from "./components/ChatPanel.jsx";
 import EndGameVote from "./components/EndGameVote.jsx";
+import EndGameEarlyButton from "./components/EndGameEarlyButton.jsx";
+import PauseVote from "./components/PauseVote.jsx";
+import PausedScreen from "./components/PausedScreen.jsx";
 import AdminPanel from "./components/AdminPanel.jsx";
+import TakeoverPanel from "./components/TakeoverPanel.jsx";
+import SpectatorScreen from "./components/SpectatorScreen.jsx";
 import { useRoomStatus } from "./lib/useRoomStatus.js";
+import { usePresence } from "./lib/usePresence.js";
 import { currentActor } from "./lib/gameEngine.js";
 
 // ---------------------------------------------------------------------------
@@ -133,6 +139,111 @@ export default function App({ account, onLogout }) {
     myPlayerId: mpPlayerId,
     myRole: mpRole,
   });
+
+  const { onlinePlayerIds, isInactive } = usePresence({
+    roomId: appMode === "multiplayer" ? mpRoomId : null,
+    myPlayerId: mpPlayerId,
+    myDisplayName: mpDisplayName,
+    myRole: mpRole,
+    gracePeriodSeconds: 25, // TODO: read from admin config once wired through App-level state
+  });
+
+  const [mpPlayersList, setMpPlayersList] = useState([]);
+  useEffect(() => {
+    if (appMode !== "multiplayer" || mpStage !== "playing" || !mpRoomId) return;
+    let cancelled = false;
+    async function poll() {
+      try {
+        const rows = await api.fetchPlayers(mpRoomId);
+        if (!cancelled) setMpPlayersList(rows);
+      } catch (e) {
+        console.error("Failed to fetch players for presence check:", e);
+      }
+    }
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [appMode, mpStage, mpRoomId]);
+
+  // Auto-flag / auto-heal: for each seat currently in the game, checks
+  // whether its controlling player is confirmed inactive (per Presence +
+  // grace period) and, if so, flags it for a takeover decision -- unless
+  // one is already active for that seat (flag_inactive_player is
+  // idempotent, so calling it repeatedly is harmless either way). Any
+  // connected client does this, not just the host, so inactivity gets
+  // noticed promptly by whoever's still around.
+  useEffect(() => {
+    if (appMode !== "multiplayer" || mpStage !== "playing" || !mpRoomId || mpPlayersList.length === 0) return;
+    for (const p of mpPlayersList) {
+      if (isInactive(p.id)) {
+        api.flagInactivePlayer({ roomId: mpRoomId, targetRole: p.role }).catch(() => {});
+      }
+    }
+  }, [appMode, mpStage, mpRoomId, mpPlayersList, isInactive]);
+
+  // Auto-heal: if a takeover event is currently open (host deciding,
+  // nominating, or voting -- NOT yet 'completed') and the original
+  // target player's presence has resumed, cancel the event so play
+  // continues under them uninterrupted. Checked by any connected client;
+  // cancel_takeover_event is a no-op if the event's already resolved.
+  const [mpActiveTakeoverEvent, setMpActiveTakeoverEvent] = useState(null);
+
+  // Spectator check: periodically verify our own stored player_id still
+  // corresponds to a real seat -- if not, we've been replaced by a
+  // completed takeover while disconnected. Checked on entering the
+  // playing phase and every 5s thereafter (cheap: one RPC call).
+  const [mpSpectatorInfo, setMpSpectatorInfo] = useState(null); // null (not checked / still in room) | { replacedRole }
+  useEffect(() => {
+    if (appMode !== "multiplayer" || mpStage !== "playing" || !mpRoomId || !mpPlayerId) return;
+    let cancelled = false;
+    async function poll() {
+      try {
+        const result = await api.checkPlayerStillInRoom({ roomId: mpRoomId, playerId: mpPlayerId });
+        if (!cancelled) {
+          setMpSpectatorInfo(result.stillInRoom ? null : { replacedRole: result.replacedRole });
+        }
+      } catch (e) {
+        console.error("Failed to check player-still-in-room status:", e);
+      }
+    }
+    poll();
+    const id = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [appMode, mpStage, mpRoomId, mpPlayerId]);
+
+  useEffect(() => {
+    if (appMode !== "multiplayer" || mpStage !== "playing" || !mpRoomId) return;
+    let cancelled = false;
+    async function poll() {
+      try {
+        const e = await api.getActiveTakeoverEvent(mpRoomId);
+        if (!cancelled) setMpActiveTakeoverEvent(e);
+      } catch (err) {
+        console.error("Failed to poll takeover event for auto-heal check:", err);
+      }
+    }
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [appMode, mpStage, mpRoomId]);
+
+  useEffect(() => {
+    if (!mpActiveTakeoverEvent || !mpRoomId) return;
+    if (["completed", "cancelled", "expired"].includes(mpActiveTakeoverEvent.status)) return;
+    const targetPlayer = mpPlayersList.find((p) => p.role === mpActiveTakeoverEvent.targetRole);
+    if (targetPlayer && onlinePlayerIds.has(targetPlayer.id)) {
+      api.cancelTakeoverEvent({ roomId: mpRoomId, eventId: mpActiveTakeoverEvent.eventId }).catch(() => {});
+    }
+  }, [mpActiveTakeoverEvent, mpPlayersList, onlinePlayerIds, mpRoomId]);
 
   // Restore a multiplayer session on refresh (room/player id persisted to
   // localStorage), so accidentally reloading the page mid-game doesn't
@@ -358,6 +469,11 @@ export default function App({ account, onLogout }) {
         onDetectiveMove={(detId, to, mode) => localStore.submitDetectiveMove(map, detId, to, mode)}
         onMrXMove={(to, edgeMode, ticketUsed) => localStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => localStore.activateDoubleMove()}
+        extraHeaderContent={
+          <div style={{ marginBottom: 10, display: "flex", justifyContent: "flex-end" }}>
+            <EndGameEarlyButton onEndGame={() => localStore.endGameEarly()} />
+          </div>
+        }
       />
     );
   }
@@ -437,14 +553,18 @@ export default function App({ account, onLogout }) {
       );
     }
 
+    if (match.phase === "paused") {
+      return <PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} />;
+    }
+
     // phase === "playing" -- multiplayer never shows a handoff screen;
     // each player has their own device and just waits for their turn
     // (GameBoard's "Waiting for X..." note covers that).
-    return (
+    const gameBoardEl = (
       <GameBoard
         map={map}
         match={match}
-        myRole={mpRole}
+        myRole={mpSpectatorInfo ? "__spectator__" : mpRole}
         mrxName={mrxName}
         detectiveName={detectiveName}
         onDetectiveMove={(detId, to, mode) => supabaseStore.submitDetectiveMove(map, detId, to, mode)}
@@ -452,14 +572,26 @@ export default function App({ account, onLogout }) {
         onActivateDoubleMove={() => supabaseStore.activateDoubleMove()}
         extraHeaderContent={
           <div style={{ marginBottom: 10 }}>
-            <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+            <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
               <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
             </div>
             <ChatPanel roomId={mpRoomId} myPlayerId={mpPlayerId} myRole={mpRole} myDisplayName={mpDisplayName} />
+            <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={mpIsHost} />
           </div>
         }
       />
     );
+
+    if (mpSpectatorInfo) {
+      return (
+        <SpectatorScreen replacedRole={mpSpectatorInfo.replacedRole} onLeave={handleLeaveMultiplayer}>
+          {gameBoardEl}
+        </SpectatorScreen>
+      );
+    }
+
+    return gameBoardEl;
   }
 
   return null;

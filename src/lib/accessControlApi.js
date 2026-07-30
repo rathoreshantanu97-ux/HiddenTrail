@@ -192,6 +192,89 @@ export async function setMapActive({ callerAccountId, mapId, isActive }) {
   await callRpc("set_map_active", { p_caller_account_id: callerAccountId, p_map_id: mapId, p_is_active: isActive });
 }
 
+export async function getTimingConfig() {
+  const rows = await callRpc("get_timing_config", {});
+  const row = rows?.[0];
+  if (!row) {
+    return {
+      nominationWindowSeconds: 30,
+      pollWindowSeconds: 60,
+      minDetectives: 3,
+      maxDetectives: 20,
+      minTotalPlayers: 2,
+      maxTotalPlayers: 21,
+      presenceGracePeriodSeconds: 25,
+      pauseResumeDeadlineHours: 36,
+    };
+  }
+  return {
+    nominationWindowSeconds: row.out_nomination_window_seconds,
+    pollWindowSeconds: row.out_poll_window_seconds,
+    minDetectives: row.out_min_detectives,
+    maxDetectives: row.out_max_detectives,
+    minTotalPlayers: row.out_min_total_players,
+    maxTotalPlayers: row.out_max_total_players,
+    presenceGracePeriodSeconds: row.out_presence_grace_period_seconds,
+    pauseResumeDeadlineHours: row.out_pause_resume_deadline_hours,
+  };
+}
+
+export async function setTimingConfig({ callerAccountId, config }) {
+  await callRpc("set_timing_config", {
+    p_caller_account_id: callerAccountId,
+    p_nomination_window_seconds: config.nominationWindowSeconds,
+    p_poll_window_seconds: config.pollWindowSeconds,
+    p_min_detectives: config.minDetectives,
+    p_max_detectives: config.maxDetectives,
+    p_min_total_players: config.minTotalPlayers,
+    p_max_total_players: config.maxTotalPlayers,
+    p_presence_grace_period_seconds: config.presenceGracePeriodSeconds,
+    p_pause_resume_deadline_hours: config.pauseResumeDeadlineHours,
+  });
+}
+
+export async function getFeatureConfig() {
+  const rows = await callRpc("get_feature_config", {});
+  const row = rows?.[0];
+  if (!row) {
+    return {
+      takeoversEnabled: true, takeoversOverridable: true,
+      takeoverReversalEnabled: true, takeoverReversalOverridable: true,
+      endGameVoteEnabled: true, endGameVoteOverridable: true,
+      pauseResumeEnabled: true, pauseResumeOverridable: true,
+      redistributeRolesEnabled: true, redistributeRolesOverridable: true,
+    };
+  }
+  return {
+    takeoversEnabled: row.out_takeovers_enabled,
+    takeoversOverridable: row.out_takeovers_overridable,
+    takeoverReversalEnabled: row.out_takeover_reversal_enabled,
+    takeoverReversalOverridable: row.out_takeover_reversal_overridable,
+    endGameVoteEnabled: row.out_end_game_vote_enabled,
+    endGameVoteOverridable: row.out_end_game_vote_overridable,
+    pauseResumeEnabled: row.out_pause_resume_enabled,
+    pauseResumeOverridable: row.out_pause_resume_overridable,
+    redistributeRolesEnabled: row.out_redistribute_roles_enabled,
+    redistributeRolesOverridable: row.out_redistribute_roles_overridable,
+  };
+}
+
+export async function setFeatureToggles({ callerAccountId, config }) {
+  await callRpc("set_feature_toggles", {
+    p_caller_account_id: callerAccountId,
+    p_takeovers_enabled: config.takeoversEnabled,
+    p_takeovers_overridable: config.takeoversOverridable,
+    p_takeover_reversal_enabled: config.takeoverReversalEnabled,
+    p_takeover_reversal_overridable: config.takeoverReversalOverridable,
+    p_end_game_vote_enabled: config.endGameVoteEnabled,
+    p_end_game_vote_overridable: config.endGameVoteOverridable,
+    p_pause_resume_enabled: config.pauseResumeEnabled,
+    p_pause_resume_overridable: config.pauseResumeOverridable,
+    p_redistribute_roles_enabled: config.redistributeRolesEnabled,
+    p_redistribute_roles_overridable: config.redistributeRolesOverridable,
+  });
+}
+
 export async function setAppPublic({ callerAccountId, isPublic }) {
   await callRpc("set_app_public", { p_caller_account_id: callerAccountId, p_is_public: isPublic });
 }

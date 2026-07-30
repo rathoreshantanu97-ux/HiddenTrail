@@ -36,15 +36,34 @@ create table if not exists rooms (
                                            -- compute_seat_layout() for how this drives seat sizing.
   status text not null default 'lobby',   -- 'lobby' | 'playing' | 'ended'
   host_player_id uuid,                    -- set once the host's player row exists
+  turn_timer_seconds int,                 -- null = "No limit"; otherwise seconds per turn (see turn timer feature)
+  -- Per-room feature overrides -- NULL means "use the admin's global
+  -- default from app_settings"; true/false means the host explicitly
+  -- turned this on/off for THIS game specifically. Every feature the
+  -- admin can globally enable/disable also gets a per-room override
+  -- here, so a host can opt out of (or into) something for their
+  -- specific game without affecting anyone else's. Defaults to null
+  -- (inherit the admin setting) unless the host changes it at creation.
+  takeovers_enabled_override boolean,
+  takeover_reversal_enabled_override boolean,
+  end_game_vote_enabled_override boolean,
+  pause_resume_enabled_override boolean,
+  redistribute_roles_enabled_override boolean,
   created_at timestamptz not null default now()
 );
 -- IMPORTANT: `create table if not exists` above does NOTHING if the table
 -- already existed from an earlier run of an older version of this file --
 -- including silently skipping any columns (like total_players) that were
--- added to this definition after your table was first created. The line
--- below is what actually fixes that: it's a genuine ALTER that runs
--- every time, and is a safe no-op if the column's already there.
+-- added to this definition after your table was first created. The lines
+-- below are what actually fix that: genuine ALTERs that run every time,
+-- and are safe no-ops if the columns are already there.
 alter table rooms add column if not exists total_players int not null default 0;
+alter table rooms add column if not exists turn_timer_seconds int;
+alter table rooms add column if not exists takeovers_enabled_override boolean;
+alter table rooms add column if not exists takeover_reversal_enabled_override boolean;
+alter table rooms add column if not exists end_game_vote_enabled_override boolean;
+alter table rooms add column if not exists pause_resume_enabled_override boolean;
+alter table rooms add column if not exists redistribute_roles_enabled_override boolean;
 
 -- -----------------------------------------------------------------------------
 -- PLAYERS — one row per connected participant (detective slot or Mr. X).
@@ -129,7 +148,7 @@ create trigger trg_check_no_overlapping_detective_seats
 -- -----------------------------------------------------------------------------
 create table if not exists game_state_public (
   room_id uuid primary key references rooms(id) on delete cascade,
-  phase text not null default 'playing',      -- "playing" | "ended"
+  phase text not null default 'playing',      -- "playing" | "ended" | "paused"
   round int not null default 1,
   turn_order text[] not null default '{}',    -- e.g. {"mrx","d0","d1"}
   turn_idx int not null default 0,
@@ -437,8 +456,285 @@ begin
 end $$;
 
 
+
+
+-- -----------------------------------------------------------------------------
+-- TAKEOVER SYSTEM -- what happens when a player (Mr.X or a detective-
+-- controller) is flagged inactive by Presence (see src/lib/usePresence.js).
+--
+-- Flow, for Mr.X:
+--   1. Any client that's noticed Mr.X's presence has been gone past the
+--      grace period calls flag_inactive_player(), creating a
+--      'takeover_events' row with status 'awaiting_host_decision'.
+--   2. The HOST sees a "wait or takeover?" prompt (host_decide_takeover()).
+--      - "wait": status -> 'waiting'. Mr.X's stalled turns auto-play via
+--        the turn-timer's random-move logic (already built); a persistent
+--        "start takeover" button stays visible for anyone to escalate.
+--      - "takeover": status -> 'nominating'. Opens a nomination window
+--        (nomination_window_seconds, admin-configurable).
+--   3. Players volunteer via nominate_self(). If exactly one nominee once
+--      the window closes, they become the new Mr.X directly (no vote
+--      needed). If multiple, status -> 'voting' and a poll_window_seconds
+--      window opens for everyone to vote (can't vote for themselves).
+--   4. Winner takes over Mr.X's existing hidden state (position, tickets,
+--      travel log all carry over -- see complete_mrx_takeover()), and
+--      picks one active player to receive their own former detective
+--      seat(s), if they had any.
+--
+-- Flow for a detective-controller: same shape, but simpler -- no
+-- nomination/vote step, just first-to-click-take-it (per project design:
+-- detective seats aren't scarce/contentious like Mr.X is), and the
+-- winner inherits ALL of that player's detective seats as one unit
+-- (tracked per-player, not per-individual-seat, per earlier discussion).
+--
+-- Auto-heal: if the original player's presence resumes before a takeover
+-- is CONFIRMED (not just nominated/voted), the whole event is cancelled
+-- silently and play continues under them -- enforced by re-checking
+-- presence at the moment of confirmation, not just when the event opened.
+-- -----------------------------------------------------------------------------
+create table if not exists takeover_events (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references rooms(id) on delete cascade,
+  target_role text not null,          -- "mrx", or a detective seat's role string (may be comma-joined)
+  target_player_id uuid references players(id) on delete set null,
+  target_display_name text not null,  -- denormalized, survives the original player's row changing
+  status text not null default 'awaiting_host_decision',
+    -- 'awaiting_host_decision' | 'waiting' | 'nominating' | 'voting'
+    -- | 'completed' | 'cancelled' | 'expired'
+  decision_deadline timestamptz,      -- set once nominating/voting starts, based on admin-configured windows
+  winner_player_id uuid references players(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- only one active (non-terminal) takeover event per target seat at a time
+create unique index if not exists takeover_events_active_unique
+  on takeover_events(room_id, target_role)
+  where status not in ('completed', 'cancelled', 'expired');
+
+create table if not exists takeover_nominations (
+  event_id uuid not null references takeover_events(id) on delete cascade,
+  player_id uuid not null references players(id) on delete cascade,
+  nominated_at timestamptz not null default now(),
+  primary key (event_id, player_id)
+);
+
+create table if not exists takeover_votes (
+  event_id uuid not null references takeover_events(id) on delete cascade,
+  voter_player_id uuid not null references players(id) on delete cascade,
+  nominee_player_id uuid not null references players(id) on delete cascade,
+  voted_at timestamptz not null default now(),
+  primary key (event_id, voter_player_id)
+);
+
+alter table takeover_events enable row level security;
+alter table takeover_nominations enable row level security;
+alter table takeover_votes enable row level security;
+
+drop policy if exists takeover_events_select_all on takeover_events;
+create policy takeover_events_select_all on takeover_events for select using (true);
+drop policy if exists takeover_events_deny_direct_write on takeover_events;
+create policy takeover_events_deny_direct_write on takeover_events for all using (false) with check (false);
+
+drop policy if exists takeover_nominations_select_all on takeover_nominations;
+create policy takeover_nominations_select_all on takeover_nominations for select using (true);
+drop policy if exists takeover_nominations_deny_direct_write on takeover_nominations;
+create policy takeover_nominations_deny_direct_write on takeover_nominations for all using (false) with check (false);
+
+drop policy if exists takeover_votes_select_all on takeover_votes;
+create policy takeover_votes_select_all on takeover_votes for select using (true);
+drop policy if exists takeover_votes_deny_direct_write on takeover_votes;
+create policy takeover_votes_deny_direct_write on takeover_votes for all using (false) with check (false);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'takeover_events'
+  ) then
+    alter publication supabase_realtime add table takeover_events;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'takeover_nominations'
+  ) then
+    alter publication supabase_realtime add table takeover_nominations;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'takeover_votes'
+  ) then
+    alter publication supabase_realtime add table takeover_votes;
+  end if;
+end $$;
+
+
 -- =============================================================================
 -- NEXT FILE: supabase/functions.sql has the RPC functions (start_game,
 -- make_move, activate_double_move) that actually mutate game state. Run
 -- that file after this one.
 -- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- PAUSE / RESUME -- same proposal/all-active-agree pattern as
+-- end_game_proposals, reused here since pausing is structurally the same
+-- "propose something disruptive, everyone must agree" shape. Once
+-- paused, game_state_public.phase is set to 'paused' (a new value
+-- alongside 'playing'/'ended') and a resume deadline is recorded here.
+-- Resuming needs only ONE active player (lower stakes than pausing,
+-- which needs consensus) -- see resume_game() in functions.sql.
+-- -----------------------------------------------------------------------------
+create table if not exists pause_proposals (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references rooms(id) on delete cascade,
+  proposed_by_player_id uuid references players(id) on delete set null,
+  proposed_by_name text not null,
+  status text not null default 'pending', -- 'pending' | 'accepted' | 'rejected' | 'expired'
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '60 seconds')
+);
+
+create unique index if not exists pause_proposals_pending_unique
+  on pause_proposals(room_id)
+  where status = 'pending';
+
+create table if not exists pause_votes (
+  proposal_id uuid not null references pause_proposals(id) on delete cascade,
+  player_id uuid not null references players(id) on delete cascade,
+  vote boolean not null,
+  voted_at timestamptz not null default now(),
+  primary key (proposal_id, player_id)
+);
+
+-- Records when a room was actually paused and its resume deadline, so
+-- the client can show a countdown and the cleanup job (data_cleanup.sql)
+-- can find rooms that have sat paused too long. One row per room; a new
+-- pause overwrites the previous row (a room can only be paused once at
+-- a time -- game_state_public.phase already enforces this at the state
+-- level, this table just carries the extra timing metadata).
+create table if not exists room_pauses (
+  room_id uuid primary key references rooms(id) on delete cascade,
+  paused_at timestamptz not null default now(),
+  resume_deadline timestamptz not null,
+  paused_by_name text not null
+);
+
+alter table pause_proposals enable row level security;
+alter table pause_votes enable row level security;
+alter table room_pauses enable row level security;
+
+drop policy if exists pause_proposals_select_all on pause_proposals;
+create policy pause_proposals_select_all on pause_proposals for select using (true);
+drop policy if exists pause_proposals_deny_direct_write on pause_proposals;
+create policy pause_proposals_deny_direct_write on pause_proposals for all using (false) with check (false);
+
+drop policy if exists pause_votes_select_all on pause_votes;
+create policy pause_votes_select_all on pause_votes for select using (true);
+drop policy if exists pause_votes_deny_direct_write on pause_votes;
+create policy pause_votes_deny_direct_write on pause_votes for all using (false) with check (false);
+
+drop policy if exists room_pauses_select_all on room_pauses;
+create policy room_pauses_select_all on room_pauses for select using (true);
+drop policy if exists room_pauses_deny_direct_write on room_pauses;
+create policy room_pauses_deny_direct_write on room_pauses for all using (false) with check (false);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'pause_proposals'
+  ) then
+    alter publication supabase_realtime add table pause_proposals;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'pause_votes'
+  ) then
+    alter publication supabase_realtime add table pause_votes;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'room_pauses'
+  ) then
+    alter publication supabase_realtime add table room_pauses;
+  end if;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- TAKEOVER REVERSAL -- same proposal/all-agree pattern as
+-- end_game_proposals/pause_proposals. Once a takeover completes, the
+-- REPLACED player (whoever lost the seat) can propose reversing it,
+-- within takeover_reversal_window_minutes of the takeover completing (an
+-- admin-configurable setting). If everyone -- including the player who
+-- currently holds the seat -- agrees, the seat goes back to the
+-- original player. This is a role-only reversal: any moves already made
+-- by the new controller stand as-is; only who controls the seat going
+-- forward changes.
+-- -----------------------------------------------------------------------------
+create table if not exists takeover_reversal_proposals (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references rooms(id) on delete cascade,
+  takeover_event_id uuid not null references takeover_events(id) on delete cascade,
+  proposed_by_player_id uuid references players(id) on delete set null,
+  proposed_by_name text not null,
+  original_role text not null,       -- the role string to restore if this passes
+  status text not null default 'pending', -- 'pending' | 'accepted' | 'rejected' | 'expired'
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '60 seconds')
+);
+
+create unique index if not exists takeover_reversal_pending_unique
+  on takeover_reversal_proposals(takeover_event_id)
+  where status = 'pending';
+
+create table if not exists takeover_reversal_votes (
+  proposal_id uuid not null references takeover_reversal_proposals(id) on delete cascade,
+  player_id uuid not null references players(id) on delete cascade,
+  vote boolean not null,
+  voted_at timestamptz not null default now(),
+  primary key (proposal_id, player_id)
+);
+
+alter table takeover_reversal_proposals enable row level security;
+alter table takeover_reversal_votes enable row level security;
+
+drop policy if exists takeover_reversal_proposals_select_all on takeover_reversal_proposals;
+create policy takeover_reversal_proposals_select_all on takeover_reversal_proposals for select using (true);
+drop policy if exists takeover_reversal_proposals_deny_direct_write on takeover_reversal_proposals;
+create policy takeover_reversal_proposals_deny_direct_write on takeover_reversal_proposals for all using (false) with check (false);
+
+drop policy if exists takeover_reversal_votes_select_all on takeover_reversal_votes;
+create policy takeover_reversal_votes_select_all on takeover_reversal_votes for select using (true);
+drop policy if exists takeover_reversal_votes_deny_direct_write on takeover_reversal_votes;
+create policy takeover_reversal_votes_deny_direct_write on takeover_reversal_votes for all using (false) with check (false);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'takeover_reversal_proposals'
+  ) then
+    alter publication supabase_realtime add table takeover_reversal_proposals;
+  end if;
+end $$;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'takeover_reversal_votes'
+  ) then
+    alter publication supabase_realtime add table takeover_reversal_votes;
+  end if;
+end $$;

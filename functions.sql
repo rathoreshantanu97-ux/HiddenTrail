@@ -81,7 +81,22 @@ $$;
 -- seat now (either "mrx" or one of the computed detective seats);
 -- everyone else claims a remaining seat when they join.
 -- -----------------------------------------------------------------------------
+-- Drop every prior signature this function has ever had, not just the
+-- current one -- if an older version (fewer parameters) is still sitting
+-- in the database from before this file's history added new parameters,
+-- Postgres will have TWO overloads of create_room simultaneously and
+-- can't decide which one a call with named/partial arguments means,
+-- producing a "could not choose the best candidate function" error. This
+-- ensures a clean slate regardless of which earlier version you had.
+drop function if exists create_room(text, int, int, text, text);
+drop function if exists create_room(text, int, int, text);
+drop function if exists create_room(text, int, text);
 drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int);
+drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int);
+drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int, text);
+drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int, text, boolean);
+drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int, text, boolean, numeric);
+drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int, text, boolean, numeric, boolean, text);
 create or replace function create_room(
   p_map_id text,
   p_num_detectives int,
@@ -101,7 +116,22 @@ create or replace function create_room(
   p_end_game_vote_override boolean default null,
   p_pause_resume_override boolean default null,
   p_redistribute_roles_override boolean default null,
-  p_turn_timer_seconds int default null
+  p_turn_timer_seconds int default null,
+  -- The map's actual station count, passed from the client (map data
+  -- itself lives client-side in JS map files, not in Postgres) so the
+  -- server can independently compute the same map-level detective/player
+  -- limits the client UI is supposed to enforce, and NOT just trust that
+  -- the client actually did -- a determined caller could otherwise call
+  -- this RPC directly with values the UI would never have offered.
+  -- NULL is treated as "unknown map" and skips this specific check
+  -- (falls back to only the admin's global bounds), so older clients
+  -- that don't yet send this stay working rather than breaking outright.
+  p_map_station_count int default null,
+  p_turn_highlight_style_override text default null,
+  p_route_explorer_override boolean default null,
+  p_round_scaling_ratio_override numeric default null,
+  p_is_public boolean default false,
+  p_room_name text default null
 ) returns table (out_room_id uuid, out_room_code text, out_host_player_id uuid)
 language plpgsql
 security definer
@@ -123,11 +153,21 @@ declare
   v_endgame_overridable boolean := true;
   v_pause_overridable boolean := true;
   v_redistribute_overridable boolean := true;
+  v_highlight_style_overridable boolean := true;
+  v_final_highlight_style_override text;
+  v_route_explorer_overridable boolean := true;
+  v_final_route_explorer_override boolean;
+  v_round_scaling_overridable boolean := true;
+  v_final_round_scaling_override numeric;
   v_final_takeovers_override boolean;
   v_final_reversal_override boolean;
   v_final_endgame_override boolean;
   v_final_pause_override boolean;
   v_final_redistribute_override boolean;
+  v_map_min_det int;
+  v_map_max_det int;
+  v_map_ratio numeric;
+  v_map_ratio_override numeric;
 begin
   -- Read configurable bounds from app_settings if that table exists (it's
   -- part of the access-control system in access_control_schema.sql,
@@ -138,15 +178,47 @@ begin
            turn_timer_min_seconds, turn_timer_max_seconds,
            takeovers_overridable_by_host, takeover_reversal_overridable_by_host,
            end_game_vote_overridable_by_host, pause_resume_overridable_by_host,
-           redistribute_roles_overridable_by_host
+           redistribute_roles_overridable_by_host, turn_highlight_style_overridable_by_host,
+           route_explorer_overridable_by_host, round_scaling_overridable_by_host
       into v_min_det, v_max_det, v_min_players, v_max_players, v_turn_min, v_turn_max,
            v_takeovers_overridable, v_reversal_overridable, v_endgame_overridable,
-           v_pause_overridable, v_redistribute_overridable
+           v_pause_overridable, v_redistribute_overridable, v_highlight_style_overridable,
+           v_route_explorer_overridable, v_round_scaling_overridable
       from app_settings where id = 1;
   end if;
 
+  -- Map-level limits: mirrors computeMapLimits() in
+  -- src/maps/mapSchema.js (client-side), so the server independently
+  -- enforces what the map itself can support, rather than only trusting
+  -- that the client's UI already did. The EFFECTIVE bounds a room
+  -- actually gets are the intersection of "what this map supports" and
+  -- "what the admin globally allows" -- whichever is more restrictive
+  -- wins on each side.
+  --
+  -- Default ratio is 8% (calibrated against the real Scotland Yard board
+  -- game's own ~199-station / 5-detective ratio), admin-adjustable per
+  -- map up to a hard ceiling of 20% via map_settings.
+  -- detective_density_ratio_override (see set_map_ticket_overrides).
+  if p_map_station_count is not null then
+    v_map_ratio := 0.08;
+    if exists (select 1 from information_schema.tables where table_name = 'map_settings') then
+      select detective_density_ratio_override into v_map_ratio_override
+        from map_settings where map_id = p_map_id;
+      if v_map_ratio_override is not null then
+        v_map_ratio := greatest(0.01, least(0.20, v_map_ratio_override));
+      end if;
+    end if;
+    v_map_max_det := greatest(3, round(p_map_station_count * v_map_ratio)::int);
+    v_map_min_det := 3;
+    v_min_det := greatest(v_min_det, v_map_min_det);
+    v_max_det := least(v_max_det, v_map_max_det);
+    if v_max_det < v_min_det then
+      v_max_det := v_min_det; -- pathological case (tiny map + high admin min) -- never let max fall below min
+    end if;
+  end if;
+
   if p_num_detectives < v_min_det or p_num_detectives > v_max_det then
-    raise exception 'num_detectives must be between % and %', v_min_det, v_max_det;
+    raise exception 'num_detectives must be between % and % for this map', v_min_det, v_max_det;
   end if;
   if p_total_players < v_min_players or p_total_players > v_max_players then
     raise exception 'total_players must be between % and %', v_min_players, v_max_players;
@@ -173,6 +245,24 @@ begin
   v_final_endgame_override := case when v_endgame_overridable then p_end_game_vote_override else null end;
   v_final_pause_override := case when v_pause_overridable then p_pause_resume_override else null end;
   v_final_redistribute_override := case when v_redistribute_overridable then p_redistribute_roles_override else null end;
+  v_final_highlight_style_override := case when v_highlight_style_overridable then p_turn_highlight_style_override else null end;
+  if v_final_highlight_style_override is not null and v_final_highlight_style_override not in ('ring', 'blink') then
+    raise exception 'turn_highlight_style_override must be ''ring'' or ''blink''';
+  end if;
+  v_final_route_explorer_override := case when v_route_explorer_overridable then p_route_explorer_override else null end;
+  v_final_round_scaling_override := case when v_round_scaling_overridable then p_round_scaling_ratio_override else null end;
+  if v_final_round_scaling_override is not null and (v_final_round_scaling_override < 0.3 or v_final_round_scaling_override > 3.0) then
+    raise exception 'round_scaling_ratio_override must be between 0.3 and 3.0';
+  end if;
+
+  if p_is_public then
+    if not is_feature_enabled('public_rooms_enabled', null) then
+      raise exception 'Public rooms are currently disabled by the admin';
+    end if;
+    if p_room_name is null or length(trim(p_room_name)) = 0 then
+      raise exception 'A room name is required for a public room';
+    end if;
+  end if;
 
   loop
     v_code := upper(substr(md5(random()::text), 1, 6));
@@ -183,12 +273,16 @@ begin
   insert into rooms (
     map_id, num_detectives, total_players, code, status, turn_timer_seconds,
     takeovers_enabled_override, takeover_reversal_enabled_override,
-    end_game_vote_enabled_override, pause_resume_enabled_override, redistribute_roles_enabled_override
+    end_game_vote_enabled_override, pause_resume_enabled_override, redistribute_roles_enabled_override,
+    turn_highlight_style_override, route_explorer_enabled_override, round_scaling_ratio_override,
+    is_public, room_name
   )
   values (
     p_map_id, p_num_detectives, p_total_players, v_code, 'lobby', p_turn_timer_seconds,
     v_final_takeovers_override, v_final_reversal_override,
-    v_final_endgame_override, v_final_pause_override, v_final_redistribute_override
+    v_final_endgame_override, v_final_pause_override, v_final_redistribute_override,
+    v_final_highlight_style_override, v_final_route_explorer_override, v_final_round_scaling_override,
+    p_is_public, nullif(trim(coalesce(p_room_name, '')), '')
   )
   returning id into v_room_id;
 
@@ -455,13 +549,16 @@ $$;
 -- client could observe.
 -- -----------------------------------------------------------------------------
 drop function if exists start_game(uuid, uuid, int[], jsonb, jsonb, text[]);
+drop function if exists start_game(uuid, uuid, int[], jsonb, jsonb, text[], int, int[]);
 create or replace function start_game(
   p_room_id uuid,
   p_caller_player_id uuid,
   p_start_pool int[],
   p_mrx_starting_tickets jsonb,
   p_detective_starting_tickets jsonb,
-  p_detective_colors text[]
+  p_detective_colors text[],
+  p_max_rounds int default 22,
+  p_reveal_rounds int[] default array[3,8,13,18,22]
 ) returns void
 language plpgsql
 security definer
@@ -539,6 +636,7 @@ begin
       'id', i,
       'color', p_detective_colors[i + 1],
       'pos', v_picked[i + 2],
+      'startPos', v_picked[i + 2],
       'tickets', p_detective_starting_tickets,
       'history', '[]'::jsonb
     ));
@@ -552,13 +650,16 @@ begin
     room_id, phase, round, turn_order, turn_idx,
     detectives, mrx_tickets, mrx_revealed_pos, mrx_last_reveal_round,
     mrx_travel_log, mrx_double_move_active, mrx_double_move_legs_remaining,
-    winner, log
+    winner, log, starting_mrx_tickets, starting_detective_tickets,
+    max_rounds, reveal_rounds
   ) values (
     p_room_id, 'playing', 1, v_turn_order, 0,
     v_detectives, p_mrx_starting_tickets, null, 0,
     '[]'::jsonb, false, 0,
     null,
-    jsonb_build_array(jsonb_build_object('kind', 'game_started', 'payload', jsonb_build_object('numDetectives', v_room.num_detectives)))
+    jsonb_build_array(jsonb_build_object('kind', 'game_started', 'payload', jsonb_build_object('numDetectives', v_room.num_detectives))),
+    p_mrx_starting_tickets, p_detective_starting_tickets,
+    p_max_rounds, p_reveal_rounds
   )
   on conflict (room_id) do update set
     phase = excluded.phase, round = excluded.round, turn_order = excluded.turn_order,
@@ -567,7 +668,11 @@ begin
     mrx_last_reveal_round = excluded.mrx_last_reveal_round, mrx_travel_log = excluded.mrx_travel_log,
     mrx_double_move_active = excluded.mrx_double_move_active,
     mrx_double_move_legs_remaining = excluded.mrx_double_move_legs_remaining,
-    winner = excluded.winner, log = excluded.log, updated_at = now();
+    winner = excluded.winner, log = excluded.log,
+    starting_mrx_tickets = excluded.starting_mrx_tickets,
+    starting_detective_tickets = excluded.starting_detective_tickets,
+    max_rounds = excluded.max_rounds, reveal_rounds = excluded.reveal_rounds,
+    updated_at = now();
 
   insert into game_state_secret (room_id, mrx_pos, mrx_position_log)
   values (
@@ -631,6 +736,7 @@ declare
   v_gs game_state_public%rowtype;
   v_next_idx int;
   v_next_round int;
+  v_max_rounds int;
 begin
   select * into v_gs from game_state_public where room_id = p_room_id for update;
 
@@ -645,12 +751,15 @@ begin
   set turn_idx = v_next_idx, round = v_next_round, updated_at = now()
   where room_id = p_room_id;
 
-  -- NOTE: "22" here duplicates MAX_ROUNDS from src/lib/gameEngine.js. SQL
-  -- can't import a JS constant, so if the round limit ever changes, BOTH
-  -- this literal and MAX_ROUNDS in gameEngine.js must be updated by hand.
-  -- Same duplication applies to REVEAL_ROUNDS (3,8,13,18,22) below in
-  -- make_mrx_move.
-  if v_next_round > 22 then
+  -- Reads the actual computed max_rounds for THIS game (see
+  -- computeRoundsAndRevealSchedule in mapSchema.js / the max_rounds
+  -- column added to game_state_public) rather than a hardcoded 22 --
+  -- this used to be hardcoded and silently ignored the per-map computed
+  -- round count entirely; fixed to read the real value, falling back to
+  -- 22 only if it's somehow null (a legacy row from before this column
+  -- existed).
+  select coalesce(max_rounds, 22) into v_max_rounds from game_state_public where room_id = p_room_id;
+  if v_next_round > v_max_rounds then
     update game_state_public
     set winner = 'mrx',
         phase = 'ended',
@@ -820,7 +929,13 @@ begin
     raise exception 'No % tickets remaining', v_spent;
   end if;
 
-  v_is_reveal := v_gs.round in (3, 8, 13, 18, 22);
+  -- Reads the actual per-game computed reveal schedule (see
+  -- computeRoundsAndRevealSchedule / the reveal_rounds column) rather
+  -- than a hardcoded (3,8,13,18,22) -- this was silently ignoring the
+  -- per-map computed schedule entirely; fixed to use the real value,
+  -- falling back to the standard schedule only for a legacy row that
+  -- somehow predates this column.
+  v_is_reveal := v_gs.round = any(coalesce(v_gs.reveal_rounds, array[3,8,13,18,22]));
   v_continuing_double := v_gs.mrx_double_move_active and v_gs.mrx_double_move_legs_remaining > 1;
 
   select * into v_secret from game_state_secret where room_id = p_room_id for update;
@@ -1081,6 +1196,7 @@ as $$
 declare
   v_proposal end_game_proposals%rowtype;
   v_total_players int;
+  v_passed boolean;
 begin
   select * into v_proposal
   from end_game_proposals p
@@ -1093,8 +1209,21 @@ begin
   end if;
 
   if v_proposal.expires_at < now() then
-    update end_game_proposals set status = 'expired' where id = v_proposal.id;
-    return; -- treat as if there were none
+    -- Auto-random-vote any active player who hasn't responded, then
+    -- resolve based on the (now complete) vote -- rather than just
+    -- expiring the proposal outright, per project design: a
+    -- non-responding but still-active player shouldn't be able to stall
+    -- a vote indefinitely just by not clicking.
+    v_passed := auto_resolve_nonresponders(p_room_id, 'end_game_votes', v_proposal.id);
+    if v_passed then
+      update end_game_proposals set status = 'accepted' where id = v_proposal.id;
+      update game_state_public set phase = 'ended', winner = null,
+        log = log || jsonb_build_array(jsonb_build_object('kind', 'ended_by_vote'))
+      where room_id = p_room_id;
+    else
+      update end_game_proposals set status = 'rejected' where id = v_proposal.id;
+    end if;
+    return;
   end if;
 
   select count(*) into v_total_players from players where room_id = p_room_id;
@@ -1789,12 +1918,30 @@ as $$
 declare
   v_proposal pause_proposals%rowtype;
   v_total_players int;
+  v_passed boolean;
+  v_deadline_hours int := 36;
 begin
   select * into v_proposal from pause_proposals p where p.room_id = p_room_id and p.status = 'pending'
     order by p.created_at desc limit 1;
   if v_proposal.id is null then return; end if;
   if v_proposal.expires_at < now() then
-    update pause_proposals set status = 'expired' where id = v_proposal.id;
+    v_passed := auto_resolve_nonresponders(p_room_id, 'pause_votes', v_proposal.id);
+    if v_passed then
+      update pause_proposals set status = 'accepted' where id = v_proposal.id;
+      if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+        select pause_resume_deadline_hours into v_deadline_hours from app_settings where id = 1;
+      end if;
+      update game_state_public
+      set phase = 'paused',
+          log = log || jsonb_build_array(jsonb_build_object('kind', 'game_paused'))
+      where room_id = p_room_id;
+      insert into room_pauses (room_id, resume_deadline, paused_by_name)
+      values (p_room_id, now() + (v_deadline_hours || ' hours')::interval, v_proposal.proposed_by_name)
+      on conflict (room_id) do update set
+        paused_at = now(), resume_deadline = excluded.resume_deadline, paused_by_name = excluded.paused_by_name;
+    else
+      update pause_proposals set status = 'rejected' where id = v_proposal.id;
+    end if;
     return;
   end if;
 
@@ -1938,32 +2085,36 @@ drop function if exists check_player_still_in_room(uuid, uuid);
 create or replace function check_player_still_in_room(
   p_room_id uuid,
   p_player_id uuid
-) returns table (out_still_in_room boolean, out_replaced_role text)
+) returns table (out_still_in_room boolean, out_replaced_role text, out_takeover_event_id uuid, out_takeover_completed_at timestamptz)
 language plpgsql
 security definer
 as $$
 declare
   v_exists boolean;
   v_last_known_role text;
+  v_event_id uuid;
+  v_completed_at timestamptz;
 begin
   select exists(select 1 from players where id = p_player_id and room_id = p_room_id) into v_exists;
 
   if v_exists then
-    return query select true, null::text;
+    return query select true, null::text, null::uuid, null::timestamptz;
     return;
   end if;
 
   -- player row is gone -- try to find what role they used to hold, via
   -- the most recent completed takeover event that targeted them, purely
   -- so the "you were replaced" message can say what they lost (e.g.
-  -- "Mr. X" or "Detectives 2 & 3") rather than a generic message.
-  select target_role into v_last_known_role
+  -- "Mr. X" or "Detectives 2 & 3") rather than a generic message, and so
+  -- the client can offer a "request my seat back" button referencing
+  -- this specific event.
+  select target_role, id, updated_at into v_last_known_role, v_event_id, v_completed_at
   from takeover_events
   where room_id = p_room_id and target_player_id = p_player_id and status = 'completed'
   order by updated_at desc
   limit 1;
 
-  return query select false, v_last_known_role;
+  return query select false, v_last_known_role, v_event_id, v_completed_at;
 end;
 $$;
 
@@ -2012,6 +2163,7 @@ exception
     return true; -- unknown feature name or column missing -- fail open rather than break the game
 end;
 $$;
+grant execute on function is_feature_enabled(text, uuid) to anon, authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -2109,12 +2261,19 @@ as $$
 declare
   v_proposal takeover_reversal_proposals%rowtype;
   v_active_ids uuid[];
+  v_passed boolean;
 begin
   select * into v_proposal from takeover_reversal_proposals p
     where p.room_id = p_room_id and p.status = 'pending' order by p.created_at desc limit 1;
   if v_proposal.id is null then return; end if;
   if v_proposal.expires_at < now() then
-    update takeover_reversal_proposals set status = 'expired' where id = v_proposal.id;
+    v_passed := auto_resolve_nonresponders(p_room_id, 'takeover_reversal_votes', v_proposal.id);
+    if v_passed then
+      update takeover_reversal_proposals set status = 'accepted' where id = v_proposal.id;
+      perform apply_reversal_seat_transfer(p_room_id, v_proposal.id);
+    else
+      update takeover_reversal_proposals set status = 'rejected' where id = v_proposal.id;
+    end if;
     return;
   end if;
 
@@ -2136,6 +2295,47 @@ $$;
 -- made under the new controller stand as-is).
 -- -----------------------------------------------------------------------------
 drop function if exists vote_takeover_reversal(uuid, uuid, uuid, boolean);
+drop function if exists apply_reversal_seat_transfer(uuid, uuid);
+create or replace function apply_reversal_seat_transfer(p_room_id uuid, p_proposal_id uuid) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_proposal takeover_reversal_proposals%rowtype;
+  v_current_holder players%rowtype;
+begin
+  select * into v_proposal from takeover_reversal_proposals where id = p_proposal_id;
+  if v_proposal.id is null then return; end if;
+
+  -- transfer the seat back: whoever currently holds original_role loses
+  -- it (or has it stripped out of their merged detective role string),
+  -- and the original player's row (still present -- they're spectating,
+  -- not deleted) gets it reassigned.
+  select * into v_current_holder from players where room_id = p_room_id and (
+    role = v_proposal.original_role or role like '%' || v_proposal.original_role || '%'
+  ) limit 1;
+
+  if v_current_holder.id is not null then
+    if v_current_holder.role = v_proposal.original_role then
+      delete from players where id = v_current_holder.id;
+    else
+      update players
+      set role = array_to_string(
+        array(select unnest(string_to_array(role, ',')) except select v_proposal.original_role),
+        ','
+      )
+      where id = v_current_holder.id;
+    end if;
+  end if;
+
+  update players set role = v_proposal.original_role
+  where room_id = p_room_id and id = (
+    select target_player_id from takeover_events where id = v_proposal.takeover_event_id
+  );
+end;
+$$;
+
+
 create or replace function vote_takeover_reversal(
   p_room_id uuid,
   p_caller_player_id uuid,
@@ -2150,7 +2350,6 @@ declare
   v_active_ids uuid[];
   v_total_active int;
   v_yes_votes int;
-  v_current_holder players%rowtype;
 begin
   select * into v_proposal from takeover_reversal_proposals p where p.id = p_proposal_id and p.room_id = p_room_id for update;
   if v_proposal.id is null or v_proposal.status <> 'pending' then
@@ -2177,34 +2376,7 @@ begin
 
   if v_yes_votes >= v_total_active then
     update takeover_reversal_proposals set status = 'accepted' where id = p_proposal_id;
-
-    -- transfer the seat back: whoever currently holds original_role loses
-    -- it (or has it stripped out of their merged detective role string),
-    -- and the original player's row (still present -- they're spectating,
-    -- not deleted) gets it reassigned.
-    select * into v_current_holder from players where room_id = p_room_id and (
-      role = v_proposal.original_role or role like '%' || v_proposal.original_role || '%'
-    ) limit 1;
-
-    if v_current_holder.id is not null then
-      if v_current_holder.role = v_proposal.original_role then
-        delete from players where id = v_current_holder.id;
-      else
-        -- current holder has merged roles (e.g. "d0,d1,d2" and only
-        -- "d1" should be given back) -- strip just that piece out
-        update players
-        set role = array_to_string(
-          array(select unnest(string_to_array(role, ',')) except select v_proposal.original_role),
-          ','
-        )
-        where id = v_current_holder.id;
-      end if;
-    end if;
-
-    update players set role = v_proposal.original_role
-    where room_id = p_room_id and id = (
-      select target_player_id from takeover_events where id = v_proposal.takeover_event_id
-    );
+    perform apply_reversal_seat_transfer(p_room_id, p_proposal_id);
   end if;
 end;
 $$;
@@ -2359,12 +2531,19 @@ as $$
 declare
   v_proposal redistribute_proposals%rowtype;
   v_active_ids uuid[];
+  v_passed boolean;
 begin
   select * into v_proposal from redistribute_proposals p
     where p.room_id = p_room_id and p.status = 'pending' order by p.created_at desc limit 1;
   if v_proposal.id is null then return; end if;
   if v_proposal.expires_at < now() then
-    update redistribute_proposals set status = 'expired' where id = v_proposal.id;
+    v_passed := auto_resolve_nonresponders(p_room_id, 'redistribute_votes', v_proposal.id);
+    if v_passed then
+      update redistribute_proposals set status = 'accepted' where id = v_proposal.id;
+      perform apply_redistribute_assignments(p_room_id, v_proposal.id);
+    else
+      update redistribute_proposals set status = 'rejected' where id = v_proposal.id;
+    end if;
     return;
   end if;
 
@@ -2384,6 +2563,26 @@ $$;
 -- every seat reassignment atomically in one transaction.
 -- -----------------------------------------------------------------------------
 drop function if exists vote_redistribute_roles(uuid, uuid, uuid, boolean);
+drop function if exists apply_redistribute_assignments(uuid, uuid);
+create or replace function apply_redistribute_assignments(p_room_id uuid, p_proposal_id uuid) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_proposal redistribute_proposals%rowtype;
+  v_key text;
+  v_val text;
+begin
+  select * into v_proposal from redistribute_proposals where id = p_proposal_id;
+  if v_proposal.id is null then return; end if;
+
+  for v_key, v_val in select * from jsonb_each_text(v_proposal.new_assignments) loop
+    update players set role = v_val where id = v_key::uuid and room_id = p_room_id;
+  end loop;
+end;
+$$;
+
+
 create or replace function vote_redistribute_roles(
   p_room_id uuid,
   p_caller_player_id uuid,
@@ -2426,10 +2625,169 @@ begin
 
   if v_yes_votes >= v_total_active then
     update redistribute_proposals set status = 'accepted' where id = p_proposal_id;
-
-    for v_key, v_val in select * from jsonb_each_text(v_proposal.new_assignments) loop
-      update players set role = v_val where id = v_key::uuid and room_id = p_room_id;
-    end loop;
+    perform apply_redistribute_assignments(p_room_id, p_proposal_id);
   end if;
 end;
 $$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_vote_status_list -- internal helper shared by all four vote-getters
+-- (end-game, pause, reversal, redistribute). Returns one row per ACTIVE
+-- player with their current vote status for a given proposal, so the
+-- client can show a live "who's agreed, who's declined, who hasn't
+-- responded yet" list instead of just a raw count.
+-- -----------------------------------------------------------------------------
+drop function if exists get_vote_status_list(uuid, text, uuid);
+create or replace function get_vote_status_list(
+  p_room_id uuid,
+  p_vote_table text, -- 'end_game_votes' | 'pause_votes' | 'takeover_reversal_votes' | 'redistribute_votes'
+  p_proposal_id uuid
+) returns table (out_player_id uuid, out_display_name text, out_status text) -- status: 'yes' | 'no' | 'pending'
+language plpgsql
+security definer
+as $$
+declare
+  v_active_ids uuid[];
+begin
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+
+  return query execute format(
+    'select p.id, p.display_name,
+       case
+         when v.vote is true then ''yes''
+         when v.vote is false then ''no''
+         else ''pending''
+       end
+     from players p
+     left join %I v on v.player_id = p.id and v.proposal_id = %L
+     where p.room_id = %L and p.id = any(%L::uuid[])
+     order by p.display_name',
+    p_vote_table, p_proposal_id, p_room_id, v_active_ids
+  );
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- auto_resolve_nonresponders -- internal helper shared by all four vote
+-- RPCs. Once a proposal's deadline has passed, any currently-ACTIVE
+-- player who hasn't yet voted gets a RANDOM yes/no cast on their behalf
+-- automatically (per project design: a still-connected player who simply
+-- hasn't clicked shouldn't indefinitely block or stall a vote). Returns
+-- true if the proposal is now unanimous-yes (i.e. should be applied),
+-- false if it was rejected (any no, including a randomly-assigned one)
+-- or is still pending (only relevant when called at exact expiry).
+-- -----------------------------------------------------------------------------
+drop function if exists auto_resolve_nonresponders(uuid, text, uuid);
+create or replace function auto_resolve_nonresponders(
+  p_room_id uuid,
+  p_vote_table text,
+  p_proposal_id uuid
+) returns boolean
+language plpgsql
+security definer
+as $$
+declare
+  v_active_ids uuid[];
+  v_nonresponder uuid;
+  v_random_vote boolean;
+  v_total_active int;
+  v_yes_votes int;
+  v_any_no boolean;
+begin
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+
+  -- assign a random vote to every active player who hasn't responded yet
+  for v_nonresponder in
+    execute format(
+      'select p.id from players p
+       where p.room_id = %L and p.id = any(%L::uuid[])
+         and not exists (select 1 from %I v where v.proposal_id = %L and v.player_id = p.id)',
+      p_room_id, v_active_ids, p_vote_table, p_proposal_id
+    )
+  loop
+    v_random_vote := random() < 0.5;
+    execute format(
+      'insert into %I (proposal_id, player_id, vote) values (%L, %L, %L) on conflict do nothing',
+      p_vote_table, p_proposal_id, v_nonresponder, v_random_vote
+    );
+  end loop;
+
+  execute format('select exists(select 1 from %I where proposal_id = %L and vote = false)', p_vote_table, p_proposal_id)
+    into v_any_no;
+  if v_any_no then
+    return false;
+  end if;
+
+  select count(*) into v_total_active from players where room_id = p_room_id and id = any(v_active_ids);
+  execute format('select count(*) from %I where proposal_id = %L and vote = true', p_vote_table, p_proposal_id)
+    into v_yes_votes;
+
+  return v_yes_votes >= v_total_active;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_effective_turn_highlight_style -- room-aware resolution: checks
+-- the room's own override first, falls back to the admin's global
+-- default. Mirrors is_feature_enabled's room-then-global pattern, just
+-- for a text value instead of a boolean.
+-- -----------------------------------------------------------------------------
+drop function if exists get_effective_turn_highlight_style(uuid);
+create or replace function get_effective_turn_highlight_style(p_room_id uuid) returns text
+language plpgsql
+security definer
+as $$
+declare
+  v_override text;
+  v_default text := 'ring';
+begin
+  if p_room_id is not null then
+    select turn_highlight_style_override into v_override from rooms where id = p_room_id;
+    if v_override is not null then
+      return v_override;
+    end if;
+  end if;
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select turn_highlight_style into v_default from app_settings where id = 1;
+  end if;
+  return coalesce(v_default, 'ring');
+end;
+$$;
+grant execute on function get_effective_turn_highlight_style(uuid) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- get_public_rooms -- powers the live room browser on the Join Room
+-- screen. Returns every public room that's still LOBBY status (not yet
+-- started) AND has at least one open seat -- the instant a room is
+-- either full or has started, it disappears from this list, per project
+-- design. Uses the same seat-layout computation as everywhere else
+-- (compute_seat_layout) to determine "how many total seats" for the
+-- fill-check, since total_players already encodes that.
+-- -----------------------------------------------------------------------------
+drop function if exists get_public_rooms();
+create or replace function get_public_rooms()
+returns table (
+  out_room_id uuid, out_room_code text, out_room_name text, out_map_id text,
+  out_joined_count int, out_total_players int
+)
+language plpgsql
+security definer
+as $$
+begin
+  return query
+    select r.id, r.code, r.room_name, r.map_id,
+      (select count(*)::int from players p where p.room_id = r.id),
+      r.total_players
+    from rooms r
+    where r.is_public
+      and r.status = 'lobby'
+      and r.total_players > 0
+      and (select count(*) from players p where p.room_id = r.id) < r.total_players
+    order by r.created_at desc;
+end;
+$$;
+grant execute on function get_public_rooms() to anon, authenticated;

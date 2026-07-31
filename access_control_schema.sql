@@ -94,6 +94,36 @@ create table if not exists app_settings (
   end_game_vote_overridable_by_host boolean not null default true,
   pause_resume_overridable_by_host boolean not null default true,
   redistribute_roles_overridable_by_host boolean not null default true,
+  -- Turn-highlight style: 'ring' (pulsing outline, default) or 'blink'
+  -- (fill/opacity pulse). Applies to both the detective turn-indicator
+  -- (visible to everyone) and Mr.X's own private self-locating
+  -- indicator (visible only to Mr.X's own client).
+  turn_highlight_style text not null default 'ring',
+  turn_highlight_style_overridable_by_host boolean not null default true,
+  -- Route explorer: lets the player whose turn it is highlight every
+  -- station reachable by a specific transport mode (only modes they
+  -- actually hold a ticket for), a purely informational "what if" view,
+  -- not a move commitment.
+  route_explorer_enabled boolean not null default true,
+  route_explorer_overridable_by_host boolean not null default true,
+  -- Round-count scaling ratio: multiplies the computed round count (from
+  -- graph-distance calibration) up or down. 1.0 = use the computed
+  -- default unchanged. Same purpose as detective_density_ratio: admin
+  -- can tune the FEEL of every game (longer or shorter hunts) without
+  -- needing per-map micromanagement, while per-map overrides (in
+  -- map_settings) still take precedence for a specific map if set.
+  round_scaling_ratio numeric not null default 1.0,
+  round_scaling_overridable_by_host boolean not null default true,
+  -- Public rooms: whether hosts are even allowed to mark a room public
+  -- at all. Unlike the other toggles, there's no separate
+  -- "overridable_by_host" companion for this one -- being ABLE to make a
+  -- room public already IS the host's choice; this flag is the
+  -- admin-level gate on whether that choice exists at all (e.g. an
+  -- admin running a small private deployment may want to disable public
+  -- rooms entirely, since a room browser only makes sense for a
+  -- deployment with enough traffic to have unrelated groups discovering
+  -- each other's games).
+  public_rooms_enabled boolean not null default true,
   updated_at timestamptz not null default now(),
   constraint app_settings_singleton check (id = 1)
 );
@@ -122,6 +152,13 @@ alter table app_settings add column if not exists takeover_reversal_overridable_
 alter table app_settings add column if not exists end_game_vote_overridable_by_host boolean not null default true;
 alter table app_settings add column if not exists pause_resume_overridable_by_host boolean not null default true;
 alter table app_settings add column if not exists redistribute_roles_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists turn_highlight_style text not null default 'ring';
+alter table app_settings add column if not exists turn_highlight_style_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists route_explorer_enabled boolean not null default true;
+alter table app_settings add column if not exists route_explorer_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists round_scaling_ratio numeric not null default 1.0;
+alter table app_settings add column if not exists round_scaling_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists public_rooms_enabled boolean not null default true;
 
 -- -----------------------------------------------------------------------------
 -- MAP SETTINGS -- lets an owner deactivate a map without deleting its
@@ -135,8 +172,22 @@ alter table app_settings add column if not exists redistribute_roles_overridable
 create table if not exists map_settings (
   map_id text primary key,
   is_active boolean not null default true,
+  -- Per-map overrides for the computed defaults in mapSchema.js
+  -- (computeMapLimits / computeTicketCounts). NULL means "use the
+  -- computed default for this map"; a non-null value is an admin's
+  -- explicit override for this SPECIFIC map only (doesn't affect any
+  -- other map). detective_density_ratio_override is capped at 0.20 by
+  -- set_map_ticket_overrides() below, same hard ceiling as the global
+  -- default -- an admin can't misconfigure an individual map into
+  -- something broken any more than they can globally.
+  detective_density_ratio_override numeric,
+  ticket_counts_override jsonb, -- {detective: {taxi,bus,underground}, mrx: {taxi,bus,underground,black,double}} or null
+  round_scaling_ratio_override numeric, -- per-map override for the round-count scaling ratio, or null to use the global default
   updated_at timestamptz not null default now()
 );
+alter table map_settings add column if not exists detective_density_ratio_override numeric;
+alter table map_settings add column if not exists ticket_counts_override jsonb;
+alter table map_settings add column if not exists round_scaling_ratio_override numeric;
 
 
 -- -----------------------------------------------------------------------------

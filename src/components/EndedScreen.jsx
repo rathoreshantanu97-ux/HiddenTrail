@@ -1,9 +1,11 @@
-import React from "react";
+import React, { useState } from "react";
 import { styles } from "./GameBoard.jsx";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
 import { formatLogEntry } from "../lib/gameEngine.js";
+import ReplayView from "./ReplayView.jsx";
 
 export default function EndedScreen({ map, match, mrxName, detectiveName, onNewGame }) {
+  const [showReplay, setShowReplay] = useState(false);
   const activeMode = map.modeTheme || MODE_DEFAULT;
   const stationLabel = (id) => (map.names ? `${map.names[id]} (#${id})` : `station ${id}`);
   const theme = { mrxName, detectiveName, stationLabel, modeLabel: (m) => activeMode[m].label };
@@ -59,7 +61,13 @@ export default function EndedScreen({ map, match, mrxName, detectiveName, onNewG
         <button style={styles.primaryBtn} onClick={onNewGame}>
           New Game
         </button>
+        <button style={{ ...styles.primaryBtn, background: "#fff", color: "#111", border: "1.5px solid #ddd" }} onClick={() => setShowReplay(true)}>
+          Replay Game
+        </button>
       </div>
+      {showReplay && (
+        <ReplayView map={map} match={match} mrxName={mrxName} detectiveName={detectiveName} onClose={() => setShowReplay(false)} />
+      )}
     </div>
   );
 }

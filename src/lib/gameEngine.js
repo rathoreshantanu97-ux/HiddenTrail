@@ -112,6 +112,7 @@ export function initMatch({ map, mapId, numDetectives }) {
     id: i,
     color: DETECTIVE_COLORS[i],
     pos,
+    startPos: pos, // retained separately from `pos` (which changes as they move) specifically so post-game replay can show where they began, not just their move history
     tickets: { ...ticketCounts.detective },
     history: [],
   }));
@@ -147,6 +148,15 @@ export function initMatch({ map, mapId, numDetectives }) {
     detectives: dets,
     mrX,
     winner: null,
+    // Retained separately from the (constantly-changing) live tickets,
+    // same reasoning as detectives' startPos above -- specifically so
+    // post-game replay can reconstruct ticket counts at any point in the
+    // game by walking forward from a known starting point, rather than
+    // trying to reverse-engineer it from the final counts (which isn't
+    // reliably possible, since ticket exchanges between Mr.X and
+    // detectives during play make a simple reversal ambiguous).
+    startingMrxTickets: { ...ticketCounts.mrx },
+    startingDetectiveTickets: { ...ticketCounts.detective },
     log: [{ kind: "game_started", payload: { numDetectives } }],
   };
 }
@@ -283,4 +293,123 @@ export function applyEndGameEarly(match) {
     winner: null,
     log: [...match.log, { kind: "ended_early" }],
   };
+}
+
+// ---------------------------------------------------------------------------
+// buildReplayTimeline — reconstructs the full move-by-move sequence of a
+// FINISHED match, for the post-game replay feature. Rather than
+// re-deriving history from match.log (which doesn't carry enough detail
+// for Mr.X's moves -- his destination station is deliberately omitted
+// from the shared log while hidden, per the game's whole secrecy design)
+// this uses the two ALREADY-TRACKED, independent position histories that
+// exist specifically for this purpose:
+//   - match.mrX.positionLog: {round, pos, mode} per Mr.X move
+//   - match.detectives[i].history: {round, to, mode} per detective move
+// both of which are perfectly safe to use in full here, since a replay
+// only ever happens on an ALREADY-ENDED game, where Mr.X's full route
+// is no longer secret from anyone (the same principle the existing
+// end-of-game route reveal already relies on).
+//
+// Interleaves these using match.turnOrder (the same fixed rotation used
+// during live play: mrx, d0, d1, ..., repeating every round) so the
+// replay steps through moves in the EXACT order they actually happened,
+// not grouped by actor. Returns an array of steps, each one a complete,
+// self-contained snapshot of "the board state immediately after this
+// move" -- {round, actor, mrXPos, detectivePositions, ticketsSnapshot,
+// logEntry} -- so the replay UI can jump to any step directly (for the
+// scrub bar) without needing to replay everything before it first.
+// ---------------------------------------------------------------------------
+export function buildReplayTimeline(match) {
+  const steps = [];
+
+  // Build a flat, chronological list of every move from both sources,
+  // each tagged with which "slot" in turnOrder it corresponds to (mrx,
+  // d0, d1, ...) and its round number -- then sort by (round, turnOrder
+  // index) to get the true chronological sequence.
+  const rawMoves = [];
+  for (const entry of match.mrX.positionLog) {
+    if (entry.round === 0) continue; // the initial placement, not a move
+    rawMoves.push({ round: entry.round, actor: "mrx", pos: entry.pos, mode: entry.mode });
+  }
+  for (const d of match.detectives) {
+    for (const entry of d.history) {
+      rawMoves.push({ round: entry.round, actor: `d${d.id}`, pos: entry.to, mode: entry.mode, detId: d.id });
+    }
+  }
+
+  const turnOrderIndex = (actor) => match.turnOrder.indexOf(actor);
+  rawMoves.sort((a, b) => a.round - b.round || turnOrderIndex(a.actor) - turnOrderIndex(b.actor));
+
+  // Replay each move in order, maintaining a running snapshot of
+  // positions AND tickets so every step is a complete, independently
+  // jumpable state -- not just a diff from the previous step.
+  //
+  // Positions start from each actor's actual STARTING position
+  // (mrX.positionLog's round-0 entry, and each detective's retained
+  // startPos field -- see the startPos addition in initMatch/start_game
+  // specifically for this purpose), so step 0 correctly shows everyone's
+  // true starting positions, not a blank/unknown state.
+  //
+  // Tickets start from match.startingMrxTickets/startingDetectiveTickets
+  // (added to match state specifically for replay -- see initMatch/
+  // start_game) and are walked FORWARD, mirroring the exact exchange
+  // rule the live game itself uses (applyDetectiveMove/applyMrXMove):
+  // a detective's move spends one ticket of that mode from the moving
+  // detective AND simultaneously adds one to Mr.X's pool of that same
+  // mode (the "spent ticket doesn't vanish" rule); Mr.X's own moves
+  // spend from his own pool (the mode actually used, which is "black"
+  // when he camouflaged the move -- see positionLog's mode field, which
+  // already records the TICKET TYPE spent, not just the edge's
+  // transport type) and don't grant anything to anyone.
+  let mrXPos = match.mrX.positionLog[0]?.pos ?? null;
+  const detectivePositions = {};
+  for (const d of match.detectives) {
+    detectivePositions[d.id] = d.startPos ?? null;
+  }
+
+  let mrXTickets = { ...(match.startingMrxTickets || {}) };
+  const detectiveTickets = {};
+  for (const d of match.detectives) {
+    detectiveTickets[d.id] = { ...(match.startingDetectiveTickets || {}) };
+  }
+
+  // The "round 0" starting snapshot, before any move has happened --
+  // lets the replay UI show the initial board state as its own step,
+  // same as how the live game shows starting positions before Round 1's
+  // first move.
+  steps.push({
+    round: 0,
+    actor: null,
+    mode: null,
+    mrXPos,
+    detectivePositions: { ...detectivePositions },
+    mrXTickets: { ...mrXTickets },
+    detectiveTickets: Object.fromEntries(Object.entries(detectiveTickets).map(([id, t]) => [id, { ...t }])),
+  });
+
+  for (const move of rawMoves) {
+    if (move.actor === "mrx") {
+      mrXPos = move.pos;
+      if (mrXTickets[move.mode] != null) {
+        mrXTickets = { ...mrXTickets, [move.mode]: mrXTickets[move.mode] - 1 };
+      }
+    } else {
+      detectivePositions[move.detId] = move.pos;
+      const before = detectiveTickets[move.detId];
+      detectiveTickets[move.detId] = { ...before, [move.mode]: (before[move.mode] ?? 0) - 1 };
+      // the spent ticket transfers TO Mr.X's pool, same as live play
+      mrXTickets = { ...mrXTickets, [move.mode]: (mrXTickets[move.mode] ?? 0) + 1 };
+    }
+    steps.push({
+      round: move.round,
+      actor: move.actor,
+      mode: move.mode,
+      mrXPos,
+      detectivePositions: { ...detectivePositions },
+      mrXTickets: { ...mrXTickets },
+      detectiveTickets: Object.fromEntries(Object.entries(detectiveTickets).map(([id, t]) => [id, { ...t }])),
+    });
+  }
+
+  return steps;
 }

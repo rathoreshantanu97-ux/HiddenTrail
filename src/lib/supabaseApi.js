@@ -95,15 +95,26 @@ export async function startGameRpc({
   mrxStartingTickets,
   detectiveStartingTickets,
   detectiveColors,
+  maxRounds,
+  revealRounds,
 }) {
-  await callRpc("start_game", {
+  const args = {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
     p_start_pool: startPool,
     p_mrx_starting_tickets: mrxStartingTickets,
     p_detective_starting_tickets: detectiveStartingTickets,
     p_detective_colors: detectiveColors,
-  });
+  };
+  // Only include these when actually provided -- explicitly passing null
+  // would OVERRIDE the SQL function's defaults (22 / [3,8,13,18,22])
+  // with null, not fall back to them; Postgres only applies a parameter
+  // default when the argument is OMITTED entirely, never when it's
+  // explicitly null. Omitting the key here is what actually triggers
+  // the SQL-side fallback correctly.
+  if (maxRounds != null) args.p_max_rounds = maxRounds;
+  if (revealRounds != null) args.p_reveal_rounds = revealRounds;
+  await callRpc("start_game", args);
 }
 
 export async function getMrxPosition({ roomId, callerPlayerId }) {

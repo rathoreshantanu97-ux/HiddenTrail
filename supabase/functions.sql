@@ -549,13 +549,16 @@ $$;
 -- client could observe.
 -- -----------------------------------------------------------------------------
 drop function if exists start_game(uuid, uuid, int[], jsonb, jsonb, text[]);
+drop function if exists start_game(uuid, uuid, int[], jsonb, jsonb, text[], int, int[]);
 create or replace function start_game(
   p_room_id uuid,
   p_caller_player_id uuid,
   p_start_pool int[],
   p_mrx_starting_tickets jsonb,
   p_detective_starting_tickets jsonb,
-  p_detective_colors text[]
+  p_detective_colors text[],
+  p_max_rounds int default 22,
+  p_reveal_rounds int[] default array[3,8,13,18,22]
 ) returns void
 language plpgsql
 security definer
@@ -633,6 +636,7 @@ begin
       'id', i,
       'color', p_detective_colors[i + 1],
       'pos', v_picked[i + 2],
+      'startPos', v_picked[i + 2],
       'tickets', p_detective_starting_tickets,
       'history', '[]'::jsonb
     ));
@@ -646,13 +650,16 @@ begin
     room_id, phase, round, turn_order, turn_idx,
     detectives, mrx_tickets, mrx_revealed_pos, mrx_last_reveal_round,
     mrx_travel_log, mrx_double_move_active, mrx_double_move_legs_remaining,
-    winner, log
+    winner, log, starting_mrx_tickets, starting_detective_tickets,
+    max_rounds, reveal_rounds
   ) values (
     p_room_id, 'playing', 1, v_turn_order, 0,
     v_detectives, p_mrx_starting_tickets, null, 0,
     '[]'::jsonb, false, 0,
     null,
-    jsonb_build_array(jsonb_build_object('kind', 'game_started', 'payload', jsonb_build_object('numDetectives', v_room.num_detectives)))
+    jsonb_build_array(jsonb_build_object('kind', 'game_started', 'payload', jsonb_build_object('numDetectives', v_room.num_detectives))),
+    p_mrx_starting_tickets, p_detective_starting_tickets,
+    p_max_rounds, p_reveal_rounds
   )
   on conflict (room_id) do update set
     phase = excluded.phase, round = excluded.round, turn_order = excluded.turn_order,
@@ -661,7 +668,11 @@ begin
     mrx_last_reveal_round = excluded.mrx_last_reveal_round, mrx_travel_log = excluded.mrx_travel_log,
     mrx_double_move_active = excluded.mrx_double_move_active,
     mrx_double_move_legs_remaining = excluded.mrx_double_move_legs_remaining,
-    winner = excluded.winner, log = excluded.log, updated_at = now();
+    winner = excluded.winner, log = excluded.log,
+    starting_mrx_tickets = excluded.starting_mrx_tickets,
+    starting_detective_tickets = excluded.starting_detective_tickets,
+    max_rounds = excluded.max_rounds, reveal_rounds = excluded.reveal_rounds,
+    updated_at = now();
 
   insert into game_state_secret (room_id, mrx_pos, mrx_position_log)
   values (
@@ -725,6 +736,7 @@ declare
   v_gs game_state_public%rowtype;
   v_next_idx int;
   v_next_round int;
+  v_max_rounds int;
 begin
   select * into v_gs from game_state_public where room_id = p_room_id for update;
 
@@ -739,12 +751,15 @@ begin
   set turn_idx = v_next_idx, round = v_next_round, updated_at = now()
   where room_id = p_room_id;
 
-  -- NOTE: "22" here duplicates MAX_ROUNDS from src/lib/gameEngine.js. SQL
-  -- can't import a JS constant, so if the round limit ever changes, BOTH
-  -- this literal and MAX_ROUNDS in gameEngine.js must be updated by hand.
-  -- Same duplication applies to REVEAL_ROUNDS (3,8,13,18,22) below in
-  -- make_mrx_move.
-  if v_next_round > 22 then
+  -- Reads the actual computed max_rounds for THIS game (see
+  -- computeRoundsAndRevealSchedule in mapSchema.js / the max_rounds
+  -- column added to game_state_public) rather than a hardcoded 22 --
+  -- this used to be hardcoded and silently ignored the per-map computed
+  -- round count entirely; fixed to read the real value, falling back to
+  -- 22 only if it's somehow null (a legacy row from before this column
+  -- existed).
+  select coalesce(max_rounds, 22) into v_max_rounds from game_state_public where room_id = p_room_id;
+  if v_next_round > v_max_rounds then
     update game_state_public
     set winner = 'mrx',
         phase = 'ended',
@@ -914,7 +929,13 @@ begin
     raise exception 'No % tickets remaining', v_spent;
   end if;
 
-  v_is_reveal := v_gs.round in (3, 8, 13, 18, 22);
+  -- Reads the actual per-game computed reveal schedule (see
+  -- computeRoundsAndRevealSchedule / the reveal_rounds column) rather
+  -- than a hardcoded (3,8,13,18,22) -- this was silently ignoring the
+  -- per-map computed schedule entirely; fixed to use the real value,
+  -- falling back to the standard schedule only for a legacy row that
+  -- somehow predates this column.
+  v_is_reveal := v_gs.round = any(coalesce(v_gs.reveal_rounds, array[3,8,13,18,22]));
   v_continuing_double := v_gs.mrx_double_move_active and v_gs.mrx_double_move_legs_remaining > 1;
 
   select * into v_secret from game_state_secret where room_id = p_room_id for update;

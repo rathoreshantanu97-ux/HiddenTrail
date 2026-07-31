@@ -83,11 +83,17 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
     async (map) => {
       if (!roomId || !myPlayerId) return;
       try {
-        // Ticket counts are computed per-map from actual graph
-        // connectivity (see computeTicketCounts in mapSchema.js), not a
-        // single fixed value for every map -- same reasoning as
-        // pass-and-play's initMatch(), kept consistent between both modes.
+        // Ticket counts and round/reveal schedule are both computed
+        // per-map from actual graph connectivity (see computeTicketCounts
+        // / computeRoundsAndRevealSchedule in mapSchema.js), not fixed
+        // values -- same reasoning as pass-and-play's initMatch(), kept
+        // consistent between both modes. Without passing these through,
+        // the server falls back to its own hardcoded 22/[3,8,13,18,22]
+        // defaults, which would silently ignore this map's actual
+        // computed values (this was a real, previously-shipped gap,
+        // fixed alongside the server-side hardcoded-value bugs).
         const ticketCounts = map.ticketCounts || TICKET_STARTS;
+        const roundsAndReveal = map.roundsAndReveal;
         await api.startGameRpc({
           roomId,
           callerPlayerId: myPlayerId,
@@ -95,6 +101,8 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
           mrxStartingTickets: ticketCounts.mrx,
           detectiveStartingTickets: ticketCounts.detective,
           detectiveColors: DETECTIVE_COLORS,
+          maxRounds: roundsAndReveal?.totalRounds,
+          revealRounds: roundsAndReveal?.revealRounds,
         });
         await refreshMatch();
       } catch (e) {

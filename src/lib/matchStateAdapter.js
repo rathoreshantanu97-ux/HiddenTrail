@@ -11,9 +11,19 @@ export function rowToMatch(gsRow, myMrxPosition) {
   return {
     phase: gsRow.phase,
     round: gsRow.round,
+    // CRITICAL FIX: these two were missing entirely until now -- without
+    // them, match.maxRounds/match.revealRounds were undefined on every
+    // multiplayer client, meaning any UI reading them directly (rather
+    // than through the server, which enforces its OWN copy of these
+    // values independently) would show "undefined" or crash. The actual
+    // enforcement (round limit, reveal-round detection) happens
+    // server-side in advance_turn_internal/make_mrx_move, which had
+    // their OWN separate hardcoded-values bug, fixed alongside this one.
+    maxRounds: gsRow.max_rounds ?? 22,
+    revealRounds: gsRow.reveal_rounds ?? [3, 8, 13, 18, 22],
     turnOrder: gsRow.turn_order,
     turnIdx: gsRow.turn_idx,
-    detectives: gsRow.detectives, // already the right shape: [{id,color,pos,tickets,history}]
+    detectives: gsRow.detectives, // already the right shape: [{id,color,pos,startPos,tickets,history}]
     mrX: {
       // `pos` is only ever populated here if the CALLER is Mr. X (passed
       // in as myMrxPosition, fetched via the get_mrx_position RPC, which
@@ -32,6 +42,12 @@ export function rowToMatch(gsRow, myMrxPosition) {
     },
     winner: gsRow.winner,
     log: gsRow.log || [],
+    // Needed for post-game replay's ticket reconstruction (see
+    // buildReplayTimeline in gameEngine.js) -- these are the STARTING
+    // ticket counts, retained separately from the live, constantly-
+    // changing ones above.
+    startingMrxTickets: gsRow.starting_mrx_tickets,
+    startingDetectiveTickets: gsRow.starting_detective_tickets,
   };
 }
 

@@ -233,6 +233,35 @@ export async function setTimingConfig({ callerAccountId, config }) {
   });
 }
 
+export async function getMapOverrides() {
+  const rows = await callRpc("get_map_overrides", {});
+  const result = {};
+  for (const row of rows || []) {
+    result[row.out_map_id] = {
+      detectiveDensityRatioOverride: row.out_detective_density_ratio_override,
+      ticketCountsOverride: row.out_ticket_counts_override,
+      roundScalingRatioOverride: row.out_round_scaling_ratio_override,
+    };
+  }
+  return result;
+}
+
+export async function setMapTicketOverrides({
+  callerAccountId,
+  mapId,
+  detectiveDensityRatioOverride,
+  ticketCountsOverride,
+  roundScalingRatioOverride,
+}) {
+  await callRpc("set_map_ticket_overrides", {
+    p_caller_account_id: callerAccountId,
+    p_map_id: mapId,
+    p_detective_density_ratio_override: detectiveDensityRatioOverride,
+    p_ticket_counts_override: ticketCountsOverride,
+    p_round_scaling_ratio_override: roundScalingRatioOverride,
+  });
+}
+
 export async function getFeatureConfig() {
   const rows = await callRpc("get_feature_config", {});
   const row = rows?.[0];
@@ -243,6 +272,10 @@ export async function getFeatureConfig() {
       endGameVoteEnabled: true, endGameVoteOverridable: true,
       pauseResumeEnabled: true, pauseResumeOverridable: true,
       redistributeRolesEnabled: true, redistributeRolesOverridable: true,
+      turnHighlightStyle: "ring", turnHighlightStyleOverridable: true,
+      routeExplorerEnabled: true, routeExplorerOverridable: true,
+      roundScalingRatio: 1.0, roundScalingOverridable: true,
+      publicRoomsEnabled: true,
     };
   }
   return {
@@ -256,6 +289,13 @@ export async function getFeatureConfig() {
     pauseResumeOverridable: row.out_pause_resume_overridable,
     redistributeRolesEnabled: row.out_redistribute_roles_enabled,
     redistributeRolesOverridable: row.out_redistribute_roles_overridable,
+    turnHighlightStyle: row.out_turn_highlight_style,
+    turnHighlightStyleOverridable: row.out_turn_highlight_style_overridable,
+    routeExplorerEnabled: row.out_route_explorer_enabled,
+    routeExplorerOverridable: row.out_route_explorer_overridable,
+    roundScalingRatio: row.out_round_scaling_ratio,
+    roundScalingOverridable: row.out_round_scaling_overridable,
+    publicRoomsEnabled: row.out_public_rooms_enabled,
   };
 }
 
@@ -272,6 +312,13 @@ export async function setFeatureToggles({ callerAccountId, config }) {
     p_pause_resume_overridable: config.pauseResumeOverridable,
     p_redistribute_roles_enabled: config.redistributeRolesEnabled,
     p_redistribute_roles_overridable: config.redistributeRolesOverridable,
+    p_turn_highlight_style: config.turnHighlightStyle,
+    p_turn_highlight_style_overridable: config.turnHighlightStyleOverridable,
+    p_route_explorer_enabled: config.routeExplorerEnabled,
+    p_route_explorer_overridable: config.routeExplorerOverridable,
+    p_round_scaling_ratio: config.roundScalingRatio,
+    p_round_scaling_overridable: config.roundScalingOverridable,
+    p_public_rooms_enabled: config.publicRoomsEnabled,
   });
 }
 

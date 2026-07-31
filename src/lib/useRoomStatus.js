@@ -26,13 +26,23 @@ export function useRoomStatus(roomId) {
     try {
       const room = await fetchRoom(roomId);
       if (!room) {
+        // fetchRoom resolved successfully and confirmed no such row exists
+        // -- this is a genuine "room not found", not a network issue.
         setRoomNotFound(true);
         return;
       }
       setStatus(room.status);
     } catch (e) {
-      console.error("Failed to fetch room status:", e);
-      setRoomNotFound(true);
+      // A thrown error here means the FETCH ITSELF failed (network
+      // hiccup, momentary Supabase reconnect, etc) -- NOT that the room
+      // doesn't exist. Treating any error as "room not found" was a real
+      // bug: right after a page refresh, the very first fetch can
+      // transiently fail before the connection settles, which would
+      // incorrectly show "this room no longer exists" even though the
+      // room is completely fine. Log it and leave `status`/`roomNotFound`
+      // untouched so the loading state persists and a retry can succeed,
+      // rather than jumping to a false conclusion from one failed attempt.
+      console.error("Failed to fetch room status (will retry, not treating as room-not-found):", e);
     }
   }, [roomId]);
 

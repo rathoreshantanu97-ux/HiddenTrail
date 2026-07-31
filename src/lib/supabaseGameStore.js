@@ -83,12 +83,17 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
     async (map) => {
       if (!roomId || !myPlayerId) return;
       try {
+        // Ticket counts are computed per-map from actual graph
+        // connectivity (see computeTicketCounts in mapSchema.js), not a
+        // single fixed value for every map -- same reasoning as
+        // pass-and-play's initMatch(), kept consistent between both modes.
+        const ticketCounts = map.ticketCounts || TICKET_STARTS;
         await api.startGameRpc({
           roomId,
           callerPlayerId: myPlayerId,
           startPool: map.startPool,
-          mrxStartingTickets: TICKET_STARTS.mrx,
-          detectiveStartingTickets: TICKET_STARTS.detective,
+          mrxStartingTickets: ticketCounts.mrx,
+          detectiveStartingTickets: ticketCounts.detective,
           detectiveColors: DETECTIVE_COLORS,
         });
         await refreshMatch();

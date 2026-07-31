@@ -14,13 +14,36 @@ async function callRpc(name, args) {
   return data;
 }
 
-export async function createRoom({ mapId, numDetectives, totalPlayers, hostDisplayName, hostRole }) {
+export async function createRoom({
+  mapId,
+  numDetectives,
+  totalPlayers,
+  hostDisplayName,
+  hostRole,
+  mapStationCount,
+  turnTimerSeconds,
+  featureOverrides = {},
+  isPublic = false,
+  roomName = null,
+}) {
   const rows = await callRpc("create_room", {
     p_map_id: mapId,
     p_num_detectives: numDetectives,
     p_total_players: totalPlayers,
     p_host_display_name: hostDisplayName,
     p_host_role: hostRole || "mrx",
+    p_takeovers_override: featureOverrides.takeovers ?? null,
+    p_takeover_reversal_override: featureOverrides.takeoverReversal ?? null,
+    p_end_game_vote_override: featureOverrides.endGameVote ?? null,
+    p_pause_resume_override: featureOverrides.pauseResume ?? null,
+    p_redistribute_roles_override: featureOverrides.redistributeRoles ?? null,
+    p_turn_timer_seconds: turnTimerSeconds ?? null,
+    p_map_station_count: mapStationCount ?? null,
+    p_turn_highlight_style_override: featureOverrides.turnHighlightStyle ?? null,
+    p_route_explorer_override: featureOverrides.routeExplorer ?? null,
+    p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
+    p_is_public: isPublic,
+    p_room_name: roomName,
   });
   const row = rows?.[0];
   if (!row) throw new Error("Failed to create room");
@@ -173,6 +196,19 @@ export async function proposeEndGame({ roomId, callerPlayerId }) {
   return { proposalId: row.out_proposal_id };
 }
 
+export async function getVoteStatusList({ roomId, voteTable, proposalId }) {
+  const rows = await callRpc("get_vote_status_list", {
+    p_room_id: roomId,
+    p_vote_table: voteTable,
+    p_proposal_id: proposalId,
+  });
+  return (rows || []).map((r) => ({
+    playerId: r.out_player_id,
+    displayName: r.out_display_name,
+    status: r.out_status, // 'yes' | 'no' | 'pending'
+  }));
+}
+
 export async function getActiveEndGameProposal(roomId) {
   const rows = await callRpc("get_active_end_game_proposal", { p_room_id: roomId });
   const row = rows?.[0];
@@ -307,8 +343,13 @@ export async function getPauseStatus(roomId) {
 export async function checkPlayerStillInRoom({ roomId, playerId }) {
   const rows = await callRpc("check_player_still_in_room", { p_room_id: roomId, p_player_id: playerId });
   const row = rows?.[0];
-  if (!row) return { stillInRoom: true, replacedRole: null };
-  return { stillInRoom: row.out_still_in_room, replacedRole: row.out_replaced_role };
+  if (!row) return { stillInRoom: true, replacedRole: null, takeoverEventId: null, takeoverCompletedAt: null };
+  return {
+    stillInRoom: row.out_still_in_room,
+    replacedRole: row.out_replaced_role,
+    takeoverEventId: row.out_takeover_event_id,
+    takeoverCompletedAt: row.out_takeover_completed_at,
+  };
 }
 
 export async function proposeTakeoverReversal({ roomId, callerPlayerId, takeoverEventId }) {
@@ -383,10 +424,37 @@ export async function heartbeat({ playerId }) {
   await callRpc("heartbeat", { p_player_id: playerId });
 }
 
+export async function getPublicRooms() {
+  const rows = await callRpc("get_public_rooms", {});
+  return (rows || []).map((r) => ({
+    roomId: r.out_room_id,
+    roomCode: r.out_room_code,
+    roomName: r.out_room_name,
+    mapId: r.out_map_id,
+    joinedCount: r.out_joined_count,
+    totalPlayers: r.out_total_players,
+  }));
+}
+
 export async function fetchRoom(roomId) {
   const { data, error } = await supabase.from("rooms").select("*").eq("id", roomId).single();
   if (error) throw new Error(error.message);
   return data;
+}
+
+export async function isFeatureEnabled({ featureName, roomId }) {
+  // NOTE: is_feature_enabled returns a scalar boolean, not a table --
+  // same shape consideration as getEffectiveTurnHighlightStyle above.
+  const value = await callRpc("is_feature_enabled", { p_feature_name: featureName, p_room_id: roomId || null });
+  return value !== false; // fail open (missing/null treated as enabled) rather than silently hide a feature on a glitch
+}
+
+export async function getEffectiveTurnHighlightStyle(roomId) {
+  // NOTE: this Postgres function returns a scalar (text), not a table --
+  // PostgREST shapes scalar-function responses as the raw value itself,
+  // not wrapped in a rows array the way table-returning functions are.
+  const value = await callRpc("get_effective_turn_highlight_style", { p_room_id: roomId });
+  return value || "ring";
 }
 
 export async function fetchPlayers(roomId) {

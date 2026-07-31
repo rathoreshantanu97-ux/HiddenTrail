@@ -132,14 +132,14 @@ export default function SetupScreen({ onStart, onBack }) {
           <b>How it works</b>
           <ul style={{ margin: "8px 0 0 18px", padding: 0, lineHeight: 1.5 }}>
             <li>Mr. X moves first each round, then each detective moves once.</li>
-            <li>Mr. X's position is hidden except on reveal rounds (3, 8, 13, 18, 22).</li>
+            <li>Mr. X's position is hidden except on reveal rounds ({(map.roundsAndReveal?.revealRounds || [3, 8, 13, 18, 22]).join(", ")}).</li>
             <li>Detectives always see Mr. X's travel log — the sequence of transport modes he's used — just not where he is.</li>
             <li>Taxi tickets cover short hops, Bus skips further, Underground jumps between hubs.</li>
             <li>Ferry crossings (dashed blue lines, over rivers or lakes depending on the map) are Mr. X only, and always cost a black ticket.</li>
             <li>On real-city maps, major areas are always named; zoom in (pinch, scroll, or the +/− buttons) to reveal every neighborhood's name and the full local street mesh.</li>
             <li>Black tickets camouflage a move on the log, or unlock a ferry. Mr. X has 5 for the whole game.</li>
             <li>Mr. X also holds two 2x cards, each letting him take two moves in one turn before detectives respond.</li>
-            <li>Detectives win by landing on Mr. X's station. Mr. X wins by surviving 22 rounds.</li>
+            <li>Detectives win by landing on Mr. X's station. Mr. X wins by surviving {map.roundsAndReveal?.totalRounds || 22} rounds.</li>
             <li>Screen will say "pass to [player]" between turns — hand the device over then.</li>
           </ul>
         </div>

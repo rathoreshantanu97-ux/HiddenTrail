@@ -1,4 +1,5 @@
 import React from "react";
+import VoteStatusList from "./VoteStatusList.jsx";
 import { useEndGameVote } from "../lib/useEndGameVote.js";
 
 // ---------------------------------------------------------------------------
@@ -10,7 +11,7 @@ import { useEndGameVote } from "../lib/useEndGameVote.js";
 // detection doesn't exist yet.
 // ---------------------------------------------------------------------------
 export default function EndGameVote({ roomId, myPlayerId }) {
-  const { proposal, err, propose, vote, iHaveVoted } = useEndGameVote({ roomId, myPlayerId });
+  const { proposal, statusList, err, propose, vote, iHaveVoted } = useEndGameVote({ roomId, myPlayerId });
 
   async function handlePropose() {
     try {
@@ -39,6 +40,7 @@ export default function EndGameVote({ roomId, myPlayerId }) {
         </div>
         <div style={styles.timer}>Expires in {secondsLeft}s if not everyone responds</div>
         {err && <div style={styles.err}>{err}</div>}
+        <VoteStatusList statusList={statusList} />
         {iHaveVoted ? (
           <div style={styles.waitingNote}>Waiting for other players to respond...</div>
         ) : (

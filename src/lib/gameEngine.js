@@ -102,16 +102,22 @@ export function initMatch({ map, mapId, numDetectives }) {
   const starts = randomDistinctStarts(map.startPool, numDetectives + 1);
   const mrxStart = starts[0];
   const detStarts = starts.slice(1);
+  // Ticket counts are computed per-map from actual graph connectivity
+  // (see computeTicketCounts in mapSchema.js) rather than a single fixed
+  // value for every map -- falls back to the original calibration
+  // constants if a map somehow lacks this (shouldn't happen for any map
+  // built via deriveMap, but keeps this defensive).
+  const ticketCounts = map.ticketCounts || TICKET_STARTS;
   const dets = detStarts.map((pos, i) => ({
     id: i,
     color: DETECTIVE_COLORS[i],
     pos,
-    tickets: { ...TICKET_STARTS.detective },
+    tickets: { ...ticketCounts.detective },
     history: [],
   }));
   const mrX = {
     pos: mrxStart,
-    tickets: { ...TICKET_STARTS.mrx },
+    tickets: { ...ticketCounts.mrx },
     revealedPos: null,
     lastRevealRound: 0,
     travelLog: [],
@@ -120,11 +126,22 @@ export function initMatch({ map, mapId, numDetectives }) {
     doubleMoveLegsRemaining: 0,
   };
   const turnOrder = ["mrx", ...dets.map((d) => `d${d.id}`)];
+  // Round count and reveal schedule are computed per-map from actual
+  // graph connectivity (see computeRoundsAndRevealSchedule in
+  // mapSchema.js), same reasoning as ticket counts -- stored directly on
+  // match state (rather than as a fixed module-level constant) since
+  // different maps now genuinely have different values. Falls back to
+  // the original fixed 22/[3,8,13,18,22] if a map somehow lacks this
+  // (shouldn't happen for any map built via deriveMap, but kept
+  // defensive, same pattern as the ticketCounts fallback above).
+  const roundsAndReveal = map.roundsAndReveal || { totalRounds: MAX_ROUNDS, revealRounds: [...REVEAL_ROUNDS] };
   return {
     phase: "handoff",
     mapId,
     numDetectives,
     round: 1,
+    maxRounds: roundsAndReveal.totalRounds,
+    revealRounds: roundsAndReveal.revealRounds,
     turnOrder,
     turnIdx: 0,
     detectives: dets,
@@ -148,7 +165,7 @@ export function advanceTurn(match) {
     nextRound = match.round + 1;
   }
   let next = { ...match, turnIdx: nextIdx, round: nextRound, phase: "handoff" };
-  if (nextRound > MAX_ROUNDS) {
+  if (nextRound > match.maxRounds) {
     next = {
       ...next,
       winner: "mrx",
@@ -199,7 +216,7 @@ export function applyDetectiveMove(map, match, detId, to, mode) {
 // Applies Mr. X's move (one leg — double-move calls this twice in a row
 // without an intervening advanceTurn, same as the original logic).
 export function applyMrXMove(map, match, to, edgeMode, ticketUsed) {
-  const isReveal = REVEAL_ROUNDS.has(match.round);
+  const isReveal = match.revealRounds.includes(match.round);
   const spent = edgeMode === "ferry" ? "black" : ticketUsed;
   const loggedMode = spent === "black" ? "black" : edgeMode;
   const prevMrX = match.mrX;

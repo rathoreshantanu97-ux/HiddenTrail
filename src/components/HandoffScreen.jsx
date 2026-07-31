@@ -1,8 +1,7 @@
 import React from "react";
 import { styles } from "./GameBoard.jsx";
-import { MAX_ROUNDS } from "../lib/gameEngine.js";
 
-export default function HandoffScreen({ handoffFor, round, onReady }) {
+export default function HandoffScreen({ handoffFor, round, maxRounds, onReady }) {
   return (
     <div style={styles.page}>
       <div style={styles.handoffCard}>
@@ -10,7 +9,7 @@ export default function HandoffScreen({ handoffFor, round, onReady }) {
         <h2 style={{ margin: "0 0 8px" }}>Pass the device to</h2>
         <div style={styles.handoffName}>{handoffFor}</div>
         <div style={{ color: "#777", marginBottom: 20 }}>
-          Round {round} of {MAX_ROUNDS}
+          Round {round} of {maxRounds}
         </div>
         <button style={styles.primaryBtn} onClick={onReady}>
           I'm ready — show my turn

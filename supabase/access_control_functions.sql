@@ -819,7 +819,11 @@ returns table (
   out_takeover_reversal_enabled boolean, out_takeover_reversal_overridable boolean,
   out_end_game_vote_enabled boolean, out_end_game_vote_overridable boolean,
   out_pause_resume_enabled boolean, out_pause_resume_overridable boolean,
-  out_redistribute_roles_enabled boolean, out_redistribute_roles_overridable boolean
+  out_redistribute_roles_enabled boolean, out_redistribute_roles_overridable boolean,
+  out_turn_highlight_style text, out_turn_highlight_style_overridable boolean,
+  out_route_explorer_enabled boolean, out_route_explorer_overridable boolean,
+  out_round_scaling_ratio numeric, out_round_scaling_overridable boolean,
+  out_public_rooms_enabled boolean
 )
 language sql
 security definer
@@ -829,7 +833,11 @@ as $$
     takeover_reversal_enabled, takeover_reversal_overridable_by_host,
     end_game_vote_enabled, end_game_vote_overridable_by_host,
     pause_resume_enabled, pause_resume_overridable_by_host,
-    redistribute_roles_enabled, redistribute_roles_overridable_by_host
+    redistribute_roles_enabled, redistribute_roles_overridable_by_host,
+    turn_highlight_style, turn_highlight_style_overridable_by_host,
+    route_explorer_enabled, route_explorer_overridable_by_host,
+    round_scaling_ratio, round_scaling_overridable_by_host,
+    public_rooms_enabled
   from app_settings where id = 1;
 $$;
 
@@ -842,13 +850,21 @@ grant execute on function get_feature_config() to anon, authenticated;
 -- state AND whether it's overridable by hosts, in one call.
 -- -----------------------------------------------------------------------------
 drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean);
+drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, text, boolean);
+drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, text, boolean, boolean, boolean);
+drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, text, boolean, boolean, boolean, numeric, boolean);
+drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, text, boolean, boolean, boolean, numeric, boolean, boolean);
 create or replace function set_feature_toggles(
   p_caller_account_id uuid,
   p_takeovers_enabled boolean, p_takeovers_overridable boolean,
   p_takeover_reversal_enabled boolean, p_takeover_reversal_overridable boolean,
   p_end_game_vote_enabled boolean, p_end_game_vote_overridable boolean,
   p_pause_resume_enabled boolean, p_pause_resume_overridable boolean,
-  p_redistribute_roles_enabled boolean, p_redistribute_roles_overridable boolean
+  p_redistribute_roles_enabled boolean, p_redistribute_roles_overridable boolean,
+  p_turn_highlight_style text default 'ring', p_turn_highlight_style_overridable boolean default true,
+  p_route_explorer_enabled boolean default true, p_route_explorer_overridable boolean default true,
+  p_round_scaling_ratio numeric default 1.0, p_round_scaling_overridable boolean default true,
+  p_public_rooms_enabled boolean default true
 ) returns void
 language plpgsql
 security definer
@@ -859,6 +875,13 @@ begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
   if v_caller.id is null or not v_caller.is_admin then
     raise exception 'Only an app admin can change this setting';
+  end if;
+
+  if p_turn_highlight_style not in ('ring', 'blink') then
+    raise exception 'turn_highlight_style must be ''ring'' or ''blink''';
+  end if;
+  if p_round_scaling_ratio < 0.3 or p_round_scaling_ratio > 3.0 then
+    raise exception 'round_scaling_ratio must be between 0.3 and 3.0';
   end if;
 
   update app_settings
@@ -872,7 +895,91 @@ begin
       pause_resume_overridable_by_host = p_pause_resume_overridable,
       redistribute_roles_enabled = p_redistribute_roles_enabled,
       redistribute_roles_overridable_by_host = p_redistribute_roles_overridable,
+      turn_highlight_style = p_turn_highlight_style,
+      turn_highlight_style_overridable_by_host = p_turn_highlight_style_overridable,
+      route_explorer_enabled = p_route_explorer_enabled,
+      route_explorer_overridable_by_host = p_route_explorer_overridable,
+      round_scaling_ratio = p_round_scaling_ratio,
+      round_scaling_overridable_by_host = p_round_scaling_overridable,
+      public_rooms_enabled = p_public_rooms_enabled,
       updated_at = now()
   where id = 1;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- get_map_overrides -- anyone (even logged out) reads per-map overrides
+-- for detective density ratio and ticket counts, so the client can apply
+-- them on top of (or instead of) the computed defaults from
+-- src/maps/mapSchema.js. Returns one row per map that HAS an override
+-- set -- a map with no row here simply uses its computed defaults.
+-- -----------------------------------------------------------------------------
+drop function if exists get_map_overrides();
+create or replace function get_map_overrides()
+returns table (out_map_id text, out_detective_density_ratio_override numeric, out_ticket_counts_override jsonb, out_round_scaling_ratio_override numeric)
+language sql
+security definer
+as $$
+  select map_id, detective_density_ratio_override, ticket_counts_override, round_scaling_ratio_override
+  from map_settings
+  where detective_density_ratio_override is not null or ticket_counts_override is not null or round_scaling_ratio_override is not null;
+$$;
+grant execute on function get_map_overrides() to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- set_map_ticket_overrides -- admin-only: set (or clear, by passing null)
+-- a specific map's detective-density-ratio and/or ticket-count overrides.
+-- Creates the map_settings row if it doesn't exist yet (a map that's
+-- never been touched in the admin panel has no row at all until its
+-- first override is set).
+-- -----------------------------------------------------------------------------
+drop function if exists set_map_ticket_overrides(uuid, text, numeric, jsonb);
+drop function if exists set_map_ticket_overrides(uuid, text, numeric, jsonb, numeric);
+create or replace function set_map_ticket_overrides(
+  p_caller_account_id uuid,
+  p_map_id text,
+  p_detective_density_ratio_override numeric,
+  p_ticket_counts_override jsonb,
+  p_round_scaling_ratio_override numeric default null
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller accounts%rowtype;
+  v_ratio numeric;
+  v_round_ratio numeric;
+begin
+  select * into v_caller from accounts a where a.id = p_caller_account_id;
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can change this setting';
+  end if;
+
+  -- same hard ceiling as the global default (0.20) -- an admin can't
+  -- misconfigure an individual map's detective density any more than
+  -- the global setting, for the same reason: too-dense games break the
+  -- intended play experience regardless of which map it happens on.
+  if p_detective_density_ratio_override is not null then
+    v_ratio := greatest(0.01, least(0.20, p_detective_density_ratio_override));
+  else
+    v_ratio := null;
+  end if;
+
+  -- same 0.3-3.0 ceiling as the global round-scaling default, per-map
+  if p_round_scaling_ratio_override is not null then
+    v_round_ratio := greatest(0.3, least(3.0, p_round_scaling_ratio_override));
+  else
+    v_round_ratio := null;
+  end if;
+
+  insert into map_settings (map_id, detective_density_ratio_override, ticket_counts_override, round_scaling_ratio_override, updated_at)
+  values (p_map_id, v_ratio, p_ticket_counts_override, v_round_ratio, now())
+  on conflict (map_id) do update set
+    detective_density_ratio_override = v_ratio,
+    ticket_counts_override = p_ticket_counts_override,
+    round_scaling_ratio_override = v_round_ratio,
+    updated_at = now();
 end;
 $$;

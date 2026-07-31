@@ -24,7 +24,7 @@ export default function EndedScreen({ map, match, mrxName, detectiveName, onNewG
         </h1>
         <p style={styles.subtitle}>
           {match.winner === "mrx"
-            ? `${mrxName()} evaded capture for 22 rounds.`
+            ? `${mrxName()} evaded capture for ${match.maxRounds} rounds.`
             : match.winner === "detectives"
             ? `A detective landed on ${mrxName()}'s station.`
             : "All players agreed to end the game early."}

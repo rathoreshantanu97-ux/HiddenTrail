@@ -20,13 +20,21 @@ export default function AdminPanel({ accountId, onBack }) {
   const [timingConfig, setTimingConfigState] = useState(null);
   const [timingDraft, setTimingDraft] = useState(null);
   const [featureDraft, setFeatureDraft] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [mapOverridesDraft, setMapOverridesDraft] = useState({});
+  const [mapOverridesBusy, setMapOverridesBusy] = useState({});
+  const [mapOverridesSaved, setMapOverridesSaved] = useState({});
+  const [gameConfigBusy, setGameConfigBusy] = useState(false);
+  const [gameConfigSaved, setGameConfigSaved] = useState("");
+  const [timingBusy, setTimingBusy] = useState(false);
+  const [timingSaved, setTimingSaved] = useState("");
+  const [featuresBusy, setFeaturesBusy] = useState(false);
+  const [featuresSaved, setFeaturesSaved] = useState("");
   const [err, setErr] = useState("");
-  const [savedNote, setSavedNote] = useState("");
+  const [publicToggleBusy, setPublicToggleBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [pub, accts, reqs, inactiveIds, cfg, timing, features] = await Promise.all([
+      const [pub, accts, reqs, inactiveIds, cfg, timing, features, mapOverrides] = await Promise.all([
         auth.getAppPublicStatus(),
         auth.listAccountsForAdmin(accountId),
         auth.listPendingRequestsForAdmin(accountId),
@@ -34,6 +42,7 @@ export default function AdminPanel({ accountId, onBack }) {
         auth.getPublicConfig(),
         auth.getTimingConfig(),
         auth.getFeatureConfig(),
+        auth.getMapOverrides(),
       ]);
       setIsPublicState(pub);
       setAccounts(accts);
@@ -44,6 +53,22 @@ export default function AdminPanel({ accountId, onBack }) {
       setTimingConfigState(timing);
       setTimingDraft(timing);
       setFeatureDraft(features);
+      // Seed each map's draft with its EXISTING override if one is set,
+      // otherwise leave it blank (meaning "use the computed default" --
+      // an empty input, not the computed value itself, since we want to
+      // visually distinguish "no override" from "override that happens
+      // to equal the default").
+      const seeded = {};
+      for (const m of MAP_LIST) {
+        const existing = mapOverrides[m.id];
+        seeded[m.id] = {
+          ratio: existing?.detectiveDensityRatioOverride != null ? String(existing.detectiveDensityRatioOverride) : "",
+          tickets: existing?.ticketCountsOverride
+            ? JSON.stringify(existing.ticketCountsOverride, null, 2)
+            : JSON.stringify(m.ticketCounts, null, 2),
+        };
+      }
+      setMapOverridesDraft(seeded);
     } catch (e) {
       setErr(e.message);
     }
@@ -54,7 +79,7 @@ export default function AdminPanel({ accountId, onBack }) {
   }, [refresh]);
 
   async function handleTogglePublic() {
-    setBusy(true);
+    setPublicToggleBusy(true);
     setErr("");
     try {
       await auth.setAppPublic({ callerAccountId: accountId, isPublic: !isPublic });
@@ -62,7 +87,7 @@ export default function AdminPanel({ accountId, onBack }) {
     } catch (e) {
       setErr(e.message);
     } finally {
-      setBusy(false);
+      setPublicToggleBusy(false);
     }
   }
 
@@ -97,9 +122,9 @@ export default function AdminPanel({ accountId, onBack }) {
   }
 
   async function handleSaveConfig() {
-    setBusy(true);
+    setGameConfigBusy(true);
     setErr("");
-    setSavedNote("");
+    setGameConfigSaved("");
     try {
       await auth.setAppConfig({
         callerAccountId: accountId,
@@ -108,19 +133,19 @@ export default function AdminPanel({ accountId, onBack }) {
         defaultInviteLimit: Number(configDraft.defaultInviteLimit),
       });
       await refresh();
-      setSavedNote("Saved.");
-      setTimeout(() => setSavedNote(""), 2000);
+      setGameConfigSaved("Saved.");
+      setTimeout(() => setGameConfigSaved(""), 2000);
     } catch (e) {
       setErr(e.message);
     } finally {
-      setBusy(false);
+      setGameConfigBusy(false);
     }
   }
 
   async function handleSaveTimingConfig() {
-    setBusy(true);
+    setTimingBusy(true);
     setErr("");
-    setSavedNote("");
+    setTimingSaved("");
     try {
       await auth.setTimingConfig({
         callerAccountId: accountId,
@@ -136,28 +161,66 @@ export default function AdminPanel({ accountId, onBack }) {
         },
       });
       await refresh();
-      setSavedNote("Saved.");
-      setTimeout(() => setSavedNote(""), 2000);
+      setTimingSaved("Saved.");
+      setTimeout(() => setTimingSaved(""), 2000);
     } catch (e) {
       setErr(e.message);
     } finally {
-      setBusy(false);
+      setTimingBusy(false);
     }
   }
 
   async function handleSaveFeatures() {
-    setBusy(true);
+    setFeaturesBusy(true);
     setErr("");
-    setSavedNote("");
+    setFeaturesSaved("");
     try {
-      await auth.setFeatureToggles({ callerAccountId: accountId, config: featureDraft });
+      await auth.setFeatureToggles({
+        callerAccountId: accountId,
+        config: { ...featureDraft, roundScalingRatio: Number(featureDraft.roundScalingRatio) },
+      });
       await refresh();
-      setSavedNote("Saved.");
-      setTimeout(() => setSavedNote(""), 2000);
+      setFeaturesSaved("Saved.");
+      setTimeout(() => setFeaturesSaved(""), 2000);
     } catch (e) {
       setErr(e.message);
     } finally {
-      setBusy(false);
+      setFeaturesBusy(false);
+    }
+  }
+
+  async function handleSaveMapOverride(mapId) {
+    setMapOverridesBusy((prev) => ({ ...prev, [mapId]: true }));
+    setErr("");
+    setMapOverridesSaved((prev) => ({ ...prev, [mapId]: "" }));
+    try {
+      const draft = mapOverridesDraft[mapId];
+      const ratioValue = draft.ratio.trim() === "" ? null : Number(draft.ratio);
+      let ticketsValue = null;
+      // An empty tickets field or one that exactly matches the computed
+      // default (re-serialized) is treated as "no override" -- only a
+      // genuinely edited JSON blob counts as an explicit override.
+      const computedDefault = JSON.stringify(MAP_LIST.find((m) => m.id === mapId)?.ticketCounts, null, 2);
+      if (draft.tickets.trim() !== "" && draft.tickets.trim() !== computedDefault) {
+        try {
+          ticketsValue = JSON.parse(draft.tickets);
+        } catch {
+          throw new Error("Ticket counts must be valid JSON (see the pre-filled example for the expected shape).");
+        }
+      }
+      await auth.setMapTicketOverrides({
+        callerAccountId: accountId,
+        mapId,
+        detectiveDensityRatioOverride: ratioValue,
+        ticketCountsOverride: ticketsValue,
+      });
+      await refresh();
+      setMapOverridesSaved((prev) => ({ ...prev, [mapId]: "Saved." }));
+      setTimeout(() => setMapOverridesSaved((prev) => ({ ...prev, [mapId]: "" })), 2000);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setMapOverridesBusy((prev) => ({ ...prev, [mapId]: false }));
     }
   }
 
@@ -183,7 +246,7 @@ export default function AdminPanel({ accountId, onBack }) {
                 : "Only registered accounts (approved or invite-code) can access the app."}
             </div>
           </div>
-          <button style={styles.toggleBtn} onClick={handleTogglePublic} disabled={busy}>
+          <button style={styles.toggleBtn} onClick={handleTogglePublic} disabled={publicToggleBusy}>
             Switch to {isPublic ? "Private" : "Public"}
           </button>
         </div>
@@ -208,6 +271,60 @@ export default function AdminPanel({ accountId, onBack }) {
             );
           })}
         </div>
+      </div>
+
+      <div style={styles.card}>
+        <div style={styles.cardTitle}>Per-map detective limits &amp; ticket counts</div>
+        <div style={styles.smallNote}>
+          Every map computes sensible defaults automatically from its own layout (detective density from station
+          count; ticket counts from actual travel distances). Leave a field blank to use the computed default —
+          only fill it in to explicitly override that ONE map. Detective density ratio is capped between 1% and 20%
+          regardless of what's entered.
+        </div>
+        {MAP_LIST.map((m) => {
+          const draft = mapOverridesDraft[m.id] || { ratio: "", tickets: "" };
+          const computedDetectiveMax = m.mapLimits?.maxDetectives;
+          return (
+            <div key={m.id} style={styles.mapOverrideBlock}>
+              <div style={styles.mapOverrideTitle}>
+                {m.label}{" "}
+                <span style={styles.smallNote}>(computed default max detectives: {computedDetectiveMax})</span>
+              </div>
+              <label style={styles.configLabel}>
+                Detective density ratio override (e.g. 0.08 for 8%) — blank uses the computed default
+                <input
+                  type="text"
+                  placeholder="blank = computed default"
+                  style={styles.configInput}
+                  value={draft.ratio}
+                  onChange={(e) =>
+                    setMapOverridesDraft((prev) => ({ ...prev, [m.id]: { ...prev[m.id], ratio: e.target.value } }))
+                  }
+                />
+              </label>
+              <label style={styles.configLabel}>
+                Ticket counts override (JSON) — edit to override, leave matching the pre-filled default to use it
+                <textarea
+                  style={styles.mapOverrideTextarea}
+                  value={draft.tickets}
+                  onChange={(e) =>
+                    setMapOverridesDraft((prev) => ({ ...prev, [m.id]: { ...prev[m.id], tickets: e.target.value } }))
+                  }
+                />
+              </label>
+              <button
+                style={styles.toggleBtn}
+                onClick={() => handleSaveMapOverride(m.id)}
+                disabled={mapOverridesBusy[m.id]}
+              >
+                {mapOverridesBusy[m.id] ? "Saving..." : `Save ${m.label} overrides`}
+              </button>
+              {mapOverridesSaved[m.id] && (
+                <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{mapOverridesSaved[m.id]}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div style={styles.card}>
@@ -248,10 +365,10 @@ export default function AdminPanel({ accountId, onBack }) {
           Turn timer minimum can never go below 15s, even if entered lower — this protects the inactivity-detection
           system from a conflicting configuration.
         </div>
-        <button style={styles.toggleBtn} onClick={handleSaveConfig} disabled={busy}>
-          {busy ? "Saving..." : "Save settings"}
+        <button style={styles.toggleBtn} onClick={handleSaveConfig} disabled={gameConfigBusy}>
+          {gameConfigBusy ? "Saving..." : "Save settings"}
         </button>
-        {savedNote && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{savedNote}</span>}
+        {gameConfigSaved && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{gameConfigSaved}</span>}
       </div>
 
       {timingDraft && (
@@ -341,10 +458,10 @@ export default function AdminPanel({ accountId, onBack }) {
             Nomination window can never go below 10s, poll window never below 15s, and presence grace period never
             below 5s — even if entered lower, to keep these flows genuinely usable.
           </div>
-          <button style={styles.toggleBtn} onClick={handleSaveTimingConfig} disabled={busy}>
-            {busy ? "Saving..." : "Save timing settings"}
+          <button style={styles.toggleBtn} onClick={handleSaveTimingConfig} disabled={timingBusy}>
+            {timingBusy ? "Saving..." : "Save timing settings"}
           </button>
-          {savedNote && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{savedNote}</span>}
+          {timingSaved && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{timingSaved}</span>}
         </div>
       )}
 
@@ -361,6 +478,7 @@ export default function AdminPanel({ accountId, onBack }) {
             { key: "endGameVote", label: "Vote to end game" },
             { key: "pauseResume", label: "Pause / resume" },
             { key: "redistributeRoles", label: "Host: redistribute roles" },
+            { key: "routeExplorer", label: "Route explorer (show reachable stations by mode)" },
           ].map(({ key, label }) => (
             <div key={key} style={styles.featureRow}>
               <span style={styles.featureLabel}>{label}</span>
@@ -383,10 +501,64 @@ export default function AdminPanel({ accountId, onBack }) {
               </label>
             </div>
           ))}
-          <button style={styles.toggleBtn} onClick={handleSaveFeatures} disabled={busy}>
-            {busy ? "Saving..." : "Save feature settings"}
+
+          <div style={styles.featureRow}>
+            <span style={styles.featureLabel}>Turn highlight style (default)</span>
+            <select
+              style={styles.configInput}
+              value={featureDraft.turnHighlightStyle}
+              onChange={(e) => setFeatureDraft({ ...featureDraft, turnHighlightStyle: e.target.value })}
+            >
+              <option value="ring">Ring</option>
+              <option value="blink">Blink</option>
+            </select>
+            <label style={styles.featureCheckboxLabel}>
+              <input
+                type="checkbox"
+                checked={featureDraft.turnHighlightStyleOverridable}
+                onChange={(e) => setFeatureDraft({ ...featureDraft, turnHighlightStyleOverridable: e.target.checked })}
+              />
+              Hosts can override per-room
+            </label>
+          </div>
+
+          <div style={styles.featureRow}>
+            <span style={styles.featureLabel}>Round-count scaling ratio (default 1.0, range 0.3–3.0)</span>
+            <input
+              type="number"
+              step="0.1"
+              min={0.3}
+              max={3.0}
+              style={styles.configInput}
+              value={featureDraft.roundScalingRatio}
+              onChange={(e) => setFeatureDraft({ ...featureDraft, roundScalingRatio: e.target.value })}
+            />
+            <label style={styles.featureCheckboxLabel}>
+              <input
+                type="checkbox"
+                checked={featureDraft.roundScalingOverridable}
+                onChange={(e) => setFeatureDraft({ ...featureDraft, roundScalingOverridable: e.target.checked })}
+              />
+              Hosts can override per-room
+            </label>
+          </div>
+
+          <div style={styles.featureRow}>
+            <span style={styles.featureLabel}>Allow hosts to create public rooms (listed in a live room browser)</span>
+            <label style={styles.featureCheckboxLabel}>
+              <input
+                type="checkbox"
+                checked={featureDraft.publicRoomsEnabled}
+                onChange={(e) => setFeatureDraft({ ...featureDraft, publicRoomsEnabled: e.target.checked })}
+              />
+              Enabled
+            </label>
+          </div>
+
+          <button style={styles.toggleBtn} onClick={handleSaveFeatures} disabled={featuresBusy}>
+            {featuresBusy ? "Saving..." : "Save feature settings"}
           </button>
-          {savedNote && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{savedNote}</span>}
+          {featuresSaved && <span style={{ marginLeft: 10, color: "#2a8", fontSize: 12.5 }}>{featuresSaved}</span>}
         </div>
       )}
 
@@ -485,6 +657,22 @@ const styles = {
   },
   smallNote: { fontSize: 12, color: "#888", marginBottom: 8 },
   mapRow: { display: "flex", flexDirection: "column", gap: 8 },
+  mapOverrideBlock: {
+    borderTop: "1px solid #f0f0f0",
+    paddingTop: 12,
+    marginTop: 12,
+  },
+  mapOverrideTitle: { fontWeight: 700, fontSize: 13.5, marginBottom: 8 },
+  mapOverrideTextarea: {
+    width: "100%",
+    minHeight: 90,
+    fontFamily: "monospace",
+    fontSize: 12,
+    padding: 8,
+    borderRadius: 6,
+    border: "1px solid #ddd",
+    boxSizing: "border-box",
+  },
   mapItem: {
     display: "flex",
     justifyContent: "space-between",

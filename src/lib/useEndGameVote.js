@@ -10,6 +10,7 @@ import * as api from "./supabaseApi.js";
 // ---------------------------------------------------------------------------
 export function useEndGameVote({ roomId, myPlayerId }) {
   const [proposal, setProposal] = useState(null);
+  const [statusList, setStatusList] = useState([]);
   const [err, setErr] = useState("");
 
   const refresh = useCallback(async () => {
@@ -17,6 +18,12 @@ export function useEndGameVote({ roomId, myPlayerId }) {
     try {
       const p = await api.getActiveEndGameProposal(roomId);
       setProposal(p);
+      if (p) {
+        const list = await api.getVoteStatusList({ roomId, voteTable: "end_game_votes", proposalId: p.proposalId });
+        setStatusList(list);
+      } else {
+        setStatusList([]);
+      }
     } catch (e) {
       console.error("Failed to fetch end-game proposal:", e);
     }
@@ -57,5 +64,5 @@ export function useEndGameVote({ roomId, myPlayerId }) {
 
   const iHaveVoted = proposal ? proposal.votedPlayerIds.includes(myPlayerId) : false;
 
-  return { proposal, err, propose, vote, iHaveVoted };
+  return { proposal, statusList, err, propose, vote, iHaveVoted };
 }

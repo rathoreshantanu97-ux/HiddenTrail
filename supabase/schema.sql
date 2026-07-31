@@ -49,6 +49,17 @@ create table if not exists rooms (
   end_game_vote_enabled_override boolean,
   pause_resume_enabled_override boolean,
   redistribute_roles_enabled_override boolean,
+  turn_highlight_style_override text,
+  route_explorer_enabled_override boolean,
+  round_scaling_ratio_override numeric,
+  -- Public/private rooms: private (default) is joinable only via room
+  -- code, never listed anywhere. Public rooms get an optional
+  -- host-chosen name and appear in the live room browser (Join Room
+  -- screen) -- but only while there's still an open seat AND the game
+  -- hasn't started yet (see get_public_rooms() in functions.sql for the
+  -- exact visibility rule).
+  is_public boolean not null default false,
+  room_name text,
   created_at timestamptz not null default now()
 );
 -- IMPORTANT: `create table if not exists` above does NOTHING if the table
@@ -64,6 +75,11 @@ alter table rooms add column if not exists takeover_reversal_enabled_override bo
 alter table rooms add column if not exists end_game_vote_enabled_override boolean;
 alter table rooms add column if not exists pause_resume_enabled_override boolean;
 alter table rooms add column if not exists redistribute_roles_enabled_override boolean;
+alter table rooms add column if not exists turn_highlight_style_override text;
+alter table rooms add column if not exists route_explorer_enabled_override boolean;
+alter table rooms add column if not exists round_scaling_ratio_override numeric;
+alter table rooms add column if not exists is_public boolean not null default false;
+alter table rooms add column if not exists room_name text;
 
 -- -----------------------------------------------------------------------------
 -- PLAYERS — one row per connected participant (detective slot or Mr. X).

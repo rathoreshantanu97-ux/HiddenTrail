@@ -8,6 +8,7 @@ import * as api from "./supabaseApi.js";
 // ---------------------------------------------------------------------------
 export function usePauseVote({ roomId, myPlayerId }) {
   const [proposal, setProposal] = useState(null);
+  const [statusList, setStatusList] = useState([]);
   const [err, setErr] = useState("");
 
   const refresh = useCallback(async () => {
@@ -15,6 +16,12 @@ export function usePauseVote({ roomId, myPlayerId }) {
     try {
       const p = await api.getActivePauseProposal(roomId);
       setProposal(p);
+      if (p) {
+        const list = await api.getVoteStatusList({ roomId, voteTable: "pause_votes", proposalId: p.proposalId });
+        setStatusList(list);
+      } else {
+        setStatusList([]);
+      }
     } catch (e) {
       console.error("Failed to fetch pause proposal:", e);
     }
@@ -55,5 +62,5 @@ export function usePauseVote({ roomId, myPlayerId }) {
 
   const iHaveVoted = proposal ? proposal.votedPlayerIds.includes(myPlayerId) : false;
 
-  return { proposal, err, propose, vote, iHaveVoted };
+  return { proposal, statusList, err, propose, vote, iHaveVoted };
 }

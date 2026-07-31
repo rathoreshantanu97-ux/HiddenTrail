@@ -2,6 +2,9 @@ import React, { useState, useEffect } from "react";
 import { isSupabaseConfigured } from "../lib/supabaseClient.js";
 import { useActiveMaps } from "../lib/useActiveMaps.js";
 import { computeSeatLayout, computeSeatLayoutSafe, seatLabel } from "../lib/seatLayout.js";
+import { useMapWithOverrides } from "../lib/useMapWithOverrides.js";
+import { usePublicRooms } from "../lib/usePublicRooms.js";
+import * as auth from "../lib/accessControlApi.js";
 
 // ---------------------------------------------------------------------------
 // LANDING SCREEN — the very first thing a player sees.
@@ -116,6 +119,17 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [seatErr, setSeatErr] = useState("");
+  const [featureConfig, setFeatureConfig] = useState(null);
+  const [featureOverrides, setFeatureOverrides] = useState({});
+  const [isPublic, setIsPublic] = useState(false);
+  const [roomName, setRoomName] = useState("");
+
+  useEffect(() => {
+    auth
+      .getFeatureConfig()
+      .then(setFeatureConfig)
+      .catch((e) => console.error("Failed to fetch feature config:", e));
+  }, []);
 
   // Same fix as SetupScreen.jsx: never default mapId to a hardcoded
   // string like "city" -- if that specific map is deactivated, nothing
@@ -128,6 +142,26 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
       setMapId(activeMaps[0].id);
     }
   }, [activeMaps, mapId]);
+
+  const rawSelectedMap = activeMaps.find((m) => m.id === mapId);
+  const selectedMap = useMapWithOverrides(rawSelectedMap) || rawSelectedMap;
+  // Fallback bounds while the map hasn't resolved yet (e.g. very first
+  // render, before the effect above picks one) -- matches the server's
+  // own fallback in create_room when no map data is available.
+  const selectedMapLimits = selectedMap?.mapLimits || { minDetectives: 3, maxDetectives: 20, minPlayers: 2, maxPlayers: 21 };
+
+  // If the selected map changes to one with a tighter ceiling than the
+  // currently chosen detective count, clamp it down automatically rather
+  // than silently letting the form hold a now-invalid value the server
+  // would reject.
+  useEffect(() => {
+    if (numDetectives > selectedMapLimits.maxDetectives) {
+      setNumDetectives(selectedMapLimits.maxDetectives);
+    } else if (numDetectives < selectedMapLimits.minDetectives) {
+      setNumDetectives(selectedMapLimits.minDetectives);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMapLimits.minDetectives, selectedMapLimits.maxDetectives]);
 
   // Compute the fair-split seat layout live as the host adjusts either
   // number. If the current combination is invalid (e.g. more
@@ -171,10 +205,24 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
       setErr(seatErr);
       return;
     }
+    if (isPublic && !roomName.trim()) {
+      setErr("Public rooms need a name so others can find them.");
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
-      await onCreate({ displayName: displayName.trim(), mapId, numDetectives, totalPlayers, hostRole });
+      await onCreate({
+        displayName: displayName.trim(),
+        mapId,
+        numDetectives,
+        totalPlayers,
+        hostRole,
+        mapStationCount: selectedMap ? Object.keys(selectedMap.stations).length : null,
+        featureOverrides,
+        isPublic,
+        roomName: isPublic ? roomName.trim() : null,
+      });
     } catch (e) {
       setErr(e.message || "Failed to create room.");
       setBusy(false);
@@ -206,14 +254,57 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
         ))}
       </select>
 
-      <label style={styles.label}>Number of detectives (3–20)</label>
+      {featureConfig?.publicRoomsEnabled && (
+        <>
+          <label style={styles.label}>Room visibility</label>
+          <div style={styles.rowCenter}>
+            <button
+              style={{ ...styles.pill, ...(!isPublic ? styles.pillActive : {}) }}
+              onClick={() => setIsPublic(false)}
+              type="button"
+            >
+              Private (code only)
+            </button>
+            <button
+              style={{ ...styles.pill, ...(isPublic ? styles.pillActive : {}) }}
+              onClick={() => setIsPublic(true)}
+              type="button"
+            >
+              Public (listed)
+            </button>
+          </div>
+          {isPublic && (
+            <>
+              <label style={styles.label}>Room name (shown to others browsing public rooms)</label>
+              <input
+                style={styles.textInput}
+                value={roomName}
+                onChange={(e) => setRoomName(e.target.value)}
+                placeholder="e.g. Friday Night Hunt"
+                maxLength={40}
+              />
+            </>
+          )}
+        </>
+      )}
+
+      <label style={styles.label}>
+        Number of detectives ({selectedMapLimits.minDetectives}–{selectedMapLimits.maxDetectives})
+      </label>
       <input
         type="number"
-        min={3}
-        max={20}
+        min={selectedMapLimits.minDetectives}
+        max={selectedMapLimits.maxDetectives}
         style={styles.numberInput}
         value={numDetectives}
-        onChange={(e) => setNumDetectives(Math.max(3, Math.min(20, parseInt(e.target.value, 10) || 3)))}
+        onChange={(e) =>
+          setNumDetectives(
+            Math.max(
+              selectedMapLimits.minDetectives,
+              Math.min(selectedMapLimits.maxDetectives, parseInt(e.target.value, 10) || selectedMapLimits.minDetectives)
+            )
+          )
+        }
       />
 
       <label style={styles.label}>Total players (including you)</label>
@@ -252,11 +343,138 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
 
       <p style={styles.hostNote}>Other players will pick from the remaining seats when they join.</p>
 
+      {featureConfig && (
+        <div style={styles.featureOverridesBox}>
+          <div style={styles.featureOverridesTitle}>Game options for this room</div>
+          {featureConfig.takeoversOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Allow takeovers for inactive players</span>
+              <input
+                type="checkbox"
+                checked={featureOverrides.takeovers ?? featureConfig.takeoversEnabled}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, takeovers: e.target.checked }))}
+              />
+            </label>
+          )}
+          {featureConfig.takeoverReversalOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Allow takeover reversal votes</span>
+              <input
+                type="checkbox"
+                checked={featureOverrides.takeoverReversal ?? featureConfig.takeoverReversalEnabled}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, takeoverReversal: e.target.checked }))}
+              />
+            </label>
+          )}
+          {featureConfig.endGameVoteOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Allow vote-to-end-game</span>
+              <input
+                type="checkbox"
+                checked={featureOverrides.endGameVote ?? featureConfig.endGameVoteEnabled}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, endGameVote: e.target.checked }))}
+              />
+            </label>
+          )}
+          {featureConfig.pauseResumeOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Allow pause / resume</span>
+              <input
+                type="checkbox"
+                checked={featureOverrides.pauseResume ?? featureConfig.pauseResumeEnabled}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, pauseResume: e.target.checked }))}
+              />
+            </label>
+          )}
+          {featureConfig.redistributeRolesOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Allow host to redistribute roles mid-game</span>
+              <input
+                type="checkbox"
+                checked={featureOverrides.redistributeRoles ?? featureConfig.redistributeRolesEnabled}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, redistributeRoles: e.target.checked }))}
+              />
+            </label>
+          )}
+          {featureConfig.routeExplorerOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Allow route explorer</span>
+              <input
+                type="checkbox"
+                checked={featureOverrides.routeExplorer ?? featureConfig.routeExplorerEnabled}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, routeExplorer: e.target.checked }))}
+              />
+            </label>
+          )}
+          {featureConfig.turnHighlightStyleOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Turn highlight style</span>
+              <select
+                style={styles.featureOverrideSelect}
+                value={featureOverrides.turnHighlightStyle ?? featureConfig.turnHighlightStyle}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, turnHighlightStyle: e.target.value }))}
+              >
+                <option value="ring">Ring</option>
+                <option value="blink">Blink</option>
+              </select>
+            </label>
+          )}
+          {featureConfig.roundScalingOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Game length (rounds) — {selectedMap?.roundsAndReveal?.totalRounds || "?"} rounds at current setting</span>
+              <select
+                style={styles.featureOverrideSelect}
+                value={featureOverrides.roundScalingRatio ?? 1.0}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, roundScalingRatio: Number(e.target.value) }))}
+              >
+                <option value={0.6}>Shorter</option>
+                <option value={1.0}>Standard</option>
+                <option value={1.4}>Longer</option>
+              </select>
+            </label>
+          )}
+        </div>
+      )}
+
       {err && <div style={styles.errText}>{err}</div>}
 
       <button style={styles.primaryBtn} onClick={handleSubmit} disabled={busy || !!seatErr}>
         {busy ? "Creating..." : "Create Room"}
       </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PUBLIC ROOMS BROWSER — live-updating list of joinable public rooms,
+// shown inline in the Join Room form as an alternative to typing a code.
+// Each entry shows the host-chosen name and how full it is; clicking one
+// runs the same lookup flow as typing its code manually. The list itself
+// updates live (see usePublicRooms) as rooms fill up or start, so a room
+// that becomes unjoinable mid-browse simply disappears rather than
+// leaving a stale, clickable-but-broken entry.
+// ---------------------------------------------------------------------------
+function PublicRoomsBrowser({ onPickRoom }) {
+  const { rooms, loading } = usePublicRooms();
+
+  if (loading) {
+    return <div style={styles.publicRoomsNote}>Checking for public rooms...</div>;
+  }
+  if (rooms.length === 0) {
+    return <div style={styles.publicRoomsNote}>No public rooms are open right now.</div>;
+  }
+
+  return (
+    <div style={styles.publicRoomsBox}>
+      <div style={styles.publicRoomsTitle}>Or join a public room</div>
+      {rooms.map((r) => (
+        <button key={r.roomId} style={styles.publicRoomRow} onClick={() => onPickRoom(r.roomCode)}>
+          <span style={styles.publicRoomName}>{r.roomName}</span>
+          <span style={styles.publicRoomFill}>
+            {r.joinedCount} / {r.totalPlayers} joined
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -320,6 +538,21 @@ function JoinRoomForm({ onJoin, accountDisplayName }) {
         <button style={styles.primaryBtn} onClick={handleLookup} disabled={busy}>
           {busy ? "Looking up..." : "Find Room"}
         </button>
+        <PublicRoomsBrowser
+          onPickRoom={async (code) => {
+            setRoomCode(code);
+            setBusy(true);
+            setErr("");
+            try {
+              const info = await onJoin.lookup(code);
+              setRoomInfo(info);
+            } catch (e) {
+              setErr(e.message || "Room not found.");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
       </div>
     );
   }
@@ -467,6 +700,41 @@ const styles = {
   },
   pillActive: { borderColor: "#111", background: "#111", color: "#fff" },
   hostNote: { fontSize: 12.5, color: "#888", marginTop: 4 },
+  featureOverridesBox: {
+    background: "#f4f2ec",
+    borderRadius: 10,
+    padding: "12px 14px",
+    marginTop: 10,
+    textAlign: "left",
+  },
+  featureOverridesTitle: { fontSize: 12.5, fontWeight: 700, color: "#555", marginBottom: 8 },
+  featureOverrideRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: 12.5,
+    padding: "5px 0",
+  },
+  featureOverrideSelect: { padding: "3px 6px", borderRadius: 6, border: "1px solid #ddd", fontSize: 12 },
+  publicRoomsNote: { fontSize: 12.5, color: "#999", marginTop: 14, textAlign: "center" },
+  publicRoomsBox: { marginTop: 16, textAlign: "left" },
+  publicRoomsTitle: { fontSize: 12.5, fontWeight: 700, color: "#555", marginBottom: 8 },
+  publicRoomRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
+    background: "#fafafa",
+    border: "1.5px solid #ddd",
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 13,
+    cursor: "pointer",
+    marginBottom: 6,
+    fontFamily: "inherit",
+  },
+  publicRoomName: { fontWeight: 600 },
+  publicRoomFill: { color: "#888", fontSize: 12 },
   errText: { color: "#c0392b", fontSize: 13, marginTop: 4 },
   primaryBtn: {
     background: "#111",

@@ -27,8 +27,17 @@ import { supabase } from "./supabaseClient.js";
 // same as "actually disconnected," rather than sitting in a false
 // "still here" status indefinitely.
 // ---------------------------------------------------------------------------
-export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePeriodSeconds = 25 }) {
+export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePeriodSeconds = 25, myExploreMode = null }) {
   const [onlinePlayerIds, setOnlinePlayerIds] = useState(new Set());
+  // playerId -> their full tracked presence payload (displayName, role,
+  // and now exploreMode) -- exposed so consumers (like the detective
+  // huddle panel) can read what a teammate is CURRENTLY doing, not just
+  // whether they're online. "Currently" is enforced by construction: a
+  // stale value can never linger here, since re-tracking (see the
+  // exploreMode effect below) always overwrites the whole payload, and a
+  // teammate clearing their own selection re-tracks with exploreMode:
+  // null, which immediately propagates via the same "sync" event.
+  const [presenceState, setPresenceState] = useState({});
   // playerId -> timestamp (ms) when they were first observed as gone.
   // Used to compute the grace-period-adjusted "inactive" set below.
   const droppedAtRef = useRef(new Map());
@@ -48,6 +57,15 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
       const state = channel.presenceState();
       const nowOnline = new Set(Object.keys(state));
       setOnlinePlayerIds(nowOnline);
+      // presenceState() gives {key: [{...payload}]} -- Supabase Presence
+      // allows multiple simultaneous "instances" per key in theory (e.g.
+      // multiple tabs), but this app only ever tracks one payload per
+      // player, so the first entry is always the right one to read.
+      const flattened = {};
+      for (const [key, entries] of Object.entries(state)) {
+        flattened[key] = entries[0] || {};
+      }
+      setPresenceState(flattened);
       for (const id of nowOnline) {
         droppedAtRef.current.delete(id);
       }
@@ -61,7 +79,7 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
 
     channel.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await channel.track({ displayName: myDisplayName, role: myRole });
+        await channel.track({ displayName: myDisplayName, role: myRole, exploreMode: myExploreMode });
       }
     });
 
@@ -69,7 +87,17 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, myPlayerId, myDisplayName, myRole]);
+
+  // Re-track whenever OUR OWN explore mode changes, so teammates see it
+  // update live -- this is a separate, lighter-weight effect from the
+  // main channel-setup one above (which only re-runs on room/player/role
+  // changes, not on every explore-mode click).
+  useEffect(() => {
+    if (!channelRef.current) return;
+    channelRef.current.track({ displayName: myDisplayName, role: myRole, exploreMode: myExploreMode }).catch(() => {});
+  }, [myExploreMode, myDisplayName, myRole]);
 
   useEffect(() => {
     const id = setInterval(() => forceTick((t) => t + 1), 1000);
@@ -88,7 +116,7 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
           backgroundTimeoutRef.current = null;
         }
         if (channelRef.current) {
-          channelRef.current.track({ displayName: myDisplayName, role: myRole }).catch(() => {});
+          channelRef.current.track({ displayName: myDisplayName, role: myRole, exploreMode: myExploreMode }).catch(() => {});
         }
       }
     }
@@ -97,6 +125,7 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (backgroundTimeoutRef.current) clearTimeout(backgroundTimeoutRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myDisplayName, myRole]);
 
   const isInactive = useCallback(
@@ -109,5 +138,5 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
     [onlinePlayerIds, gracePeriodSeconds]
   );
 
-  return { onlinePlayerIds, isInactive };
+  return { onlinePlayerIds, presenceState, isInactive };
 }

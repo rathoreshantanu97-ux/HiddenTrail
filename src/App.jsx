@@ -14,12 +14,15 @@ import ChatPanel from "./components/ChatPanel.jsx";
 import EndGameVote from "./components/EndGameVote.jsx";
 import EndGameEarlyButton from "./components/EndGameEarlyButton.jsx";
 import PauseVote from "./components/PauseVote.jsx";
+import TakeoverReversalVote from "./components/TakeoverReversalVote.jsx";
+import RedistributeRolesVote from "./components/RedistributeRolesVote.jsx";
 import PausedScreen from "./components/PausedScreen.jsx";
 import AdminPanel from "./components/AdminPanel.jsx";
 import TakeoverPanel from "./components/TakeoverPanel.jsx";
 import SpectatorScreen from "./components/SpectatorScreen.jsx";
 import { useRoomStatus } from "./lib/useRoomStatus.js";
 import { usePresence } from "./lib/usePresence.js";
+import { useDelayedEndedTransition } from "./lib/useDelayedEndedTransition.js";
 import { currentActor } from "./lib/gameEngine.js";
 
 // ---------------------------------------------------------------------------
@@ -110,6 +113,19 @@ export default function App({ account, onLogout }) {
 
   // ---- Pass-and-play specific state ----
   const localStore = useLocalGameStore();
+  const { showEndedScreen: ppShowEndedScreen } = useDelayedEndedTransition(localStore.match);
+
+  // If a pass-and-play match was restored from localStorage on mount
+  // (see localGameStore.js), switch appMode to reflect it -- otherwise
+  // the restored match sits in the store but the app still shows the
+  // landing screen, since nothing else would ever flip appMode on its
+  // own just because match data happens to exist.
+  useEffect(() => {
+    if (localStore.match && appMode === "landing") {
+      setAppMode("passandplay");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [passAndPlayMapId, setPassAndPlayMapId] = useState("city");
   const [handoffFor, setHandoffFor] = useState(null);
 
@@ -139,13 +155,17 @@ export default function App({ account, onLogout }) {
     myPlayerId: mpPlayerId,
     myRole: mpRole,
   });
+  const { showEndedScreen: mpShowEndedScreen } = useDelayedEndedTransition(supabaseStore.match);
 
-  const { onlinePlayerIds, isInactive } = usePresence({
+  const [mpExploreMode, setMpExploreMode] = useState(null); // this client's own current route-explorer selection, reported up from GameBoard so it can be broadcast via Presence
+
+  const { onlinePlayerIds, isInactive, presenceState } = usePresence({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     myPlayerId: mpPlayerId,
     myDisplayName: mpDisplayName,
     myRole: mpRole,
     gracePeriodSeconds: 25, // TODO: read from admin config once wired through App-level state
+    myExploreMode: mpExploreMode,
   });
 
   const [mpPlayersList, setMpPlayersList] = useState([]);
@@ -203,7 +223,11 @@ export default function App({ account, onLogout }) {
       try {
         const result = await api.checkPlayerStillInRoom({ roomId: mpRoomId, playerId: mpPlayerId });
         if (!cancelled) {
-          setMpSpectatorInfo(result.stillInRoom ? null : { replacedRole: result.replacedRole });
+          setMpSpectatorInfo(
+            result.stillInRoom
+              ? null
+              : { replacedRole: result.replacedRole, takeoverEventId: result.takeoverEventId }
+          );
         }
       } catch (e) {
         console.error("Failed to check player-still-in-room status:", e);
@@ -295,13 +319,17 @@ export default function App({ account, onLogout }) {
     setAppMode("passandplay");
   }
 
-  async function handleCreateRoom({ displayName, mapId, numDetectives, totalPlayers, hostRole }) {
+  async function handleCreateRoom({ displayName, mapId, numDetectives, totalPlayers, hostRole, mapStationCount, featureOverrides, isPublic, roomName }) {
     const { roomId, roomCode, hostPlayerId } = await api.createRoom({
       mapId,
       numDetectives,
       totalPlayers,
       hostDisplayName: displayName,
       hostRole,
+      mapStationCount,
+      featureOverrides,
+      isPublic,
+      roomName,
     });
     setMpRoomId(roomId);
     setMpRoomCode(roomCode);
@@ -445,9 +473,26 @@ export default function App({ account, onLogout }) {
       return <SetupScreen onStart={handleStartPassAndPlay} onBack={() => setAppMode("landing")} />;
     }
     if (match.phase === "handoff") {
-      return <HandoffScreen handoffFor={handoffFor} round={match.round} onReady={handleReadyForTurn} />;
+      return <HandoffScreen handoffFor={handoffFor} round={match.round} maxRounds={match.maxRounds} onReady={handleReadyForTurn} />;
     }
     if (match.phase === "ended") {
+      if (!ppShowEndedScreen) {
+        // Deliberate pause: keep showing the board (with its collision
+        // effect) for a moment after a capture, rather than jumping
+        // straight to results -- see useDelayedEndedTransition.
+        return (
+          <GameBoard
+            map={map}
+            match={match}
+            myRole={null}
+            mrxName={mrxName}
+            detectiveName={detectiveName}
+            onDetectiveMove={() => {}}
+            onMrXMove={() => {}}
+            onActivateDoubleMove={() => {}}
+          />
+        );
+      }
       return (
         <EndedScreen
           map={map}
@@ -542,6 +587,21 @@ export default function App({ account, onLogout }) {
     }
 
     if (match.phase === "ended") {
+      if (!mpShowEndedScreen) {
+        return (
+          <GameBoard
+            map={map}
+            match={match}
+            myRole={mpSpectatorInfo ? "__spectator__" : mpRole}
+            roomId={mpRoomId}
+            mrxName={mrxName}
+            detectiveName={detectiveName}
+            onDetectiveMove={() => {}}
+            onMrXMove={() => {}}
+            onActivateDoubleMove={() => {}}
+          />
+        );
+      }
       return (
         <EndedScreen
           map={map}
@@ -557,6 +617,33 @@ export default function App({ account, onLogout }) {
       return <PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} />;
     }
 
+    // Derive the huddle-panel data from Presence: every OTHER detective
+    // player currently broadcasting a non-null exploreMode. Looked up
+    // against mpPlayersList (role -> player) and match.detectives (seat
+    // -> color/position), so the panel shows real names/colors already
+    // used elsewhere on this exact board, not a separate palette.
+    const teammatesExploring = [];
+    let anyDetectiveExploring = false;
+    for (const p of mpPlayersList) {
+      if (p.role === "mrx" || p.id === mpPlayerId) continue; // skip Mr.X's own seat and myself
+      const payload = presenceState[p.id];
+      if (!payload || !payload.exploreMode) continue;
+      // a multi-detective seat's role is comma-joined (e.g. "d0,d1") --
+      // use the FIRST detective in their seat for color/position, since
+      // that's simplest and still gives a meaningful visual anchor
+      const firstSeat = p.role.split(",")[0];
+      const theirDetective = match.detectives.find((d) => `d${d.id}` === firstSeat);
+      if (!theirDetective) continue;
+      anyDetectiveExploring = true;
+      teammatesExploring.push({
+        playerId: p.id,
+        displayName: p.display_name,
+        color: theirDetective.color,
+        exploreMode: payload.exploreMode,
+        detectiveSeat: firstSeat,
+      });
+    }
+
     // phase === "playing" -- multiplayer never shows a handoff screen;
     // each player has their own device and just waits for their turn
     // (GameBoard's "Waiting for X..." note covers that).
@@ -565,8 +652,12 @@ export default function App({ account, onLogout }) {
         map={map}
         match={match}
         myRole={mpSpectatorInfo ? "__spectator__" : mpRole}
+        roomId={mpRoomId}
         mrxName={mrxName}
         detectiveName={detectiveName}
+        onExploreModeChange={setMpExploreMode}
+        teammatesExploring={teammatesExploring}
+        anyDetectiveExploring={anyDetectiveExploring}
         onDetectiveMove={(detId, to, mode) => supabaseStore.submitDetectiveMove(map, detId, to, mode)}
         onMrXMove={(to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => supabaseStore.activateDoubleMove()}
@@ -575,6 +666,24 @@ export default function App({ account, onLogout }) {
             <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
               <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
+              {/* Single instance handles both roles: shows a "request my
+                  seat back" button when completedTakeoverEventId is
+                  known (only true for the replaced player themself, via
+                  mpSpectatorInfo), and renders the vote MODAL for
+                  everyone once a proposal actually exists, regardless of
+                  whether this specific client has an event id. */}
+              <TakeoverReversalVote
+                roomId={mpRoomId}
+                myPlayerId={mpPlayerId}
+                completedTakeoverEventId={mpSpectatorInfo?.takeoverEventId || null}
+              />
+              <RedistributeRolesVote
+                roomId={mpRoomId}
+                myPlayerId={mpPlayerId}
+                isHost={mpIsHost}
+                numDetectives={mpNumDetectives}
+                totalPlayers={mpTotalPlayers}
+              />
             </div>
             <ChatPanel roomId={mpRoomId} myPlayerId={mpPlayerId} myRole={mpRole} myDisplayName={mpDisplayName} />
             <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={mpIsHost} />

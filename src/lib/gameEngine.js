@@ -68,6 +68,10 @@ export function formatLogEntry(entry, theme) {
       return `${mrxName()} moved onto a detective's station! Detectives win.`;
     case "double_move_activated":
       return `${mrxName()} played a 2x (double move) card.`;
+    case "turn_passed": {
+      const label = payload.actor === "mrx" ? mrxName() : detectiveName(parseInt(String(payload.actor).slice(1), 10));
+      return `${label} had no legal moves and passed their turn.`;
+    }
     case "round_limit_reached":
       return `Round limit reached \u2014 ${mrxName()} wins by evasion!`;
     case "ended_by_vote":
@@ -196,6 +200,23 @@ export function advanceTurn(match) {
     };
   }
   return next;
+}
+
+// applyPassTurn — fixes a real, severe bug: a player whose relevant
+// tickets are all exhausted (so validMovesFor returns an empty array
+// for their current position) had NO way to skip their turn at all,
+// permanently soft-locking the game for everyone. This applies no
+// position/ticket change (there's nothing legal to do), just logs the
+// pass and advances the turn exactly like a real move would. The
+// CALLER is responsible for verifying validMovesFor is genuinely empty
+// before offering this -- it's not a general "give up your turn"
+// button, only a real last-resort when no legal move exists.
+export function applyPassTurn(match, actorLabel) {
+  const next = {
+    ...match,
+    log: [...match.log, { kind: "turn_passed", payload: { actor: actorLabel } }],
+  };
+  return advanceTurn(next);
 }
 
 // Applies a detective's move. `mode` must already be a validated legal

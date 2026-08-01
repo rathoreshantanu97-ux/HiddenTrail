@@ -1,21 +1,29 @@
 import React from "react";
 
 // ---------------------------------------------------------------------------
-// MOVE POPUP — a small, focused popup anchored just above the clicked
-// station on the map, replacing the old sidebar ticket-chooser panels.
-// Positioned in actual screen pixels (passed in by the caller, which has
-// already done the SVG-viewBox -> screen-pixel translation, accounting
-// for the current zoom/pan state -- see GameBoard.jsx's
-// svgPointToScreenPoint), so it stays visually anchored to the right
-// station regardless of zoom level or how far the map has been panned.
+// MOVE POPUP — a small, focused popup anchored just above (or below/left/
+// right, per openDirection) the clicked station on the map, replacing
+// the old sidebar ticket-chooser panels. Positioned in actual screen
+// pixels (passed in by the caller, which has already done the
+// SVG-viewBox -> screen-pixel translation, accounting for the current
+// zoom/pan state -- see GameBoard.jsx's svgPointToScreenPoint), so it
+// stays visually anchored to the right station regardless of zoom level
+// or how far the map has been panned.
 //
-// Deliberately closes ONLY via the explicit ✕ button, never by clicking
-// elsewhere on the map -- per project decision, to avoid an accidental
-// dismissal mid-decision.
+// openDirection ("above" | "below" | "left" | "right" | "center") is
+// computed by the caller against the REAL viewport size (not any
+// assumed dimension) -- this is the actual fix for a real bug: a
+// station near the top of the screen used to always get its popup
+// pushed partially off-screen (since it always opened upward, with no
+// awareness of whether there was room), leaving the confirm/cancel
+// buttons unreachable -- especially bad since this popup deliberately
+// closes ONLY via its own explicit ✕ button, never by clicking
+// elsewhere, so a fully-offscreen popup was a genuine dead end.
 // ---------------------------------------------------------------------------
-export default function MovePopup({ x, y, title, options, onClose, fallback = false }) {
+export default function MovePopup({ x, y, title, options, onClose, fallback = false, openDirection = "above" }) {
+  const dir = fallback ? "center" : openDirection;
   return (
-    <div style={{ ...styles.popup, left: x, top: y, transform: fallback ? "translate(-50%, -50%)" : styles.popup.transform }}>
+    <div style={{ ...styles.popup, left: x, top: y, transform: TRANSFORM_FOR_DIR[dir] }}>
       <button style={styles.closeBtn} onClick={onClose} aria-label="Cancel">
         ✕
       </button>
@@ -27,16 +35,70 @@ export default function MovePopup({ x, y, title, options, onClose, fallback = fa
           </button>
         ))}
       </div>
-      {!fallback && <div style={styles.pointer} />}
+      {dir !== "center" && <div style={POINTER_FOR_DIR[dir]} />}
     </div>
   );
 }
 
+const TRANSFORM_FOR_DIR = {
+  above: "translate(-50%, -100%)",
+  below: "translate(-50%, 0%)",
+  left: "translate(-100%, -50%)",
+  right: "translate(0%, -50%)",
+  center: "translate(-50%, -50%)",
+};
+
+const POINTER_FOR_DIR = {
+  above: {
+    position: "absolute",
+    bottom: -6,
+    left: "50%",
+    transform: "translateX(-50%)",
+    width: 0,
+    height: 0,
+    borderLeft: "6px solid transparent",
+    borderRight: "6px solid transparent",
+    borderTop: "6px solid #fff",
+  },
+  below: {
+    position: "absolute",
+    top: -6,
+    left: "50%",
+    transform: "translateX(-50%)",
+    width: 0,
+    height: 0,
+    borderLeft: "6px solid transparent",
+    borderRight: "6px solid transparent",
+    borderBottom: "6px solid #fff",
+  },
+  left: {
+    position: "absolute",
+    right: -6,
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: 0,
+    height: 0,
+    borderTop: "6px solid transparent",
+    borderBottom: "6px solid transparent",
+    borderLeft: "6px solid #fff",
+  },
+  right: {
+    position: "absolute",
+    left: -6,
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: 0,
+    height: 0,
+    borderTop: "6px solid transparent",
+    borderBottom: "6px solid transparent",
+    borderRight: "6px solid #fff",
+  },
+};
+
 const styles = {
   popup: {
     position: "fixed",
-    transform: "translate(-50%, -100%)",
-    marginTop: -10, // small gap above the station itself
+    marginTop: 0,
     background: "#fff",
     borderRadius: 12,
     padding: "10px 12px",
@@ -69,16 +131,5 @@ const styles = {
     fontSize: 12.5,
     fontWeight: 600,
     cursor: "pointer",
-  },
-  pointer: {
-    position: "absolute",
-    bottom: -6,
-    left: "50%",
-    transform: "translateX(-50%)",
-    width: 0,
-    height: 0,
-    borderLeft: "6px solid transparent",
-    borderRight: "6px solid transparent",
-    borderTop: "6px solid #fff",
   },
 };

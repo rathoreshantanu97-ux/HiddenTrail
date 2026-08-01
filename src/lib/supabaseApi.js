@@ -209,6 +209,10 @@ export async function updateRoomSettings({ roomId, callerPlayerId, mapId, numDet
   });
 }
 
+export async function passTurn({ roomId, callerPlayerId, actor }) {
+  await callRpc("pass_turn", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_actor: actor });
+}
+
 export async function leaveRoomPermanently({ roomId, playerId }) {
   await callRpc("leave_room_permanently", { p_room_id: roomId, p_player_id: playerId });
 }

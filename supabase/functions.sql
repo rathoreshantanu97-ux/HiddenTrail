@@ -3228,3 +3228,61 @@ begin
 end;
 $$;
 grant execute on function update_room_settings(uuid, uuid, text, int, int, int, int) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- pass_turn -- fixes a real, severe bug: a player whose relevant tickets
+-- are all exhausted (so they have no legal move from their current
+-- station) had NO way to skip their turn at all, permanently soft-
+-- locking the game for everyone. The server does NOT independently
+-- verify graph-legality (it never has -- the map's connectivity data
+-- only ever lives client-side, the same architectural fact already
+-- established for regular move submissions and the turn-timer's
+-- auto-move feature); it trusts the calling client's own determination
+-- that no legal move exists, exactly the same trust boundary already in
+-- place for every other move submission (the server checks tickets/
+-- turn-order/occupancy, not full graph-legality). This is a turn-
+-- advancing action, not a ticket-consuming one -- no tickets change.
+-- -----------------------------------------------------------------------------
+drop function if exists pass_turn(uuid, uuid, text);
+create or replace function pass_turn(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_actor text
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_gs game_state_public%rowtype;
+  v_current_actor text;
+begin
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  select * into v_gs from game_state_public where room_id = p_room_id for update;
+  if v_gs.room_id is null then raise exception 'Game not started'; end if;
+  if v_gs.phase <> 'playing' then raise exception 'Game is not in progress'; end if;
+
+  v_current_actor := v_gs.turn_order[v_gs.turn_idx + 1]; -- 1-indexed in postgres arrays
+  if v_current_actor <> p_actor then
+    raise exception 'It is not this actor''s turn';
+  end if;
+
+  if p_actor = 'mrx' then
+    if v_caller.role <> 'mrx' then raise exception 'You do not control Mr. X'; end if;
+  else
+    if not (p_actor = any(string_to_array(v_caller.role, ','))) then
+      raise exception 'You do not control this detective';
+    end if;
+  end if;
+
+  update game_state_public
+  set log = log || jsonb_build_array(jsonb_build_object('kind', 'turn_passed', 'payload', jsonb_build_object('actor', p_actor)))
+  where room_id = p_room_id;
+
+  perform advance_turn_internal(p_room_id);
+end;
+$$;
+grant execute on function pass_turn(uuid, uuid, text) to anon, authenticated;

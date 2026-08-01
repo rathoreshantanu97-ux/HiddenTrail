@@ -2,6 +2,7 @@ import { deriveMap } from "./mapSchema.js";
 import { cityMap } from "./city.js";
 import { bengaluruMap } from "./bengaluru.js";
 import { bengaluruNewMap } from "./bengaluruNew.js";
+import { nammaBengaluruMap } from "./nammaBengaluru.js";
 import { westerosMap } from "./westeros.js";
 
 // ---------------------------------------------------------------------------
@@ -15,9 +16,11 @@ import { westerosMap } from "./westeros.js";
 // "bengaluru-new" is a from-scratch 100-station redesign, kept alongside
 // the original "bengaluru" map per explicit instruction -- both are
 // active so they can be compared/verified before deciding whether to
-// remove the original.
+// remove the original. "namma-bengaluru" is a further redesign built
+// directly from a detailed, hand-authored 100-node schematic
+// specification, kept alongside both earlier maps for the same reason.
 // ---------------------------------------------------------------------------
-const RAW_MAPS = [cityMap, bengaluruMap, bengaluruNewMap, westerosMap];
+const RAW_MAPS = [cityMap, bengaluruMap, bengaluruNewMap, nammaBengaluruMap, westerosMap];
 
 export const MAPS = Object.fromEntries(
   RAW_MAPS.map((cfg) => [cfg.id, deriveMap(cfg)])

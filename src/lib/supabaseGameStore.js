@@ -138,6 +138,20 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
     [roomId, myPlayerId, refreshMatch]
   );
 
+  const passTurn = useCallback(
+    async (actor) => {
+      if (!roomId || !myPlayerId) return;
+      try {
+        await api.passTurn({ roomId, callerPlayerId: myPlayerId, actor });
+        await refreshMatch();
+      } catch (e) {
+        setError(e.message);
+        throw e;
+      }
+    },
+    [roomId, myPlayerId, refreshMatch]
+  );
+
   const submitMrXMove = useCallback(
     async (_map, to, edgeMode, ticketUsed) => {
       if (!roomId || !myPlayerId) return;
@@ -181,6 +195,7 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
     submitDetectiveMove,
     submitMrXMove,
     activateDoubleMove,
+    passTurn,
     beginTurnScreen,
     resetToSetup,
   };

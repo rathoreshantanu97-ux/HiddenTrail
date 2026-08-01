@@ -191,6 +191,25 @@ export default function MapBackground({ map }) {
     );
   }
 
+  if (bg.kind === "citymap" && bg.theme === "namma-bengaluru") {
+    // Namma Bengaluru: built from a detailed hand-authored spec (non-
+    // square 126x100 canvas). Clean, functional base for now -- richer
+    // graphics (lakes, gardens, streets-vs-highways styling) are a
+    // planned follow-up polish pass, kept deliberately simple here so
+    // this map is fully playable immediately, prioritized ahead of
+    // visual decoration per explicit instruction.
+    return (
+      <>
+        <rect x="0" y="0" width="126" height="100" fill="#eef1ec" />
+        <circle cx="30" cy="25" r="16" fill="#e6e8e2" opacity="0.4" />
+        <circle cx="95" cy="25" r="16" fill="#e6e8e2" opacity="0.4" />
+        <circle cx="30" cy="75" r="16" fill="#e3e5df" opacity="0.4" />
+        <circle cx="95" cy="75" r="16" fill="#e3e5df" opacity="0.4" />
+        <circle cx="63" cy="50" r="15" fill="#e9e6da" opacity="0.4" />
+      </>
+    );
+  }
+
   // Default / "plain" — parchment base with soft district blobs and a river.
   // Used by city.js, and a reasonable fallback for any new map that hasn't
   // authored custom background art yet.

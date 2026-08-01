@@ -146,10 +146,21 @@ export default function App({ account, onLogout }) {
   // column via a live Supabase subscription (see useRoomStatus.js), so
   // every client -- host or not -- sees the same "has this game started"
   // truth, kept in sync automatically.
-  const { status: roomStatus, roomNotFound: mpRoomNotFound } = useRoomStatus(
+  const { status: roomStatus, room: liveRoom, roomNotFound: mpRoomNotFound } = useRoomStatus(
     appMode === "multiplayer" ? mpRoomId : null
   );
   const mpStage = roomStatus === "playing" || roomStatus === "ended" ? "playing" : "lobby";
+  // Real bug fix: host reassignment (reassign_host) and settings edits
+  // (update_room_settings) both correctly updated the server, but every
+  // client EXCEPT the one that made the call kept showing stale local
+  // state indefinitely (mpIsHost/mpMapId/etc were only ever set once, at
+  // join/create time). Deriving these live from the room row (kept
+  // current via Realtime in useRoomStatus) means every client's view
+  // updates the moment ANYONE changes them, not just the caller.
+  const liveIsHost = liveRoom ? liveRoom.host_player_id === mpPlayerId : mpIsHost;
+  const liveMapId = liveRoom?.map_id ?? mpMapId;
+  const liveNumDetectives = liveRoom?.num_detectives ?? mpNumDetectives;
+  const liveTotalPlayers = liveRoom?.total_players ?? mpTotalPlayers;
 
   const supabaseStore = useSupabaseGameStore({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
@@ -473,7 +484,7 @@ export default function App({ account, onLogout }) {
   }
 
   async function handleStartMultiplayerGame() {
-    const map = MAPS[mpMapId];
+    const map = MAPS[liveMapId];
     await supabaseStore.startGame(map);
     // no need to persist a "stage" here anymore -- the next load of this
     // room will correctly show "playing" because useRoomStatus reads it
@@ -606,6 +617,7 @@ export default function App({ account, onLogout }) {
         onDetectiveMove={(detId, to, mode) => localStore.submitDetectiveMove(map, detId, to, mode)}
         onMrXMove={(to, edgeMode, ticketUsed) => localStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => localStore.activateDoubleMove()}
+        onPassTurn={(actor) => localStore.passTurn(actor)}
         extraHeaderContent={
           <div style={{ marginBottom: 10, display: "flex", justifyContent: "flex-end" }}>
             <EndGameEarlyButton onEndGame={() => localStore.endGameEarly()} />
@@ -675,11 +687,11 @@ export default function App({ account, onLogout }) {
           myPlayerId={mpPlayerId}
           myRole={mpRole}
           onRoleChanged={setMpRole}
-          isHost={mpIsHost}
+          isHost={liveIsHost}
           onHostChanged={setMpIsHost}
-          numDetectives={mpNumDetectives}
-          totalPlayers={mpTotalPlayers}
-          mapId={mpMapId}
+          numDetectives={liveNumDetectives}
+          totalPlayers={liveTotalPlayers}
+          mapId={liveMapId}
           onStart={handleStartMultiplayerGame}
           onLeave={handleLeaveMultiplayer}
         />
@@ -788,6 +800,7 @@ export default function App({ account, onLogout }) {
         onDetectiveMove={(detId, to, mode) => supabaseStore.submitDetectiveMove(map, detId, to, mode)}
         onMrXMove={(to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => supabaseStore.activateDoubleMove()}
+        onPassTurn={(actor) => supabaseStore.passTurn(actor)}
         extraHeaderContent={
           <div style={{ marginBottom: 10 }}>
             <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -807,12 +820,12 @@ export default function App({ account, onLogout }) {
               <RedistributeRolesVote
                 roomId={mpRoomId}
                 myPlayerId={mpPlayerId}
-                isHost={mpIsHost}
-                numDetectives={mpNumDetectives}
-                totalPlayers={mpTotalPlayers}
+                isHost={liveIsHost}
+                numDetectives={liveNumDetectives}
+                totalPlayers={liveTotalPlayers}
               />
             </div>
-            <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={mpIsHost} />
+            <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={liveIsHost} />
           </div>
         }
         belowTicketsContent={

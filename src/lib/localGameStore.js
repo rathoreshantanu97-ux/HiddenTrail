@@ -73,6 +73,13 @@ export function useLocalGameStore() {
     setMatch((prev) => (prev ? E.applyActivateDoubleMove(prev) : prev));
   }, [setMatch]);
 
+  const passTurn = useCallback(
+    (actorLabel) => {
+      setMatch((prev) => (prev ? E.applyPassTurn(prev, actorLabel) : prev));
+    },
+    [setMatch]
+  );
+
   const endGameEarly = useCallback(() => {
     setMatch((prev) => (prev ? E.applyEndGameEarly(prev) : prev));
   }, [setMatch]);
@@ -93,6 +100,7 @@ export function useLocalGameStore() {
     submitDetectiveMove,
     submitMrXMove,
     activateDoubleMove,
+    passTurn,
     endGameEarly,
     beginTurnScreen,
     resetToSetup,

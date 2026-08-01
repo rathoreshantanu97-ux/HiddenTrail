@@ -43,6 +43,7 @@ export default function GameBoard({
   onDetectiveMove,
   onMrXMove,
   onActivateDoubleMove,
+  onPassTurn, // (actor) => void -- called when the current actor genuinely has zero legal moves; fixes the real bug where this situation permanently soft-locked the game
   extraHeaderContent, // e.g. a "pass to X" banner slot in pass-and-play; votes in multiplayer -- renders at the very TOP, above everything else
   belowTicketsContent, // e.g. chat in multiplayer -- renders AFTER the log/tickets panels, per the agreed sidebar order (votes -> huddle -> explorer -> log -> tickets -> chat)
   onExploreModeChange, // (mode|null) => void -- reports this client's own explore-mode selection upward, so App.jsx can broadcast it via Presence
@@ -100,22 +101,32 @@ export default function GameBoard({
   // by the existing drag-to-pan handlers above (rect.width/viewSizeW),
   // just applied to a fixed station position instead of a mouse delta.
   function svgPointToScreenPoint(svgX, svgY) {
-    if (!svgRef.current) return { x: window.innerWidth / 2, y: window.innerHeight / 2, fallback: true };
+    if (!svgRef.current) return { x: window.innerWidth / 2, y: window.innerHeight / 2, fallback: true, openDirection: "center" };
     const rect = svgRef.current.getBoundingClientRect();
     if (!rect.width || !rect.height) {
-      // The SVG hasn't been laid out yet (zero-size rect) -- rather than
-      // silently returning null and making the ENTIRE popup (including
-      // its confirm/cancel buttons) vanish, which would leave a player
-      // with a pending move they can't confirm or cancel, fall back to
-      // screen-center. This is a real robustness fix, not just a test
-      // accommodation -- any environment where layout hasn't settled yet
-      // (a slow first paint, an unusual browser) could hit this same
-      // path in production.
-      return { x: window.innerWidth / 2, y: window.innerHeight / 2, fallback: true };
+      return { x: window.innerWidth / 2, y: window.innerHeight / 2, fallback: true, openDirection: "center" };
     }
     const px = rect.left + ((svgX - pan.x) / viewSizeW) * rect.width;
     const py = rect.top + ((svgY - pan.y) / viewSizeH) * rect.height;
-    return { x: px, y: py, fallback: false };
+    // Real bug fix: previously the popup always opened ABOVE the clicked
+    // station, with no check for whether there was actually room --
+    // a station near the top of the screen would push the popup
+    // partially or fully off-screen, with no way to reach its buttons
+    // (since it only closes via its own explicit X). Now: check the
+    // ACTUAL viewport (window.innerHeight/innerWidth, not any assumed
+    // size) for real available space in each direction, and tell
+    // MovePopup which way to open instead.
+    const POPUP_HEIGHT_ESTIMATE = 160; // generous estimate of the popup's own rendered height
+    const POPUP_WIDTH_ESTIMATE = 220;
+    const openDirection =
+      py < POPUP_HEIGHT_ESTIMATE + 20
+        ? "below"
+        : px < POPUP_WIDTH_ESTIMATE / 2 + 10
+          ? "right"
+          : px > window.innerWidth - POPUP_WIDTH_ESTIMATE / 2 - 10
+            ? "left"
+            : "above";
+    return { x: px, y: py, fallback: false, openDirection };
   }
 
   const activeMode = map.modeTheme || MODE_DEFAULT;
@@ -505,7 +516,7 @@ export default function GameBoard({
             </div>
           )}
 
-          {!isMrXTurn && (
+          {(myRole === null ? !isMrXTurn : iAmDetective) && (
             <div style={styles.travelLogPanel}>
               <div style={styles.travelLogTitle}>
                 {mrxName()}'s travel log ({match.maxRounds + 2} moves max — {match.maxRounds} rounds + 2 double-move legs)
@@ -643,6 +654,22 @@ export default function GameBoard({
             </div>
           )}
 
+          {isMyTurnToAct && !pendingMove && legalTargets.size === 0 && (
+            <div style={styles.rowCenter}>
+              <div style={styles.passTurnNote}>
+                No legal moves available from your current station with your remaining tickets.
+              </div>
+              <button
+                style={styles.primaryBtn}
+                onClick={() => {
+                  if (onPassTurn) onPassTurn(actor);
+                }}
+              >
+                Pass Turn
+              </button>
+            </div>
+          )}
+
           {!isMyTurnToAct && myRole !== null && (
             <div style={styles.ruleNote}>Waiting for {isMrXTurn ? mrxName() : detectiveName(activeDetective.id)}...</div>
           )}
@@ -758,6 +785,18 @@ export default function GameBoard({
                 const detHere = match.detectives.find((d) => d.pos === numId);
                 const mrXHere = showMrXPos && match.mrX.pos != null && numId === match.mrX.pos;
                 const isLastKnown = !isMrXTurn && match.mrX.revealedPos === numId;
+                // Real bug fix: this used to stay TRUE (and show a full
+                // animated "Mr.X is here" style marker) forever after a
+                // reveal, even many rounds later, which read as "Mr.X's
+                // position is being revealed continuously." The sidebar
+                // text ("Last confirmed sighting") already correctly
+                // treats this as HISTORICAL info -- the map marker should
+                // match that: strong and animated only DURING the actual
+                // reveal round, then a much quieter static outline
+                // afterward (still useful as a reference point, but no
+                // longer implying "this is happening right now").
+                const isCurrentReveal = isLastKnown && match.mrX.lastRevealRound === match.round;
+                const isStaleReveal = isLastKnown && !isCurrentReveal;
                 const isExploreReachable = exploreReachable.has(numId);
                 const isPeekedReachable = peekedReachable.has(numId);
                 // Turn indicator: for a detective's turn, this is visible
@@ -784,9 +823,11 @@ export default function GameBoard({
                   fill = "#1a1a1a";
                   stroke = "#fff";
                 }
-                if (isLastKnown) {
+                if (isCurrentReveal) {
                   fill = "#1a1a1a";
                   stroke = "#e11";
+                } else if (isStaleReveal) {
+                  stroke = "#e11"; // keep a subtle red outline as a historical marker, but no longer fill it solid black like an active sighting
                 }
 
                 const sizeScale = 1;
@@ -844,11 +885,14 @@ export default function GameBoard({
                         opacity={0.85}
                       />
                     )}
-                    {isLastKnown && (
+                    {isCurrentReveal && (
                       <circle cx={x} cy={y} r={nodeR + 1.4} fill="none" stroke="#e11" strokeWidth={0.35} opacity={0.8}>
                         <animate attributeName="r" values={`${nodeR + 1}; ${nodeR + 2.2}; ${nodeR + 1}`} dur="1.6s" repeatCount="indefinite" />
                         <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.6s" repeatCount="indefinite" />
                       </circle>
+                    )}
+                    {isStaleReveal && (
+                      <circle cx={x} cy={y} r={nodeR + 1.2} fill="none" stroke="#e11" strokeWidth={0.25} opacity={0.4} strokeDasharray="0.6,0.6" />
                     )}
                     {isCurrentTurnStation && highlightPositionStyle !== "blink" && (
                       <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={activeDetective.color} strokeWidth={0.4} style={highlightPositionStyle} />
@@ -885,7 +929,7 @@ export default function GameBoard({
                       y={y + 0.55 * sizeScale}
                       fontSize={1.35 * sizeScale}
                       textAnchor="middle"
-                      fill={detHere || mrXHere || isLastKnown ? "#ffffff" : map.id === "bengaluru" ? "#3c4043" : "#5c5648"}
+                      fill={detHere || mrXHere || isCurrentReveal ? "#ffffff" : map.id === "bengaluru" ? "#3c4043" : "#5c5648"}
                       fontWeight="700"
                     >
                       {id}
@@ -1019,6 +1063,7 @@ export default function GameBoard({
                     x={screenPos.x}
                     y={screenPos.y}
                     fallback={screenPos.fallback}
+                    openDirection={screenPos.openDirection}
                     title={`Move to ${stationLabel(pendingMove.to)} via:`}
                     options={options}
                     onClose={() => setPendingMove(null)}
@@ -1032,6 +1077,7 @@ export default function GameBoard({
                     x={screenPos.x}
                     y={screenPos.y}
                     fallback={screenPos.fallback}
+                    openDirection={screenPos.openDirection}
                     title={`Move to ${stationLabel(pendingMove.to)} using ${activeMode[pendingMove.mode].label}?`}
                     options={[
                       {
@@ -1110,8 +1156,6 @@ export const styles = {
     flexDirection: "row",
     height: "100%",
     width: "100%",
-    maxWidth: 1920,
-    margin: "0 auto",
     gap: 0,
   },
   sidebarPermanent: {
@@ -1413,6 +1457,13 @@ export const styles = {
     fontSize: 13,
     fontWeight: 600,
     marginTop: 8,
+  },
+  passTurnNote: {
+    fontSize: 12.5,
+    color: "#a33",
+    textAlign: "center",
+    marginBottom: 8,
+    maxWidth: 320,
   },
   ruleNote: {
     width: "100%",

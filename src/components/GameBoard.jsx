@@ -439,6 +439,14 @@ export default function GameBoard({
                 </div>
               )}
               {roomCode && <div style={styles.roomCodeLabel}>Room code: {roomCode}</div>}
+              <div style={styles.legendCompact}>
+                {Object.entries(activeMode).map(([key, m]) => (
+                  <span key={key} style={styles.legendCompactItem}>
+                    <span style={{ ...styles.legendDot, background: m.color }} />
+                    {m.label}
+                  </span>
+                ))}
+              </div>
             </div>
             <div style={styles.ticketsPanel}>
               {isMrXTurn
@@ -674,14 +682,6 @@ export default function GameBoard({
             <div style={styles.ruleNote}>Waiting for {isMrXTurn ? mrxName() : detectiveName(activeDetective.id)}...</div>
           )}
 
-          <div style={styles.legend}>
-            {Object.entries(activeMode).map(([key, m]) => (
-              <div key={key} style={styles.legendItem}>
-                <span style={{ ...styles.legendDot, background: m.color }} />
-                {m.label}
-              </div>
-            ))}
-          </div>
         </div>
 
         <div style={styles.boardColumnFull}>
@@ -1107,14 +1107,6 @@ export default function GameBoard({
             </div>
           </div>
 
-          <div style={styles.legend}>
-            {Object.entries(activeMode).map(([key, m]) => (
-              <div key={key} style={styles.legendItem}>
-                <span style={{ ...styles.legendDot, background: m.color }} />
-                {m.label}
-              </div>
-            ))}
-          </div>
         </div>
       </div>
     </div>
@@ -1298,6 +1290,8 @@ export const styles = {
   turnTimerLabel: { fontSize: 13, fontWeight: 600, color: "#666", marginTop: 2 },
   turnTimerLabelUrgent: { color: "#c0392b" },
   roomCodeLabel: { fontSize: 11, color: "#aaa", marginTop: 2, letterSpacing: 0.5 },
+  legendCompact: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  legendCompactItem: { display: "flex", alignItems: "center", gap: 3, fontSize: 10.5, color: "#888" },
   turnColorDot: { width: 12, height: 12, borderRadius: "50%", display: "inline-block", flexShrink: 0 },
   ticketsPanel: { display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 },
   chip: {

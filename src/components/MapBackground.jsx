@@ -192,20 +192,54 @@ export default function MapBackground({ map }) {
   }
 
   if (bg.kind === "citymap" && bg.theme === "namma-bengaluru") {
-    // Namma Bengaluru: built from a detailed hand-authored spec (non-
-    // square 126x100 canvas). Clean, functional base for now -- richer
-    // graphics (lakes, gardens, streets-vs-highways styling) are a
-    // planned follow-up polish pass, kept deliberately simple here so
-    // this map is fully playable immediately, prioritized ahead of
-    // visual decoration per explicit instruction.
+    // Namma Bengaluru: richer visual pass -- real Bengaluru lakes and
+    // landmark buildings, positioned at the ACTUAL coordinates of their
+    // named stations after the v3 redistribution (verified against the
+    // real station data, not guessed).
     return (
       <>
         <rect x="0" y="0" width="126" height="100" fill="#eef1ec" />
-        <circle cx="30" cy="25" r="16" fill="#e6e8e2" opacity="0.4" />
-        <circle cx="95" cy="25" r="16" fill="#e6e8e2" opacity="0.4" />
-        <circle cx="30" cy="75" r="16" fill="#e3e5df" opacity="0.4" />
-        <circle cx="95" cy="75" r="16" fill="#e3e5df" opacity="0.4" />
-        <circle cx="63" cy="50" r="15" fill="#e9e6da" opacity="0.4" />
+        <circle cx="30" cy="25" r="16" fill="#e6e8e2" opacity="0.35" />
+        <circle cx="95" cy="25" r="16" fill="#e6e8e2" opacity="0.35" />
+        <circle cx="30" cy="75" r="16" fill="#e3e5df" opacity="0.35" />
+        <circle cx="95" cy="75" r="16" fill="#e3e5df" opacity="0.35" />
+        <circle cx="63" cy="50" r="15" fill="#e9e6da" opacity="0.35" />
+
+        {/* Ulsoor Lake -- real station at (81.2, 31.9) */}
+        <ellipse cx="84" cy="30" rx="5.5" ry="3.8" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(15 84 30)" />
+        <text x="84" y="24.5" fontSize="1.3" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
+          Ulsoor Lake
+        </text>
+
+        {/* Bellandur Lake -- real station at (108.2, 83.2), the largest water body */}
+        <ellipse cx="112" cy="86" rx="7" ry="4.5" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(-10 112 86)" />
+        <text x="112" y="79.5" fontSize="1.3" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
+          Bellandur Lake
+        </text>
+
+        {/* Cubbon Park -- real station at (53.6, 42.3) */}
+        <ellipse cx="57" cy="39" rx="5.5" ry="4" fill="#cfe3c4" opacity="0.85" />
+        <text x="57" y="39" fontSize="1.2" textAnchor="middle" fill="#4a7a3d" fontWeight="600" opacity="0.85">
+          Cubbon Park
+        </text>
+
+        {/* Lalbagh -- real station at (49.2, 64.1) */}
+        <ellipse cx="46" cy="68" rx="5" ry="3.8" fill="#cfe3c4" opacity="0.85" />
+        <text x="46" y="68" fontSize="1.2" textAnchor="middle" fill="#4a7a3d" fontWeight="600" opacity="0.85">
+          Lalbagh
+        </text>
+
+        {/* Vidhana Soudha -- major government building, real station at (43.4, 25.4) */}
+        <rect x="40.5" y="21" width="3.2" height="2.3" fill="#d8cba8" opacity="0.9" rx="0.3" />
+        <text x="42" y="19.7" fontSize="1.05" textAnchor="middle" fill="#8a6d3a" fontWeight="600" opacity="0.85">
+          Vidhana Soudha
+        </text>
+
+        {/* Bengaluru Palace -- major building, real station at (54.2, 9.2) */}
+        <rect x="51.5" y="5.5" width="3" height="2.2" fill="#d8cba8" opacity="0.9" rx="0.3" />
+        <text x="53" y="4.5" fontSize="1.05" textAnchor="middle" fill="#8a6d3a" fontWeight="600" opacity="0.85">
+          Bengaluru Palace
+        </text>
       </>
     );
   }

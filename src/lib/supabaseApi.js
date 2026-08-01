@@ -197,6 +197,22 @@ export async function reassignHost({ roomId, callerPlayerId, newHostPlayerId }) 
   await callRpc("reassign_host", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_new_host_player_id: newHostPlayerId });
 }
 
+export async function updateRoomSettings({ roomId, callerPlayerId, mapId, numDetectives, totalPlayers, mapStationCount, turnTimerSeconds }) {
+  await callRpc("update_room_settings", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_map_id: mapId,
+    p_num_detectives: numDetectives,
+    p_total_players: totalPlayers,
+    p_map_station_count: mapStationCount ?? null,
+    p_turn_timer_seconds: turnTimerSeconds ?? null,
+  });
+}
+
+export async function leaveRoomPermanently({ roomId, playerId }) {
+  await callRpc("leave_room_permanently", { p_room_id: roomId, p_player_id: playerId });
+}
+
 export async function leaveLobby({ roomId, playerId }) {
   await callRpc("leave_lobby", { p_room_id: roomId, p_player_id: playerId });
 }

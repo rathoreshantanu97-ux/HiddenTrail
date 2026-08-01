@@ -35,10 +35,10 @@
 // ---------------------------------------------------------------------------
 
 export const MODE_DEFAULT = {
-  taxi: { color: "#f2c14e", label: "Taxi", short: "T" },
+  taxi: { color: "#c9971f", label: "Taxi", short: "T" },
   bus: { color: "#4e9c6d", label: "Bus", short: "B" },
   underground: { color: "#c1443c", label: "Metro", short: "M" },
-  ferry: { color: "#2f8fbf", label: "Ferry", short: "F" },
+  ferry: { color: "#1a1a1a", label: "Ferry", short: "F" },
   black: { color: "#2b2b2b", label: "Black", short: "X" },
 };
 

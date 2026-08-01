@@ -18,8 +18,16 @@ export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numD
   const [players, setPlayers] = useState([]);
   const [assignments, setAssignments] = useState({}); // playerId -> role
 
-  if (!enabled) return null;
-
+  // MOVED HERE (before the early return below) -- this was a REAL,
+  // confirmed bug: a hook called after a conditional `return null` is
+  // called a DIFFERENT NUMBER OF TIMES depending on whether `enabled` is
+  // true or false, which violates React's Rules of Hooks and throws
+  // "Rendered fewer hooks than expected" (minified as React error #300)
+  // -- crashing the ENTIRE app, not just this component, the moment any
+  // admin/host disabled this specific feature. Confirmed by the exact
+  // symptom reported: ticking every feature toggle ON made the crash
+  // disappear, since `enabled` was then always true and this early
+  // return never fired.
   useEffect(() => {
     if (!showForm) return;
     api
@@ -33,6 +41,8 @@ export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numD
       })
       .catch((e) => console.error("Failed to fetch players for redistribute form:", e));
   }, [showForm, roomId]);
+
+  if (!enabled) return null;
 
   const allSeats = ["mrx", ...computeSeatLayoutSafe(numDetectives, totalPlayers).map((s) => s.seatRole)];
 

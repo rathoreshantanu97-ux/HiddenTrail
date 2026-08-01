@@ -49,7 +49,8 @@ create table if not exists rooms (
   end_game_vote_enabled_override boolean,
   pause_resume_enabled_override boolean,
   redistribute_roles_enabled_override boolean,
-  turn_highlight_style_override text,
+  position_highlight_style_override text,
+  destination_highlight_style_override text,
   route_explorer_enabled_override boolean,
   round_scaling_ratio_override numeric,
   -- Public/private rooms: private (default) is joinable only via room
@@ -75,7 +76,11 @@ alter table rooms add column if not exists takeover_reversal_enabled_override bo
 alter table rooms add column if not exists end_game_vote_enabled_override boolean;
 alter table rooms add column if not exists pause_resume_enabled_override boolean;
 alter table rooms add column if not exists redistribute_roles_enabled_override boolean;
-alter table rooms add column if not exists turn_highlight_style_override text;
+-- Dead now (replaced by the two independent columns above) -- dropped
+-- rather than left as confusing leftover state.
+alter table rooms drop column if exists turn_highlight_style_override;
+alter table rooms add column if not exists position_highlight_style_override text;
+alter table rooms add column if not exists destination_highlight_style_override text;
 alter table rooms add column if not exists route_explorer_enabled_override boolean;
 alter table rooms add column if not exists round_scaling_ratio_override numeric;
 alter table rooms add column if not exists is_public boolean not null default false;
@@ -193,12 +198,19 @@ create table if not exists game_state_public (
   -- schema/adapter until this fix.
   max_rounds int,
   reveal_rounds int[],
+  -- When the CURRENT turn began -- used by the turn timer (if enabled
+  -- for this room) to compute the countdown shown to every player, and
+  -- to detect server-side when a turn has genuinely run out of time (so
+  -- an auto-random-move can be applied, keeping the game moving even if
+  -- the active player has walked away).
+  turn_started_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 alter table game_state_public add column if not exists starting_mrx_tickets jsonb;
 alter table game_state_public add column if not exists starting_detective_tickets jsonb;
 alter table game_state_public add column if not exists max_rounds int;
 alter table game_state_public add column if not exists reveal_rounds int[];
+alter table game_state_public add column if not exists turn_started_at timestamptz not null default now();
 
 -- -----------------------------------------------------------------------------
 -- GAME STATE (MR. X SECRET) — Mr. X's true position. Only Mr. X's own

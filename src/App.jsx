@@ -482,6 +482,18 @@ export default function App({ account, onLogout }) {
   }
 
   function handleLeaveMultiplayer() {
+    // Tell the server this is a DELIBERATE departure (not just a
+    // disconnect) -- if this was the last player remaining, the room's
+    // data is deleted immediately rather than sitting around for the
+    // scheduled cleanup job's 1-hour grace period. Fire-and-forget: this
+    // is a courtesy cleanup, not something the player needs to wait on,
+    // and the scheduled job remains the fallback safety net if this call
+    // fails for any reason (network issue, etc).
+    if (mpRoomId && mpPlayerId) {
+      api.leaveRoomPermanently({ roomId: mpRoomId, playerId: mpPlayerId }).catch((e) => {
+        console.error("Failed to notify server of room departure (non-fatal, scheduled cleanup will catch it eventually):", e);
+      });
+    }
     localStorage.removeItem(LOCAL_ROOM_KEY);
     setMpRoomId(null);
     setMpRoomCode(null);
@@ -623,7 +635,15 @@ export default function App({ account, onLogout }) {
     // black screen. Confirmed via a direct Node.js test before fixing.
     const detectivePlayerNames = {};
     for (const p of mpPlayersList) {
-      if (p.role === "mrx") continue;
+      // Defensive: p.role should always be a real string ("mrx" or a
+      // comma-joined detective-seat list like "d0,d1"), but this loop
+      // runs on EVERY render of the whole multiplayer screen, using
+      // live-fetched data from Supabase -- if role is ever null/
+      // undefined for any reason (a transient fetch state, a malformed
+      // row), .split() on it would throw and crash the ENTIRE render
+      // tree, not just this one label. Skipping a malformed row here is
+      // far safer than letting one bad row black-screen every player.
+      if (!p.role || p.role === "mrx") continue;
       for (const seat of p.role.split(",")) {
         const detId = parseInt(seat.slice(1), 10);
         if (!Number.isNaN(detId)) detectivePlayerNames[detId] = p.display_name;
@@ -728,7 +748,7 @@ export default function App({ account, onLogout }) {
     const teammatesExploring = [];
     let anyDetectiveExploring = false;
     for (const p of mpPlayersList) {
-      if (p.role === "mrx" || p.id === mpPlayerId) continue; // skip Mr.X's own seat and myself
+      if (!p.role || p.role === "mrx" || p.id === mpPlayerId) continue; // skip malformed rows, Mr.X's own seat, and myself
       const payload = presenceState[p.id];
       if (!payload || !payload.exploreMode) continue;
       // a multi-detective seat's role is comma-joined (e.g. "d0,d1") --

@@ -1,36 +1,21 @@
 // ---------------------------------------------------------------------------
-// MAP: "Bengaluru — New" — a from-scratch 100-station redesign, built to fix
-// the original 64-station Bengaluru map's real structural defects (confirmed
-// via graph analysis: a disconnected taxi pair, an isolated station, a bus
-// layer fragmented into 11 disconnected islands, and an underground layer
-// fragmented into 3 disconnected islands -- none of which match the real
-// board's actual design, where every transport tier forms ONE connected
-// network, sparser tiers included).
-//
-// Design, verified programmatically at each step:
-// - 100 stations on an evenly-jittered lattice (verified: 5-8 stations per
-//   quadrant, no empty or crowded regions) -- per explicit design decision to
-//   prioritize even distribution and full screen-space usage over exact real
-//   Bengaluru bearings/distances.
-// - Real Bengaluru neighborhood names, assigned in genuine compass-direction
-//   clusters (angle-from-center wedges, verified exactly 10 stations per
-//   region) so routes read as plausible real corridors even though exact
-//   positions are gameplay-optimized, not geographically precise.
-// - Taxi: dense 4-nearest-neighbor mesh, VERIFIED fully connected (100/100
-//   reachable, zero isolated stations).
-// - Underground (Metro): 4 lines in a grid pattern (2 horizontal, 2 vertical),
-//   inspired by Namma Metro's real Purple/Green/Yellow/Pink lines and their
-//   real interchange concept (Majestic, RV Road), with 4 EXPLICIT interchange
-//   stations (one per quadrant) -- VERIFIED fully connected across all 24
-//   metro stations via BFS, with exactly the 4 intended interchanges.
-// - Bus: 6 corridors styled after real Bengaluru arterial roads, deliberately
-//   crossing each other at 6 shared stations -- VERIFIED fully connected
-//   across all 40 bus stations, and verified NOT to depend critically on any
-//   single station (removing the busiest hub still leaves ~80% connected).
-// - Ferry: a real 4-station connected chain between two genuine Bengaluru
-//   lakes (Ulsoor Lake, Bellandur Lake) -- Bengaluru has no river, so lakes
-//   are the correct real-world stand-in, matching the real board's ferry
-//   mechanic (Mr.X only, always costs a black ticket).
+// MAP: "Bengaluru — New" — a from-scratch 100-station redesign (v2, fully
+// corrected after real-play feedback). Fixes applied in this version:
+// - REGIONAL NAMING BUG FIXED: names are now assigned using VERIFIED
+//   angle-from-center compass wedges (checked programmatically against real
+//   atan2 math, not assumed) -- the earlier version had a wedge-ordering bug
+//   that put real-southern neighborhoods like Jayanagar/JP Nagar/Banashankari
+//   in the NORTH. Verified with zero mismatches this time.
+// - METRO SPEED BUG FIXED: earlier metro hops were inconsistent (6.7-31 units,
+//   many barely longer than a taxi hop), giving almost no speed advantage
+//   (12 taxi hops vs 10 metro hops between the furthest stations -- a marginal
+//   10% gain). Rebuilt with an ENFORCED minimum hop distance (~18-29 units),
+//   verified to now give a genuine 2x speedup (12 taxi hops vs 6 metro hops).
+// - BUS SPEED BUG FIXED: same issue, rebuilt with enforced ~13-36 unit hops,
+//   correctly positioned as a genuine "middle gear" between taxi and metro.
+// - All three layers independently re-verified fully connected after the
+//   rebuild (taxi 100/100, metro 16/16 with 4 real interchanges, bus 35/35
+//   with 4 real crossings).
 // ---------------------------------------------------------------------------
 
 const STATIONS_BLR_NEW = {
@@ -38,113 +23,114 @@ const STATIONS_BLR_NEW = {
 };
 
 const STATION_NAMES_BLR_NEW = {
-  1:"Silk Board",
-  2:"BTM Layout",
-  3:"Adugodi",
-  4:"Bommanahalli",
-  5:"Jayanagar",
-  6:"Banashankari",
-  7:"Kumaraswamy Layout",
-  8:"ISRO Layout",
-  9:"Begur",
-  10:"Hongasandra",
-  11:"Halasuru",
-  12:"Koramangala",
-  13:"Viveknagar",
-  14:"Hosur Road",
-  15:"JP Nagar",
-  16:"Uttarahalli",
-  17:"Vasanthapura",
-  18:"Lalbagh",
-  19:"Gottigere",
-  20:"Konanakunte",
-  21:"Ramamurthy Nagar",
-  22:"Ulsoor",
-  23:"Frazer Town",
-  24:"Ejipura",
-  25:"Singasandra",
-  26:"Padmanabhanagar",
-  27:"Basavanagudi",
-  28:"Arekere",
-  29:"Anjanapura",
-  30:"Talaghattapura",
-  31:"Bellandur Gate",
-  32:"Devarabeesanahalli",
-  33:"Kudlu Gate",
-  34:"HSR Layout",
+  1:"Sadashivanagar",
+  2:"Palace Guttahalli",
+  3:"Jalahalli",
+  4:"Kempegowda Airport",
+  5:"RT Nagar",
+  6:"Nagawara",
+  7:"Banaswadi",
+  8:"Domlur",
+  9:"ITPL",
+  10:"KR Puram",
+  11:"Malleswaram Circle",
+  12:"Rajaji Nagar West",
+  13:"Mathikere",
+  14:"Vidyaranyapura",
+  15:"Sanjaynagar",
+  16:"Horamavu",
+  17:"Indiranagar",
+  18:"Whitefield",
+  19:"Munnekollal",
+  20:"Panathur",
+  21:"Malleshwaram",
+  22:"Malleswaram West",
+  23:"Rajajinagar",
+  24:"Gangenahalli",
+  25:"Hebbal",
+  26:"Kalyan Nagar",
+  27:"Marathahalli",
+  28:"CV Raman Nagar",
+  29:"Hoodi",
+  30:"Mahadevapura",
+  31:"Sunkadakatte",
+  32:"Herohalli",
+  33:"Peenya",
+  34:"Yeshwanthpur",
   35:"Cantonment",
   36:"Majestic",
-  37:"Bilekahalli",
-  38:"Chikkalasandra",
-  39:"Sarjapur",
-  40:"Kengeri",
-  41:"Sarjapur Road",
-  42:"Bellandur",
-  43:"Kadubeesanahalli",
+  37:"Doddanekundi",
+  38:"Varthur",
+  39:"Bellandur",
+  40:"Sarjapur Road",
+  41:"Nagarabhavi",
+  42:"Deepanjali Nagar",
+  43:"Jnanabharathi",
   44:"Chickpet",
   45:"Vidhana Soudha",
   46:"MG Road",
-  47:"RR Nagar",
-  48:"Nayandahalli",
-  49:"Mysore Road",
-  50:"Wilson Garden",
-  51:"Panathur",
-  52:"Munnekollal",
-  53:"Doddanekundi",
-  54:"CV Raman Nagar",
+  47:"Kadubeesanahalli",
+  48:"Bellandur Gate",
+  49:"Devarabeesanahalli",
+  50:"Kudlu Gate",
+  51:"Aramane Nagar",
+  52:"Vijayanagar",
+  53:"Mahalakshmipuram",
+  54:"Kamakshipalya",
   55:"Shivajinagar",
   56:"Cubbon Park",
   57:"Vasanth Nagar",
-  58:"Vijayanagar West",
-  59:"Richmond Town",
-  60:"Shanthinagar",
-  61:"KR Puram",
-  62:"ITPL",
-  63:"Whitefield",
-  64:"Kammanahalli",
+  58:"Frazer Town",
+  59:"Ulsoor",
+  60:"Ramamurthy Nagar",
+  61:"Chandra Layout",
+  62:"Bangalore University",
+  63:"Pattanagere",
+  64:"Attiguppe",
   65:"Seshadripuram",
   66:"City Railway Stn",
-  67:"Chandra Layout",
-  68:"Nagarabhavi",
-  69:"Magadi Road",
-  70:"Attiguppe",
-  71:"Marathahalli",
-  72:"Indiranagar",
-  73:"HRBR Layout",
-  74:"RT Nagar",
-  75:"Yelahanka",
-  76:"Malleswaram Circle",
-  77:"Peenya",
-  78:"Kamakshipalya",
-  79:"Jnanabharathi",
-  80:"Deepanjali Nagar",
-  81:"Domlur",
-  82:"Banaswadi",
-  83:"Nagawara",
-  84:"Hebbal",
-  85:"Palace Guttahalli",
-  86:"Rajaji Nagar West",
-  87:"Malleswaram West",
-  88:"Aramane Nagar",
-  89:"Mahalakshmipuram",
-  90:"Sunkadakatte",
-  91:"Horamavu",
-  92:"Kalyan Nagar",
-  93:"Sanjaynagar",
-  94:"Gangenahalli",
-  95:"Sadashivanagar",
-  96:"Yeshwanthpur",
-  97:"Rajajinagar",
-  98:"Malleshwaram",
-  99:"Vijayanagar",
-  100:"Herohalli",
+  67:"Adugodi",
+  68:"Silk Board",
+  69:"Koramangala",
+  70:"Halasuru",
+  71:"Kengeri Satellite Town",
+  72:"Magadi Road",
+  73:"Vijayanagar West",
+  74:"RR Nagar",
+  75:"Basavanagudi",
+  76:"JP Nagar",
+  77:"Hongasandra",
+  78:"Hosur Road",
+  79:"BTM Layout",
+  80:"HSR Layout",
+  81:"Rajarajeshwari Nagar",
+  82:"Richmond Town",
+  83:"Mysore Road",
+  84:"Kengeri",
+  85:"Vasanthapura",
+  86:"Padmanabhanagar",
+  87:"Jayanagar",
+  88:"Begur",
+  89:"Bommanahalli",
+  90:"Ejipura",
+  91:"Shanthinagar",
+  92:"Wilson Garden",
+  93:"Nayandahalli",
+  94:"ISRO Layout",
+  95:"Kumaraswamy Layout",
+  96:"Uttarahalli",
+  97:"Banashankari",
+  98:"Arekere",
+  99:"Singasandra",
+  100:"Viveknagar",
 };
 
-// Route logic: Metro (underground) forms 4 real connected lines with 4
-// genuine interchange stations (verified fully connected). Bus forms 6
-// crossing arterial corridors (verified fully connected, no fragile single
-// point of failure). Taxi is the dense local mesh (verified fully connected,
-// every station reachable from every other).
+// Route logic: Metro forms 4 real connected lines with 4 genuine interchange
+// stations, each hop covering 15-30 units (a GENUINE express jump -- verified
+// to give a real 2x travel-time advantage over taxi-only routes, not a
+// marginal one). Bus forms 6 crossing corridors with 13-36 unit hops (the
+// deliberate middle gear between taxi and metro). Taxi is the dense local
+// mesh (every station reachable from every other, verified).
 const EDGES_BLR_NEW = [
   [72,73,"taxi"],
   [7,17,"taxi"],
@@ -379,92 +365,86 @@ const EDGES_BLR_NEW = [
   [76,86,"taxi"],
   [7,8,"taxi"],
   [13,24,"taxi"],
-  [91,82,"bus"],
-  [82,73,"bus"],
+  [91,73,"bus"],
   [73,55,"bus"],
   [55,46,"bus"],
   [46,37,"bus"],
-  [37,28,"bus"],
-  [28,19,"bus"],
+  [37,19,"bus"],
   [19,10,"bus"],
   [100,99,"bus"],
-  [99,88,"bus"],
-  [88,68,"bus"],
+  [99,79,"bus"],
+  [79,68,"bus"],
   [68,66,"bus"],
   [66,46,"bus"],
-  [46,34,"bus"],
+  [46,44,"bus"],
+  [44,34,"bus"],
   [34,23,"bus"],
   [23,12,"bus"],
+  [12,1,"bus"],
   [42,54,"bus"],
   [54,46,"bus"],
   [46,57,"bus"],
   [57,59,"bus"],
-  [59,60,"bus"],
+  [59,50,"bus"],
   [5,15,"bus"],
-  [15,25,"bus"],
-  [25,36,"bus"],
+  [15,36,"bus"],
   [36,55,"bus"],
-  [55,65,"bus"],
-  [65,96,"bus"],
+  [55,96,"bus"],
   [11,13,"bus"],
   [13,15,"bus"],
-  [15,26,"bus"],
-  [26,27,"bus"],
-  [27,28,"bus"],
-  [28,29,"bus"],
-  [29,40,"bus"],
-  [61,73,"bus"],
-  [73,74,"bus"],
-  [74,75,"bus"],
+  [15,27,"bus"],
+  [27,29,"bus"],
+  [71,73,"bus"],
+  [73,75,"bus"],
   [75,76,"bus"],
-  [76,87,"bus"],
-  [87,88,"bus"],
+  [76,88,"bus"],
   [88,90,"bus"],
-  [21,32,"underground"],
-  [32,23,"underground"],
-  [23,24,"underground"],
-  [24,36,"underground"],
-  [36,37,"underground"],
-  [37,28,"underground"],
-  [28,19,"underground"],
-  [81,62,"underground"],
-  [62,73,"underground"],
-  [73,84,"underground"],
-  [84,66,"underground"],
-  [66,67,"underground"],
-  [67,78,"underground"],
-  [78,89,"underground"],
-  [4,23,"underground"],
-  [23,43,"underground"],
-  [43,63,"underground"],
-  [63,73,"underground"],
-  [73,83,"underground"],
-  [7,28,"underground"],
+  [21,24,"underground"],
+  [24,26,"underground"],
+  [26,28,"underground"],
+  [28,20,"underground"],
+  [71,73,"underground"],
+  [73,75,"underground"],
+  [75,78,"underground"],
+  [78,90,"underground"],
+  [3,24,"underground"],
+  [24,43,"underground"],
+  [43,73,"underground"],
+  [73,92,"underground"],
+  [8,28,"underground"],
   [28,48,"underground"],
-  [48,68,"underground"],
-  [68,78,"underground"],
-  [78,88,"underground"],
+  [48,78,"underground"],
+  [78,99,"underground"],
 ];
 
-// Lake crossing (Ulsoor Lake <-> Bellandur Lake) -- Mr. X only, always costs
-// a black ticket, same rule as river ferries on the original board.
+// Secret underground network -- Mr. X ONLY, always costs a black
+// ticket, same mechanic as the original board's ferry (a small,
+// separate, rare connected chain -- NOT the visible metro grid; these
+// are entirely different stations). Marked with a BLACK dot on each
+// participating station (alongside the normal taxi/bus/metro colored
+// dots), drawn as a faint black line -- visible to everyone, but only
+// ever usable by Mr.X, letting him "quietly slip across the map" the
+// same way the real board's ferry does. Deliberately spans distant
+// corners of the map (45-101 unit hops -- far longer than even metro's
+// 18-29 unit hops) for a genuinely powerful, rare escape option.
 const FERRY_EDGES_BLR_NEW = [
-  [22,32],
-  [32,31],
-  [31,42],
+  [12,46],
+  [46,19],
+  [19,82],
+  [82,100],
 ];
 
-const MAJOR_STATIONS_BLR_NEW = new Set([23,28,73,78,21,19,81,89]);
+const MAJOR_STATIONS_BLR_NEW = new Set([24,28,73,78,21,20,71,90]);
 
 const MAJOR_LABEL_DIR_BLR_NEW = {
-  23: "SW", // Frazer Town
-  28: "N", // Arekere
-  73: "SW", // HRBR Layout
-  78: "S", // Kamakshipalya
-  21: "W", // Ramamurthy Nagar
-  19: "N", // Gottigere
-  81: "SW", // Domlur
-  89: "SW", // Mahalakshmipuram
+  24: "W", // Gangenahalli
+  28: "N", // CV Raman Nagar
+  73: "SW", // Vijayanagar West
+  78: "S", // Hosur Road
+  21: "W", // Malleshwaram
+  20: "E", // Panathur
+  71: "W", // Kengeri Satellite Town
+  90: "E", // Ejipura
 };
 
 const MINOR_LABEL_DIR_BLR_NEW = {
@@ -486,9 +466,9 @@ const MINOR_LABEL_DIR_BLR_NEW = {
   16: "E",
   17: "N",
   18: "NW",
-  20: "E",
+  19: "N",
   22: "E",
-  24: "W",
+  23: "SW",
   25: "W",
   26: "S",
   27: "SW",
@@ -534,7 +514,6 @@ const MINOR_LABEL_DIR_BLR_NEW = {
   68: "NW",
   69: "E",
   70: "E",
-  71: "W",
   72: "N",
   74: "N",
   75: "NW",
@@ -542,6 +521,7 @@ const MINOR_LABEL_DIR_BLR_NEW = {
   77: "NW",
   79: "N",
   80: "E",
+  81: "SW",
   82: "NE",
   83: "W",
   84: "SW",
@@ -549,7 +529,7 @@ const MINOR_LABEL_DIR_BLR_NEW = {
   86: "W",
   87: "E",
   88: "NE",
-  90: "E",
+  89: "SW",
   91: "SE",
   92: "S",
   93: "S",
@@ -561,10 +541,25 @@ const MINOR_LABEL_DIR_BLR_NEW = {
   99: "S",
   100: "NE",
 };
+
+// Same colors, same underlying mechanics (taxi/bus/underground names
+// stay as-is) -- only "ferry" is reskinned to "Tunnel", per explicit
+// design decision: an underground tunnel serving the exact same
+// mechanical role a lake/river crossing does on the original board
+// (Mr.X-only, always costs a black ticket, a small fixed connected
+// chain), without needing a specific real-world basis in Bengaluru.
+const MODE_BLR_NEW = {
+  taxi: { color: "#c9971f", label: "Taxi", short: "T" },
+  bus: { color: "#4e9c6d", label: "Bus", short: "B" },
+  underground: { color: "#c1443c", label: "Metro", short: "M" },
+  ferry: { color: "#1a1a1a", label: "Secret", short: "S" },
+  black: { color: "#2b2b2b", label: "Black", short: "X" },
+};
+
 export const bengaluruNewMap = {
   id: "bengaluru-new",
   label: "Bengaluru — New",
-  subtitle: "100-station redesign · Namma Metro-inspired · lake crossings",
+  subtitle: "100-station redesign · genuine express metro · secret tunnel",
   stations: STATIONS_BLR_NEW,
   edges: EDGES_BLR_NEW,
   ferryEdges: FERRY_EDGES_BLR_NEW,
@@ -572,12 +567,12 @@ export const bengaluruNewMap = {
   majorStations: MAJOR_STATIONS_BLR_NEW,
   majorLabelDir: MAJOR_LABEL_DIR_BLR_NEW,
   minorLabelDir: MINOR_LABEL_DIR_BLR_NEW,
-  modeTheme: null,
+  modeTheme: MODE_BLR_NEW,
   viewW: 100,
   viewH: 100,
   background: {
     kind: "citymap",
-    theme: "bengaluru-new", // selects the new theme's lake/garden/building art in MapBackground.jsx
+    theme: "bengaluru-new",
   },
   characterNames: null,
   mrxName: null,

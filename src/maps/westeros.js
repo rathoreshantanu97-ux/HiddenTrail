@@ -364,7 +364,7 @@ const MET2_REGION_HULLS = {
 // same underlying mechanics (taxi=dense/local, bus=mid-range,
 // underground=long-distance express, ferry=Mr.X-only water crossing).
 const MODE_GOT = {
-  taxi: { color: "#f2c14e", label: "Foot", short: "F" },
+  taxi: { color: "#c9971f", label: "Foot", short: "F" },
   bus: { color: "#4e9c6d", label: "Horse", short: "H" },
   underground: { color: "#c1443c", label: "Dragon", short: "D" },
   ferry: { color: "#2f8fbf", label: "Ship", short: "S" },

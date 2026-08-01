@@ -625,12 +625,6 @@ export default function GameBoard({
 
           {belowTicketsContent}
 
-          {isMrXTurn && isMyTurnToAct && !pendingMove && (
-            <div style={styles.ruleNote}>
-              Stations with a red dashed ring hold a detective — moving onto one ends the game immediately.
-            </div>
-          )}
-
           {message && <div style={styles.messageBar}>{message}</div>}
 
           {isMrXTurn && isMyTurnToAct && !pendingMove && (
@@ -667,7 +661,7 @@ export default function GameBoard({
           <div
             style={{
               ...styles.boardWrap,
-              maxWidth: Math.min(1400, baseW * 10),
+              maxWidth: "100%",
               aspectRatio: `${baseW} / ${baseH}`,
             }}
           >
@@ -733,9 +727,9 @@ export default function GameBoard({
                 const offset = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
                 const cx = mx + nx * offset;
                 const cy = my + ny * offset;
-                const strokeW = mode === "underground" ? 0.45 : mode === "bus" ? 0.35 : mode === "ferry" ? 0.42 : 0.24;
+                const strokeW = mode === "underground" ? 0.45 : mode === "bus" ? 0.35 : mode === "ferry" ? 0.22 : 0.32;
                 const taxiFadeOpacity = zoom < 1.6 ? 0.35 : 0.85;
-                const lineOpacity = mode === "taxi" ? taxiFadeOpacity : 0.85;
+                const lineOpacity = mode === "taxi" ? taxiFadeOpacity : mode === "ferry" ? 0.4 : 0.85;
                 return (
                   <g key={`${key}-${mode}-${i}`}>
                     <path
@@ -751,8 +745,7 @@ export default function GameBoard({
                       fill="none"
                       stroke={activeMode[mode].color}
                       strokeWidth={strokeW}
-                      strokeDasharray={mode === "ferry" ? "1.2,0.8" : undefined}
-                      opacity={lineOpacity}
+                                            opacity={lineOpacity}
                       strokeLinecap="round"
                     />
                   </g>
@@ -767,7 +760,6 @@ export default function GameBoard({
                 const isLastKnown = !isMrXTurn && match.mrX.revealedPos === numId;
                 const isExploreReachable = exploreReachable.has(numId);
                 const isPeekedReachable = peekedReachable.has(numId);
-                const dangerTarget = isMrXTurn && isLegal && detHere;
                 // Turn indicator: for a detective's turn, this is visible
                 // to EVERYONE (their position is always public). For
                 // Mr.X's own turn, a SEPARATE private indicator is shown
@@ -826,11 +818,8 @@ export default function GameBoard({
                 return (
                   <g key={id} onClick={() => handleStationClick(numId)} style={{ cursor: isLegal ? "pointer" : "default" }}>
                     <circle cx={x} cy={y} r={2.6 * sizeScale} fill="transparent" />
-                    {isLegal && !dangerTarget && (
+                    {isLegal && (
                       <HighlightRing x={x} y={y} radius={nodeR + 0.7} color="#1a1a1a" strokeWidth={0.25} dashed style={highlightDestinationStyle} />
-                    )}
-                    {dangerTarget && (
-                      <circle cx={x} cy={y} r={nodeR + 0.9} fill="none" stroke="#c0392b" strokeWidth={0.4} strokeDasharray="0.5,0.5" />
                     )}
                     {isExploreReachable && (
                       <circle

@@ -7,6 +7,14 @@
 -- rather than creating a duplicate).
 --
 -- WHAT GETS CLEANED UP, AND WHEN:
+--   - IMMEDIATELY, event-driven (not this scheduled job): a room is
+--     deleted the instant it becomes empty -- either via leave_lobby
+--     (pre-game leave) or leave_room_permanently (a deliberate
+--     departure after a game has ended, e.g. clicking "New Game"),
+--     both of which check "am I the last one here?" and delete right
+--     away rather than waiting for this job's next run. This job is
+--     the SAFETY NET for everything else -- abandonment that isn't a
+--     deliberate, detected departure.
 --   - Rooms whose game ended (game_state_public.phase = 'ended') more
 --     than 1 hour ago -- gives players time to see the results screen
 --     (including the full-route reveal) before the room's data disappears.
@@ -18,6 +26,15 @@
 --     immediately, so they then follow the same "cleaned up 1 hour after
 --     ending" rule as every other ended game, giving players a
 --     consistent final-state screen instead of the room just vanishing.
+--   - ACTIVE games (phase = 'playing') that everyone has genuinely
+--     abandoned mid-match -- a real gap that existed before this rule:
+--     such a room was never 'ended' (so the 1-hour rule never applied)
+--     and never 'lobby' (so the 24-hour rule never applied either), so
+--     it would sit in the database FOREVER. Now: if a playing game's
+--     state hasn't changed in 3+ hours AND nobody in the room has been
+--     seen (via the same presence/heartbeat signal used everywhere
+--     else) recently, it's auto-ended the same way an expired pause is,
+--     then cleaned up by the normal 1-hour ended-game rule.
 --
 -- Deleting a room cascades (via foreign keys) to its players,
 -- game_state_public, game_state_secret, moves, messages, and end-game
@@ -36,7 +53,36 @@ security definer
 as $$
 declare
   v_deleted uuid[];
+  v_presence_grace_seconds int := 25;
 begin
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select presence_grace_period_seconds into v_presence_grace_seconds from app_settings where id = 1;
+  end if;
+
+  -- Step 0: a real, previously-missing gap -- an ACTIVE game
+  -- (phase='playing') that everyone has genuinely abandoned mid-match
+  -- had NO cleanup path at all before this: it's not 'ended' (so the
+  -- 1-hour ended-game rule never applied) and not 'lobby' (so the
+  -- 24-hour abandoned-lobby rule never applied either) -- it would sit
+  -- in the database forever. Fix: if a playing game's state hasn't
+  -- changed in a long time AND nobody in the room is currently active
+  -- (checked via the same last_seen_at heartbeat signal used
+  -- everywhere else), auto-end it the same way an expired pause is
+  -- auto-ended -- reusing the existing "ended games get cleaned up 1
+  -- hour later" rule below rather than deleting immediately, so it
+  -- still gets a moment as a normal "ended" room first (consistent
+  -- behavior, same as every other way a game can conclude).
+  update game_state_public gs
+  set phase = 'ended',
+      log = gs.log || jsonb_build_array(jsonb_build_object('kind', 'ended_abandoned'))
+  where gs.phase = 'playing'
+    and gs.updated_at < now() - interval '3 hours'
+    and not exists (
+      select 1 from players p
+      where p.room_id = gs.room_id
+        and p.last_seen_at > now() - (v_presence_grace_seconds || ' seconds')::interval
+    );
+
   -- Step 1: any room paused past its resume deadline gets auto-ended
   -- (not deleted yet) -- this reuses the exact same "ended" path a normal
   -- game conclusion takes, so it then gets cleaned up by the SAME rule

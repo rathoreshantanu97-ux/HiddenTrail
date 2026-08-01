@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import EditRoomSettingsForm from "./EditRoomSettingsForm.jsx";
 import * as api from "../lib/supabaseApi.js";
 import { MAP_LIST } from "../maps/index.js";
 import { computeSeatLayout, seatLabel } from "../lib/seatLayout.js";
@@ -38,6 +39,7 @@ export default function LobbyScreen({
   const [hostPlayerId, setHostPlayerId] = useState(null);
   const [hostInactive, setHostInactive] = useState(false);
   const [freeingSeat, setFreeingSeat] = useState(false);
+  const [showEditSettings, setShowEditSettings] = useState(false);
   const [activePlayerIds, setActivePlayerIds] = useState(null); // null = not yet checked; otherwise a Set of currently-active player ids, used to offer "free this seat" for anyone inactive (not just the host)
 
   const refresh = useCallback(async () => {
@@ -170,6 +172,23 @@ export default function LobbyScreen({
     }
   }
 
+  if (showEditSettings) {
+    return (
+      <EditRoomSettingsForm
+        roomId={roomId}
+        myPlayerId={myPlayerId}
+        currentMapId={mapId}
+        currentNumDetectives={numDetectives}
+        currentTotalPlayers={totalPlayers}
+        onSaved={() => {
+          setShowEditSettings(false);
+          refresh();
+        }}
+        onCancel={() => setShowEditSettings(false)}
+      />
+    );
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.card}>
@@ -269,6 +288,15 @@ export default function LobbyScreen({
           <p style={styles.waitNote}>
             {allSeatsFilled ? "Waiting for the host to start the game..." : "Waiting for everyone to join..."}
           </p>
+        )}
+
+        {isHost && (
+          <button
+            style={{ ...styles.leaveBtn, background: "#fff", color: "#111", border: "1.5px solid #ddd", marginBottom: 8 }}
+            onClick={() => setShowEditSettings(true)}
+          >
+            ← Edit Room Settings
+          </button>
         )}
 
         <button style={styles.leaveBtn} onClick={handleLeave} disabled={leaving}>

@@ -146,24 +146,47 @@ export default function MapBackground({ map }) {
           Bangalore Palace
         </text>
 
-        {/* Ulsoor Lake <-> Bellandur Lake water corridor -- the ferry
-            chain's real geography. Positioned using the ACTUAL new
-            station coordinates (Ulsoor at ~14,24 through Bellandur at
-            ~16,48), rendered as one connected water shape the ferry
-            line visually crosses, rather than two disconnected blobs. */}
+        {/* Kempegowda Airport -- real Bengaluru landmark, placed at the
+            actual coordinates of the renamed station (station 4, the
+            genuine northernmost station on this map, matching the real
+            airport's real-world position north of the city). Simple
+            runway-stripe glyph rather than a building icon. */}
+        <g opacity="0.85">
+          <rect x="35" y="1.5" width="6" height="1" fill="#8a8f96" rx="0.15" />
+          <rect x="36" y="0.8" width="4" height="0.5" fill="#d8d4c8" />
+        </g>
+        <text x="38" y="5.5" fontSize="1.1" textAnchor="middle" fill="#5c6066" fontWeight="600" opacity="0.85">
+          Kempegowda Airport
+        </text>
+
+        {/* Ulsoor Lake / Bellandur Lake -- kept as pure visual scenery
+            (per updated design decision: lakes stay, but no longer
+            gate a special crossing mechanic -- that's now handled by
+            the separate secret-underground-network mechanic instead).
+            Bridges are drawn across the lake shapes so normal
+            taxi/bus/metro routes crossing through this area read as
+            genuinely crossing OVER the water via a bridge, not
+            floating through it. */}
         <path
-          d="M 13 20 C 10 26, 8 32, 10 36 C 12 40, 14 43, 15 48
-             C 16 52, 15 55, 12 56 L 8 54 C 9 48, 9 42, 7 36
-             C 5 30, 6 24, 9 19 Z"
+          d="M 84 32 C 88 36, 90 42, 88 47 C 86 51, 84 54, 85 58
+             C 86 61, 84 63, 81 62 L 78 59 C 80 54, 79 49, 80 44
+             C 81 39, 80 34, 82 30 Z"
           fill="url(#lakeGrad)"
           opacity="0.9"
         />
-        <text x="11" y="30" fontSize="1.2" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
-          Ulsoor Lake
-        </text>
-        <text x="11" y="50" fontSize="1.2" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
+        <text x="86" y="34" fontSize="1.2" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
           Bellandur Lake
         </text>
+        <text x="83" y="58" fontSize="1.2" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
+          Ulsoor Lake
+        </text>
+        {/* Bridge markers -- short pale crossbars, drawn wherever a
+            normal route edge happens to pass over the lake shape, so
+            it visually reads as "crossing a bridge" rather than an
+            unexplained gap in the water. Positioned generically across
+            the lake's narrow points. */}
+        <rect x="82" y="43" width="6" height="1.4" fill="#d8d4c8" opacity="0.9" rx="0.3" transform="rotate(20 85 43.7)" />
+        <rect x="80" y="52" width="6" height="1.4" fill="#d8d4c8" opacity="0.9" rx="0.3" transform="rotate(-15 83 52.7)" />
       </>
     );
   }

@@ -3103,3 +3103,128 @@ begin
 end;
 $$;
 grant execute on function rejoin_lobby_seat(uuid, text) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- leave_room_permanently -- a DELIBERATE departure from a room whose
+-- game has ALREADY ENDED (clicking "New Game" or the spectator screen's
+-- "Leave" button) -- distinct from leave_lobby (pre-game) and from a
+-- mere disconnect (which is just inactivity, handled by presence/
+-- takeover, not a real departure). Removes the player's row and, if
+-- this was the last remaining player, deletes the room immediately
+-- rather than waiting for the scheduled cleanup job's 1-hour grace
+-- period -- there's no reason to keep an ended game's data around once
+-- everyone who might want to see the results screen has actually left.
+-- -----------------------------------------------------------------------------
+drop function if exists leave_room_permanently(uuid, uuid);
+create or replace function leave_room_permanently(
+  p_room_id uuid,
+  p_player_id uuid
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_remaining_count int;
+begin
+  delete from players where id = p_player_id and room_id = p_room_id;
+
+  select count(*) into v_remaining_count from players where room_id = p_room_id;
+  if v_remaining_count = 0 then
+    delete from rooms where id = p_room_id;
+  end if;
+end;
+$$;
+grant execute on function leave_room_permanently(uuid, uuid) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- update_room_settings -- lets the HOST return from the lobby to a
+-- settings-adjustment view and change the room's configuration WITHOUT
+-- leaving/recreating the room (same code, same players, same lobby to
+-- come back to) -- fixes a real gap: previously the only way out of
+-- LobbyScreen was a full leave, which for the host could delete the
+-- whole room if nobody else was there yet.
+--
+-- Only callable by the current host, and only while the room is still
+-- in the lobby (once a game starts, settings are locked in -- changing
+-- them mid-game would invalidate ticket/round calibration that's
+-- already been computed and stored). Reduces detective count is BLOCKED
+-- (not auto-kicking anyone) if it would leave already-seated players in
+-- now-invalid detective slots -- per explicit design decision, a clear
+-- error is safer than silently removing someone from their seat.
+-- -----------------------------------------------------------------------------
+drop function if exists update_room_settings(uuid, uuid, text, int, int, int);
+create or replace function update_room_settings(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_map_id text,
+  p_num_detectives int,
+  p_total_players int,
+  p_map_station_count int default null,
+  p_turn_timer_seconds int default null
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_min_det int := 3;
+  v_max_det int := 20;
+  v_map_max_det int;
+  v_seated_detective_count int;
+  v_map_ratio numeric := 0.08;
+  v_map_ratio_override numeric;
+begin
+  select * into v_room from rooms r where r.id = p_room_id for update;
+  if v_room.id is null then raise exception 'Room not found'; end if;
+  if v_room.host_player_id <> p_caller_player_id then
+    raise exception 'Only the host can change room settings';
+  end if;
+  if v_room.status <> 'lobby' then
+    raise exception 'Settings can only be changed before the game starts';
+  end if;
+
+  -- Same admin-global-bounds check as create_room, kept consistent
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select min_detectives, max_detectives into v_min_det, v_max_det from app_settings where id = 1;
+  end if;
+
+  if p_map_station_count is not null then
+    if exists (select 1 from information_schema.tables where table_name = 'map_settings') then
+      select detective_density_ratio_override into v_map_ratio_override
+        from map_settings where map_id = p_map_id;
+      if v_map_ratio_override is not null then
+        v_map_ratio := greatest(0.01, least(0.20, v_map_ratio_override));
+      end if;
+    end if;
+    v_map_max_det := greatest(3, round(p_map_station_count * v_map_ratio)::int);
+    v_max_det := least(v_max_det, v_map_max_det);
+    if v_max_det < v_min_det then v_min_det := v_max_det; end if;
+  end if;
+
+  if p_num_detectives < v_min_det or p_num_detectives > v_max_det then
+    raise exception 'num_detectives must be between % and % for this map', v_min_det, v_max_det;
+  end if;
+
+  -- BLOCK (don't auto-kick) if reducing detective count would orphan an
+  -- already-seated player -- count distinct detective seat indices
+  -- currently claimed across all players' comma-joined roles.
+  select count(distinct d) into v_seated_detective_count
+  from players p, unnest(string_to_array(p.role, ',')) as seat(d)
+  where p.room_id = p_room_id and seat.d like 'd%' and seat.d ~ '^d[0-9]+$'
+    and (substring(seat.d from 2))::int >= p_num_detectives;
+
+  if v_seated_detective_count > 0 then
+    raise exception 'Cannot reduce to % detectives -- % player(s) are already seated in a detective slot that would no longer exist', p_num_detectives, v_seated_detective_count;
+  end if;
+
+  update rooms
+  set map_id = p_map_id,
+      num_detectives = p_num_detectives,
+      total_players = p_total_players,
+      turn_timer_seconds = p_turn_timer_seconds
+  where id = p_room_id;
+end;
+$$;
+grant execute on function update_room_settings(uuid, uuid, text, int, int, int, int) to anon, authenticated;

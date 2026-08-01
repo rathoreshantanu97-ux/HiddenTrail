@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect } from "react";
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
-import { useTurnHighlightStyle } from "../lib/useTurnHighlightStyle.js";
+import { useHighlightStyles } from "../lib/useHighlightStyles.js";
+import HighlightRing from "./HighlightRing.jsx";
+import MovePopup from "./MovePopup.jsx";
 import { useMoveAnimation } from "../lib/useMoveAnimation.js";
 import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
@@ -41,12 +43,17 @@ export default function GameBoard({
   onDetectiveMove,
   onMrXMove,
   onActivateDoubleMove,
-  extraHeaderContent, // e.g. a "pass to X" banner slot in pass-and-play, or a chat toggle in multiplayer
+  extraHeaderContent, // e.g. a "pass to X" banner slot in pass-and-play; votes in multiplayer -- renders at the very TOP, above everything else
+  belowTicketsContent, // e.g. chat in multiplayer -- renders AFTER the log/tickets panels, per the agreed sidebar order (votes -> huddle -> explorer -> log -> tickets -> chat)
   onExploreModeChange, // (mode|null) => void -- reports this client's own explore-mode selection upward, so App.jsx can broadcast it via Presence
   teammatesExploring = [], // [{playerId, displayName, color, exploreMode}] -- OTHER detectives' current exploration, for the huddle panel (multiplayer only)
   anyDetectiveExploring = false, // true if ANY detective (including possibly this client) currently has an active exploration -- drives Mr.X's content-free "Detectives are discussing" indicator
+  detectivePlayerNames = {}, // detectiveId -> player display name (multiplayer only) -- for the ticket counter's "Priya — D1" labeling
+  secondsRemaining = null, // null (no timer set for this room) | number of seconds left in the current turn -- shown to EVERYONE regardless of whose turn it is
+  turnTimerSeconds = null, // the room's configured timer length, for showing "12 / 60s" style displays
+  roomCode = null, // multiplayer only -- shown persistently so a disconnected player can be told the code to rejoin
 }) {
-  const highlightStyle = useTurnHighlightStyle(roomId); // 'ring' | 'blink', admin/host-configurable
+  const { positionStyle: highlightPositionStyle, destinationStyle: highlightDestinationStyle } = useHighlightStyles(roomId); // each independently 'ring' | 'rotating' | 'blink' | 'static' | 'none'
   const { getProgress } = useMoveAnimation(match.detectives);
   // Detect a just-happened capture ending, so the collision effect knows
   // WHERE to draw itself (the station both Mr.X and the capturing
@@ -83,6 +90,33 @@ export default function GameBoard({
   const [message, setMessage] = useState("");
   const dragState = React.useRef(null);
   const svgRef = React.useRef(null);
+
+  // Converts a station's coordinates (in the SVG's own viewBox
+  // coordinate space, e.g. 0-100) into actual SCREEN pixels, accounting
+  // for the SVG's current pan/zoom state and its rendered size/position
+  // on the page -- this is what lets MovePopup stay visually anchored to
+  // the right station regardless of zoom level or how far the map has
+  // been panned. Mirrors the exact same conversion factor already used
+  // by the existing drag-to-pan handlers above (rect.width/viewSizeW),
+  // just applied to a fixed station position instead of a mouse delta.
+  function svgPointToScreenPoint(svgX, svgY) {
+    if (!svgRef.current) return { x: window.innerWidth / 2, y: window.innerHeight / 2, fallback: true };
+    const rect = svgRef.current.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      // The SVG hasn't been laid out yet (zero-size rect) -- rather than
+      // silently returning null and making the ENTIRE popup (including
+      // its confirm/cancel buttons) vanish, which would leave a player
+      // with a pending move they can't confirm or cancel, fall back to
+      // screen-center. This is a real robustness fix, not just a test
+      // accommodation -- any environment where layout hasn't settled yet
+      // (a slow first paint, an unusual browser) could hit this same
+      // path in production.
+      return { x: window.innerWidth / 2, y: window.innerHeight / 2, fallback: true };
+    }
+    const px = rect.left + ((svgX - pan.x) / viewSizeW) * rect.width;
+    const py = rect.top + ((svgY - pan.y) / viewSizeH) * rect.height;
+    return { x: px, y: py, fallback: false };
+  }
 
   const activeMode = map.modeTheme || MODE_DEFAULT;
   const stationLabel = (id) => (map.names ? `${map.names[id]} (#${id})` : `station ${id}`);
@@ -253,21 +287,19 @@ export default function GameBoard({
       : myOwnDetectives.find((d) => d.id === exploreFromDetectiveId) || myOwnDetectives[0] || null;
 
   function computeReachableFrom(fromPos, mode) {
+    // Shows only the DIRECT, one-hop legal destinations for this mode --
+    // i.e. the actual stations you could move to right now by spending
+    // one ticket of this type, not "everywhere eventually reachable via
+    // unlimited hops of this mode." The taxi tier especially is a dense,
+    // fully-connected local mesh (by design), so an unbounded walk would
+    // reach nearly the entire map -- which is exactly the bug this fixes
+    // (confirmed: taxi was highlighting almost every station).
     if (!mode || fromPos == null) return new Set();
-    const visited = new Set([fromPos]);
-    const queue = [fromPos];
-    let qi = 0;
-    while (qi < queue.length) {
-      const cur = queue[qi++];
-      for (const edge of map.graph[cur] || []) {
-        if (edge.mode === mode && !visited.has(edge.to)) {
-          visited.add(edge.to);
-          queue.push(edge.to);
-        }
-      }
+    const reachable = new Set();
+    for (const edge of map.graph[fromPos] || []) {
+      if (edge.mode === mode) reachable.add(edge.to);
     }
-    visited.delete(fromPos);
-    return visited;
+    return reachable;
   }
 
   const exploreReachable = useMemo(() => {
@@ -390,6 +422,12 @@ export default function GameBoard({
                 )}
                 {isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}
               </div>
+              {secondsRemaining != null && (
+                <div style={{ ...styles.turnTimerLabel, ...(secondsRemaining <= 10 ? styles.turnTimerLabelUrgent : {}) }}>
+                  ⏱ {secondsRemaining}s {turnTimerSeconds ? `/ ${turnTimerSeconds}s` : ""}
+                </div>
+              )}
+              {roomCode && <div style={styles.roomCodeLabel}>Room code: {roomCode}</div>}
             </div>
             <div style={styles.ticketsPanel}>
               {isMrXTurn
@@ -404,35 +442,68 @@ export default function GameBoard({
 
           {extraHeaderContent}
 
-          <div style={styles.allTicketsPanel}>
-            <div style={styles.travelLogTitle}>Everyone's tickets</div>
-            <div style={styles.detectiveOverviewRow}>
-              <div style={styles.detectiveOverviewCard}>
-                <div style={{ ...styles.detectiveOverviewDot, background: "#1a1a1a" }} />
-                <span style={{ fontWeight: 700, marginRight: 4 }}>{mrxName()}</span>
-                {Object.entries(match.mrX.tickets).map(([mode, count]) => (
-                  <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode] ? activeMode[mode].color : "#666" }}>
-                    {mode === "double" ? "2x" : activeMode[mode].short}
-                    {count}
-                  </span>
-                ))}
-              </div>
-              {match.detectives.map((d) => (
-                <div key={d.id} style={styles.detectiveOverviewCard}>
-                  <div style={{ ...styles.detectiveOverviewDot, background: d.color }} />
-                  <span style={{ fontWeight: 700, marginRight: 4 }}>
-                    {isWesteros ? detectiveName(d.id) : `D${d.id + 1}`}
-                  </span>
-                  {Object.entries(d.tickets).map(([mode, count]) => (
-                    <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode].color }}>
-                      {activeMode[mode].short}
-                      {count}
-                    </span>
-                  ))}
-                </div>
+          {isMrXTurn && anyDetectiveExploring && (
+            <div style={styles.huddleAmbientNote}>👀 Detectives are discussing...</div>
+          )}
+
+          {iAmDetective && teammatesExploring.length > 0 && (
+            <div style={styles.huddlePanel}>
+              <div style={styles.exploreLabel}>Teammates exploring:</div>
+              {teammatesExploring.map((t) => (
+                <button
+                  key={t.playerId}
+                  style={{
+                    ...styles.huddleRow,
+                    ...(peekedTeammateId === t.playerId ? styles.huddleRowActive : {}),
+                  }}
+                  onClick={() => setPeekedTeammateId(peekedTeammateId === t.playerId ? null : t.playerId)}
+                >
+                  <span style={{ ...styles.huddleDot, background: t.color }} />
+                  {t.displayName}: {activeMode[t.exploreMode]?.label || t.exploreMode}
+                  {peekedTeammateId === t.playerId ? " (peeking)" : ""}
+                </button>
               ))}
             </div>
-          </div>
+          )}
+
+          {(isMrXTurn ? isMyTurnToAct : iAmDetective || myRole === null) && routeExplorerEnabled && exploreModeOptions.length > 0 && (
+            <div style={styles.exploreRow}>
+              {myOwnDetectives.length > 1 && (
+                <select
+                  style={styles.exploreDetectivePicker}
+                  value={exploringDetective?.id ?? ""}
+                  onChange={(e) => {
+                    setExploreFromDetectiveId(Number(e.target.value));
+                    setExploreMode(null); // switching whose position we explore from clears any active highlight, since it'd otherwise show stale reachability from the previous detective
+                  }}
+                >
+                  {myOwnDetectives.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      Explore from {isWesteros ? detectiveName(d.id) : `Detective ${d.id + 1}`}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <span style={styles.exploreLabel}>Show reachable stations by:</span>
+              {exploreModeOptions.map((mode) => (
+                <button
+                  key={mode}
+                  style={{
+                    ...styles.exploreBtn,
+                    ...(exploreMode === mode ? { ...styles.exploreBtnActive, borderColor: activeMode[mode].color } : {}),
+                  }}
+                  onClick={() => setExploreMode(exploreMode === mode ? null : mode)}
+                >
+                  {activeMode[mode].label}
+                </button>
+              ))}
+              {exploreMode && (
+                <button style={styles.exploreClearBtn} onClick={() => setExploreMode(null)}>
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
 
           {!isMrXTurn && (
             <div style={styles.travelLogPanel}>
@@ -503,72 +574,60 @@ export default function GameBoard({
             </div>
           )}
 
+          <div style={styles.allTicketsPanel}>
+            <div style={styles.travelLogTitle}>Everyone's tickets</div>
+            <div style={styles.detectiveOverviewRow}>
+              <div style={styles.detectiveOverviewCard}>
+                <div style={{ ...styles.detectiveOverviewDot, background: "#1a1a1a" }} />
+                <span style={{ fontWeight: 700, marginRight: 4 }}>{mrxName()}</span>
+                {Object.entries(match.mrX.tickets).map(([mode, count]) => (
+                  <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode] ? activeMode[mode].color : "#666" }}>
+                    {mode === "double" ? "2x" : activeMode[mode].short}
+                    {count}
+                  </span>
+                ))}
+              </div>
+              {match.detectives.map((d) => {
+                // Naming rules (agreed): pass-and-play (myRole===null, no
+                // real player identities) keeps the old bare "Dn" label,
+                // since there's nothing else to show. Multiplayer: your
+                // OWN seat(s) show "You" (or "You — Character" on
+                // Westeros, where players pick a fixed character rather
+                // than typing their own name); other players show their
+                // real display name (or their chosen character name on
+                // Westeros) — never a bare seat number once real
+                // identities exist.
+                const isMine = controlsSeat(`d${d.id}`);
+                let label;
+                if (myRole === null) {
+                  label = `D${d.id + 1}`;
+                } else if (isWesteros) {
+                  label = isMine ? `You — ${detectiveName(d.id)}` : `${detectiveName(d.id)} — D${d.id + 1}`;
+                } else {
+                  const playerName = detectivePlayerNames[d.id];
+                  label = isMine ? `You — D${d.id + 1}` : playerName ? `${playerName} — D${d.id + 1}` : `D${d.id + 1}`;
+                }
+                return (
+                  <div key={d.id} style={styles.detectiveOverviewCard}>
+                    <div style={{ ...styles.detectiveOverviewDot, background: d.color }} />
+                    <span style={{ fontWeight: 700, marginRight: 4 }}>{label}</span>
+                    {Object.entries(d.tickets).map(([mode, count]) => (
+                      <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode].color }}>
+                        {activeMode[mode].short}
+                        {count}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {belowTicketsContent}
+
           {isMrXTurn && isMyTurnToAct && !pendingMove && (
             <div style={styles.ruleNote}>
               Stations with a red dashed ring hold a detective — moving onto one ends the game immediately.
-            </div>
-          )}
-
-          {isMrXTurn && anyDetectiveExploring && (
-            <div style={styles.huddleAmbientNote}>👀 Detectives are discussing...</div>
-          )}
-
-          {iAmDetective && teammatesExploring.length > 0 && (
-            <div style={styles.huddlePanel}>
-              <div style={styles.exploreLabel}>Teammates exploring:</div>
-              {teammatesExploring.map((t) => (
-                <button
-                  key={t.playerId}
-                  style={{
-                    ...styles.huddleRow,
-                    ...(peekedTeammateId === t.playerId ? styles.huddleRowActive : {}),
-                  }}
-                  onClick={() => setPeekedTeammateId(peekedTeammateId === t.playerId ? null : t.playerId)}
-                >
-                  <span style={{ ...styles.huddleDot, background: t.color }} />
-                  {t.displayName}: {activeMode[t.exploreMode]?.label || t.exploreMode}
-                  {peekedTeammateId === t.playerId ? " (peeking)" : ""}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {(isMrXTurn ? isMyTurnToAct : iAmDetective || myRole === null) && routeExplorerEnabled && exploreModeOptions.length > 0 && (
-            <div style={styles.exploreRow}>
-              {myOwnDetectives.length > 1 && (
-                <select
-                  style={styles.exploreDetectivePicker}
-                  value={exploringDetective?.id ?? ""}
-                  onChange={(e) => {
-                    setExploreFromDetectiveId(Number(e.target.value));
-                    setExploreMode(null); // switching whose position we explore from clears any active highlight, since it'd otherwise show stale reachability from the previous detective
-                  }}
-                >
-                  {myOwnDetectives.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      Explore from {isWesteros ? detectiveName(d.id) : `Detective ${d.id + 1}`}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <span style={styles.exploreLabel}>Show reachable stations by:</span>
-              {exploreModeOptions.map((mode) => (
-                <button
-                  key={mode}
-                  style={{
-                    ...styles.exploreBtn,
-                    ...(exploreMode === mode ? { ...styles.exploreBtnActive, borderColor: activeMode[mode].color } : {}),
-                  }}
-                  onClick={() => setExploreMode(exploreMode === mode ? null : mode)}
-                >
-                  {activeMode[mode].label}
-                </button>
-              ))}
-              {exploreMode && (
-                <button style={styles.exploreClearBtn} onClick={() => setExploreMode(null)}>
-                  Clear
-                </button>
-              )}
             </div>
           )}
 
@@ -586,54 +645,6 @@ export default function GameBoard({
                 onClick={onActivateDoubleMove}
               >
                 Play 2x card ({match.mrX.tickets.double} left)
-              </button>
-            </div>
-          )}
-
-          {isMrXTurn && isMyTurnToAct && pendingMove && (
-            <div style={styles.ticketChooser}>
-              <div style={{ marginBottom: 6 }}>Move to {stationLabel(pendingMove.to)} via:</div>
-              <div style={styles.rowCenter}>
-                {pendingMove.edgeMode === "ferry" ? (
-                  <button style={{ ...styles.primaryBtn, background: activeMode.ferry.color }} onClick={() => commitMrXMove("black")}>
-                    {activeMode.ferry.label} (uses 1 black ticket)
-                  </button>
-                ) : (
-                  <>
-                    {match.mrX.tickets[pendingMove.edgeMode] > 0 && (
-                      <button style={styles.primaryBtn} onClick={() => commitMrXMove(pendingMove.edgeMode)}>
-                        {activeMode[pendingMove.edgeMode].label} ticket
-                      </button>
-                    )}
-                    {match.mrX.tickets.black > 0 && (
-                      <button style={{ ...styles.primaryBtn, background: "#2b2b2b" }} onClick={() => commitMrXMove("black")}>
-                        Black ticket (camouflage)
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-              <button style={styles.linkBtn} onClick={() => setPendingMove(null)}>
-                Cancel
-              </button>
-            </div>
-          )}
-
-          {!isMrXTurn && activeDetective && isMyTurnToAct && pendingMove && (
-            <div style={styles.ticketChooser}>
-              <div style={{ marginBottom: 10 }}>
-                Move to {stationLabel(pendingMove.to)} using a {activeMode[pendingMove.mode].label} ticket?
-              </div>
-              <div style={styles.rowCenter}>
-                <button
-                  style={styles.primaryBtn}
-                  onClick={() => commitDetectiveMove(activeDetective.id, pendingMove.to, pendingMove.mode)}
-                >
-                  Confirm move
-                </button>
-              </div>
-              <button style={styles.linkBtn} onClick={() => setPendingMove(null)}>
-                Cancel
               </button>
             </div>
           )}
@@ -816,16 +827,7 @@ export default function GameBoard({
                   <g key={id} onClick={() => handleStationClick(numId)} style={{ cursor: isLegal ? "pointer" : "default" }}>
                     <circle cx={x} cy={y} r={2.6 * sizeScale} fill="transparent" />
                     {isLegal && !dangerTarget && (
-                      <circle cx={x} cy={y} r={nodeR + 0.7} fill="none" stroke="#1a1a1a" strokeWidth={0.25} strokeDasharray="0.7,0.7" opacity={0.7}>
-                        <animateTransform
-                          attributeName="transform"
-                          type="rotate"
-                          from={`0 ${x} ${y}`}
-                          to={`360 ${x} ${y}`}
-                          dur="4s"
-                          repeatCount="indefinite"
-                        />
-                      </circle>
+                      <HighlightRing x={x} y={y} radius={nodeR + 0.7} color="#1a1a1a" strokeWidth={0.25} dashed style={highlightDestinationStyle} />
                     )}
                     {dangerTarget && (
                       <circle cx={x} cy={y} r={nodeR + 0.9} fill="none" stroke="#c0392b" strokeWidth={0.4} strokeDasharray="0.5,0.5" />
@@ -859,29 +861,26 @@ export default function GameBoard({
                         <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.6s" repeatCount="indefinite" />
                       </circle>
                     )}
-                    {isCurrentTurnStation && highlightStyle === "ring" && (
-                      <circle cx={x} cy={y} r={nodeR + 1.2} fill="none" stroke={activeDetective.color} strokeWidth={0.4} opacity={0.9}>
-                        <animate attributeName="r" values={`${nodeR + 0.9}; ${nodeR + 2}; ${nodeR + 0.9}`} dur="1.2s" repeatCount="indefinite" />
-                        <animate attributeName="opacity" values="0.9;0.25;0.9" dur="1.2s" repeatCount="indefinite" />
-                      </circle>
+                    {isCurrentTurnStation && highlightPositionStyle !== "blink" && (
+                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={activeDetective.color} strokeWidth={0.4} style={highlightPositionStyle} />
                     )}
-                    {isMrXOwnTurnIndicator && highlightStyle === "ring" && (
-                      <circle cx={x} cy={y} r={nodeR + 1.2} fill="none" stroke="#1a1a1a" strokeWidth={0.4} opacity={0.9}>
-                        <animate attributeName="r" values={`${nodeR + 0.9}; ${nodeR + 2}; ${nodeR + 0.9}`} dur="1.2s" repeatCount="indefinite" />
-                        <animate attributeName="opacity" values="0.9;0.25;0.9" dur="1.2s" repeatCount="indefinite" />
-                      </circle>
+                    {isMrXOwnTurnIndicator && highlightPositionStyle !== "blink" && (
+                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color="#1a1a1a" strokeWidth={0.4} style={highlightPositionStyle} />
                     )}
                     <circle cx={x} cy={y} r={nodeR} fill={fill} stroke={stroke} strokeWidth={0.35} filter="url(#softShadow)">
                       {/* Blink style: animates the actual node's own fill
                           opacity, per project request, instead of a
-                          separate zooming ring -- applied to whichever
-                          station currently has one of the two turn
+                          separate ring -- applied to whichever station
+                          currently has one of the two position
                           indicators active. Only one of the two can ever
                           be true for the same station at once (a
                           detective's turn and Mr.X's turn never overlap),
                           so there's no conflict animating the same
-                          element for both cases. */}
-                      {highlightStyle === "blink" && (isCurrentTurnStation || isMrXOwnTurnIndicator) && (
+                          element for both cases. Handled here rather
+                          than inside HighlightRing since it animates a
+                          DIFFERENT element (the station's own fill, not
+                          a separate ring). */}
+                      {highlightPositionStyle === "blink" && (isCurrentTurnStation || isMrXOwnTurnIndicator) && (
                         <animate attributeName="opacity" values="1;0.35;1" dur="1s" repeatCount="indefinite" />
                       )}
                     </circle>
@@ -1002,6 +1001,62 @@ export default function GameBoard({
                 </g>
               )}
             </svg>
+            {isMyTurnToAct && pendingMove && (() => {
+              const [sx, sy] = map.stations[pendingMove.to];
+              const screenPos = svgPointToScreenPoint(sx, sy);
+              if (isMrXTurn) {
+                const options = [];
+                if (pendingMove.edgeMode === "ferry") {
+                  options.push({
+                    key: "ferry",
+                    label: `${activeMode.ferry.label} (black ticket)`,
+                    accent: activeMode.ferry.color,
+                    onClick: () => commitMrXMove("black"),
+                  });
+                } else {
+                  if (match.mrX.tickets[pendingMove.edgeMode] > 0) {
+                    options.push({
+                      key: "mode",
+                      label: `${activeMode[pendingMove.edgeMode].label} ticket`,
+                      onClick: () => commitMrXMove(pendingMove.edgeMode),
+                    });
+                  }
+                  if (match.mrX.tickets.black > 0) {
+                    options.push({ key: "black", label: "Black ticket (camouflage)", accent: "#2b2b2b", onClick: () => commitMrXMove("black") });
+                  }
+                }
+                return (
+                  <MovePopup
+                    x={screenPos.x}
+                    y={screenPos.y}
+                    fallback={screenPos.fallback}
+                    title={`Move to ${stationLabel(pendingMove.to)} via:`}
+                    options={options}
+                    onClose={() => setPendingMove(null)}
+                  />
+                );
+              }
+
+              if (activeDetective) {
+                return (
+                  <MovePopup
+                    x={screenPos.x}
+                    y={screenPos.y}
+                    fallback={screenPos.fallback}
+                    title={`Move to ${stationLabel(pendingMove.to)} using ${activeMode[pendingMove.mode].label}?`}
+                    options={[
+                      {
+                        key: "confirm",
+                        label: "Confirm move",
+                        onClick: () => commitDetectiveMove(activeDetective.id, pendingMove.to, pendingMove.mode),
+                      },
+                    ]}
+                    onClose={() => setPendingMove(null)}
+                  />
+                );
+              }
+              return null;
+            })()}
             <div style={styles.zoomControls}>
               <button style={styles.zoomBtn} onClick={() => zoomBy(1.4)} aria-label="Zoom in">
                 +
@@ -1207,6 +1262,9 @@ export const styles = {
   },
   roundLabel: { fontSize: 12, color: "#888" },
   turnLabel: { fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 },
+  turnTimerLabel: { fontSize: 13, fontWeight: 600, color: "#666", marginTop: 2 },
+  turnTimerLabelUrgent: { color: "#c0392b" },
+  roomCodeLabel: { fontSize: 11, color: "#aaa", marginTop: 2, letterSpacing: 0.5 },
   turnColorDot: { width: 12, height: 12, borderRadius: "50%", display: "inline-block", flexShrink: 0 },
   ticketsPanel: { display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 },
   chip: {

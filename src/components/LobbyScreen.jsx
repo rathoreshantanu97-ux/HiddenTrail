@@ -35,6 +35,10 @@ export default function LobbyScreen({
   const [switching, setSwitching] = useState(false);
   const [reassigning, setReassigning] = useState(false);
   const [err, setErr] = useState("");
+  const [hostPlayerId, setHostPlayerId] = useState(null);
+  const [hostInactive, setHostInactive] = useState(false);
+  const [freeingSeat, setFreeingSeat] = useState(false);
+  const [activePlayerIds, setActivePlayerIds] = useState(null); // null = not yet checked; otherwise a Set of currently-active player ids, used to offer "free this seat" for anyone inactive (not just the host)
 
   const refresh = useCallback(async () => {
     try {
@@ -43,6 +47,28 @@ export default function LobbyScreen({
     } catch (e) {
       console.error("Failed to fetch players:", e);
     }
+    // Fixes a real gap found during the failure-point audit: if the
+    // host disconnects while the room is still in the LOBBY (before the
+    // game starts), the existing takeover system doesn't apply (it's
+    // only for an active game), and there was previously no way for
+    // anyone else to recover -- this check is what lets a "Claim host"
+    // button appear for everyone else once the current host is
+    // genuinely inactive (see reassign_host's own server-side safety
+    // check, which independently re-verifies this before actually
+    // allowing the claim -- this client-side check only controls
+    // whether the BUTTON appears, not whether the action is actually
+    // permitted).
+    try {
+      const room = await api.fetchRoom(roomId);
+      setHostPlayerId(room?.host_player_id ?? null);
+      const activeIds = await api.getActivePlayerIds(roomId);
+      setActivePlayerIds(new Set(activeIds));
+      if (room?.host_player_id) {
+        setHostInactive(!activeIds.includes(room.host_player_id));
+      }
+    } catch (e) {
+      console.error("Failed to check host activity:", e);
+    }
   }, [roomId]);
 
   useEffect(() => {
@@ -50,6 +76,33 @@ export default function LobbyScreen({
     const id = setInterval(refresh, 3000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  async function handleClaimHost() {
+    setReassigning(true);
+    setErr("");
+    try {
+      await api.reassignHost({ roomId, callerPlayerId: myPlayerId, newHostPlayerId: myPlayerId });
+      onHostChanged && onHostChanged(true);
+      await refresh();
+    } catch (e) {
+      setErr(e.message || "Failed to claim host.");
+    } finally {
+      setReassigning(false);
+    }
+  }
+
+  async function handleFreeSeat(targetRole) {
+    setFreeingSeat(true);
+    setErr("");
+    try {
+      await api.freeInactiveLobbySeat({ roomId, callerPlayerId: myPlayerId, targetRole });
+      await refresh();
+    } catch (e) {
+      setErr(e.message || "Failed to free that seat.");
+    } finally {
+      setFreeingSeat(false);
+    }
+  }
 
   const map = MAP_LIST.find((m) => m.id === mapId);
 
@@ -107,7 +160,7 @@ export default function LobbyScreen({
     setReassigning(true);
     setErr("");
     try {
-      await api.reassignHost({ roomId, newHostPlayerId });
+      await api.reassignHost({ roomId, callerPlayerId: myPlayerId, newHostPlayerId });
       onHostChanged && onHostChanged(false); // this client is no longer host
       await refresh();
     } catch (e) {
@@ -128,12 +181,28 @@ export default function LobbyScreen({
           <div style={styles.code}>{roomCode}</div>
         </div>
 
+        {hostInactive && !isHost && hostPlayerId && (
+          <div style={styles.hostInactiveBanner}>
+            <span>The host appears to have disconnected.</span>
+            <button style={styles.claimHostBtn} onClick={handleClaimHost} disabled={reassigning}>
+              {reassigning ? "Claiming..." : "Claim host"}
+            </button>
+          </div>
+        )}
+
         <div style={styles.slotsList}>
           {allSeatRoles.map((seatRole) => {
             const p = players.find((pl) => pl.role === seatRole);
             const isMine = seatRole === myRole;
             const isOpen = !p;
             const canMakeHost = isHost && p && !isMine;
+            // A seat can be freed by ANY active player once its occupant
+            // is confirmed inactive (not gated to host-only, unlike
+            // "Make host" -- freeing a stuck detective seat is a much
+            // lower-stakes action than transferring host, so this
+            // deliberately doesn't require host status).
+            const seatInactive = p && activePlayerIds && !activePlayerIds.has(p.id);
+            const canFreeSeat = seatInactive && !isMine;
             return (
               <div
                 key={seatRole}
@@ -151,6 +220,7 @@ export default function LobbyScreen({
                 <span style={styles.slotRightSide}>
                   <span style={p ? styles.slotFilled : styles.slotEmpty}>
                     {p ? p.display_name : isOpen ? "tap to join" : "waiting..."}
+                    {seatInactive && <span style={styles.inactiveTag}> (inactive)</span>}
                   </span>
                   {canMakeHost && (
                     <button
@@ -162,6 +232,18 @@ export default function LobbyScreen({
                       disabled={reassigning}
                     >
                       Make host
+                    </button>
+                  )}
+                  {canFreeSeat && (
+                    <button
+                      style={styles.freeSeatBtn}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleFreeSeat(seatRole);
+                      }}
+                      disabled={freeingSeat}
+                    >
+                      Free seat
                     </button>
                   )}
                 </span>
@@ -228,6 +310,28 @@ const styles = {
   },
   codeLabel: { fontSize: 12, color: "#888", marginBottom: 4 },
   code: { fontSize: 30, fontWeight: 800, letterSpacing: 4 },
+  hostInactiveBanner: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    background: "#fdecea",
+    border: "1.3px solid #e0a8a8",
+    borderRadius: 10,
+    padding: "10px 14px",
+    marginBottom: 16,
+    fontSize: 13,
+    color: "#a33",
+  },
+  claimHostBtn: {
+    border: "none",
+    background: "#a33",
+    color: "#fff",
+    borderRadius: 8,
+    padding: "6px 12px",
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
   slotsList: { display: "flex", flexDirection: "column", gap: 6, marginBottom: 16, textAlign: "left" },
   slotRow: {
     display: "flex",
@@ -254,6 +358,16 @@ const styles = {
     fontSize: 11,
     cursor: "pointer",
     color: "#555",
+  },
+  inactiveTag: { color: "#a33", fontWeight: 600, fontSize: 11 },
+  freeSeatBtn: {
+    border: "1px solid #e0a8a8",
+    background: "#fdecea",
+    borderRadius: 6,
+    padding: "3px 8px",
+    fontSize: 11,
+    cursor: "pointer",
+    color: "#a33",
   },
   slotRole: { fontWeight: 600, color: "#333" },
   slotFilled: { color: "#111", fontWeight: 600 },

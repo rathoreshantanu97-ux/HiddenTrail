@@ -503,20 +503,46 @@ export default function AdminPanel({ accountId, onBack }) {
           ))}
 
           <div style={styles.featureRow}>
-            <span style={styles.featureLabel}>Turn highlight style (default)</span>
+            <span style={styles.featureLabel}>Position highlight style (default) — your turn / Mr. X's own view</span>
             <select
               style={styles.configInput}
-              value={featureDraft.turnHighlightStyle}
-              onChange={(e) => setFeatureDraft({ ...featureDraft, turnHighlightStyle: e.target.value })}
+              value={featureDraft.positionHighlightStyle}
+              onChange={(e) => setFeatureDraft({ ...featureDraft, positionHighlightStyle: e.target.value })}
             >
-              <option value="ring">Ring</option>
+              <option value="ring">Pulsing ring</option>
+              <option value="rotating">Rotating ring</option>
               <option value="blink">Blink</option>
+              <option value="static">Static ring</option>
+              <option value="none">None</option>
             </select>
             <label style={styles.featureCheckboxLabel}>
               <input
                 type="checkbox"
-                checked={featureDraft.turnHighlightStyleOverridable}
-                onChange={(e) => setFeatureDraft({ ...featureDraft, turnHighlightStyleOverridable: e.target.checked })}
+                checked={featureDraft.positionHighlightStyleOverridable}
+                onChange={(e) => setFeatureDraft({ ...featureDraft, positionHighlightStyleOverridable: e.target.checked })}
+              />
+              Hosts can override per-room
+            </label>
+          </div>
+
+          <div style={styles.featureRow}>
+            <span style={styles.featureLabel}>Destination highlight style (default) — legal moves</span>
+            <select
+              style={styles.configInput}
+              value={featureDraft.destinationHighlightStyle}
+              onChange={(e) => setFeatureDraft({ ...featureDraft, destinationHighlightStyle: e.target.value })}
+            >
+              <option value="ring">Pulsing ring</option>
+              <option value="rotating">Rotating ring</option>
+              <option value="blink">Blink</option>
+              <option value="static">Static ring</option>
+              <option value="none">None</option>
+            </select>
+            <label style={styles.featureCheckboxLabel}>
+              <input
+                type="checkbox"
+                checked={featureDraft.destinationHighlightStyleOverridable}
+                onChange={(e) => setFeatureDraft({ ...featureDraft, destinationHighlightStyleOverridable: e.target.checked })}
               />
               Hosts can override per-room
             </label>

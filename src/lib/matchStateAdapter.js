@@ -48,6 +48,7 @@ export function rowToMatch(gsRow, myMrxPosition) {
     // changing ones above.
     startingMrxTickets: gsRow.starting_mrx_tickets,
     startingDetectiveTickets: gsRow.starting_detective_tickets,
+    turnStartedAt: gsRow.turn_started_at,
   };
 }
 

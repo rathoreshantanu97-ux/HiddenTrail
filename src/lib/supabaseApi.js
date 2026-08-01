@@ -39,7 +39,8 @@ export async function createRoom({
     p_redistribute_roles_override: featureOverrides.redistributeRoles ?? null,
     p_turn_timer_seconds: turnTimerSeconds ?? null,
     p_map_station_count: mapStationCount ?? null,
-    p_turn_highlight_style_override: featureOverrides.turnHighlightStyle ?? null,
+    p_position_highlight_style_override: featureOverrides.positionHighlightStyle ?? null,
+    p_destination_highlight_style_override: featureOverrides.destinationHighlightStyle ?? null,
     p_route_explorer_override: featureOverrides.routeExplorer ?? null,
     p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
     p_is_public: isPublic,
@@ -192,8 +193,8 @@ export async function getAllChannelMessages({ roomId, after }) {
   }));
 }
 
-export async function reassignHost({ roomId, newHostPlayerId }) {
-  await callRpc("reassign_host", { p_room_id: roomId, p_new_host_player_id: newHostPlayerId });
+export async function reassignHost({ roomId, callerPlayerId, newHostPlayerId }) {
+  await callRpc("reassign_host", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_new_host_player_id: newHostPlayerId });
 }
 
 export async function leaveLobby({ roomId, playerId }) {
@@ -447,6 +448,49 @@ export async function getPublicRooms() {
   }));
 }
 
+export async function getReconnectableLobbySeats(roomCode) {
+  const rows = await callRpc("get_reconnectable_lobby_seats", { p_room_code: roomCode });
+  return (rows || []).map((r) => ({
+    roomId: r.out_room_id,
+    playerId: r.out_player_id,
+    role: r.out_role,
+    displayName: r.out_display_name,
+  }));
+}
+
+export async function rejoinLobbySeat({ playerId, displayName }) {
+  const rows = await callRpc("rejoin_lobby_seat", { p_player_id: playerId, p_display_name: displayName ?? null });
+  const row = rows?.[0];
+  if (!row) throw new Error("Failed to rejoin.");
+  return { roomId: row.out_room_id, role: row.out_role };
+}
+
+export async function freeInactiveLobbySeat({ roomId, callerPlayerId, targetRole }) {
+  await callRpc("free_inactive_lobby_seat", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_target_role: targetRole });
+}
+
+export async function getReconnectableSeats(roomCode) {
+  const rows = await callRpc("get_reconnectable_seats", { p_room_code: roomCode });
+  return (rows || []).map((r) => ({
+    roomId: r.out_room_id,
+    playerId: r.out_player_id,
+    role: r.out_role,
+    displayName: r.out_display_name,
+  }));
+}
+
+export async function rejoinOwnSeat(playerId) {
+  const rows = await callRpc("rejoin_own_seat", { p_player_id: playerId });
+  const row = rows?.[0];
+  if (!row) throw new Error("Failed to rejoin.");
+  return { roomId: row.out_room_id, role: row.out_role };
+}
+
+export async function getActivePlayerIds(roomId) {
+  const rows = await callRpc("get_active_player_ids", { p_room_id: roomId });
+  return (rows || []).map((r) => r.out_player_id);
+}
+
 export async function fetchRoom(roomId) {
   const { data, error } = await supabase.from("rooms").select("*").eq("id", roomId).single();
   if (error) throw new Error(error.message);
@@ -455,17 +499,22 @@ export async function fetchRoom(roomId) {
 
 export async function isFeatureEnabled({ featureName, roomId }) {
   // NOTE: is_feature_enabled returns a scalar boolean, not a table --
-  // same shape consideration as getEffectiveTurnHighlightStyle above.
+  // same shape consideration as getEffectivePositionHighlightStyle above.
   const value = await callRpc("is_feature_enabled", { p_feature_name: featureName, p_room_id: roomId || null });
   return value !== false; // fail open (missing/null treated as enabled) rather than silently hide a feature on a glitch
 }
 
-export async function getEffectiveTurnHighlightStyle(roomId) {
+export async function getEffectivePositionHighlightStyle(roomId) {
   // NOTE: this Postgres function returns a scalar (text), not a table --
   // PostgREST shapes scalar-function responses as the raw value itself,
   // not wrapped in a rows array the way table-returning functions are.
-  const value = await callRpc("get_effective_turn_highlight_style", { p_room_id: roomId });
+  const value = await callRpc("get_effective_position_highlight_style", { p_room_id: roomId });
   return value || "ring";
+}
+
+export async function getEffectiveDestinationHighlightStyle(roomId) {
+  const value = await callRpc("get_effective_destination_highlight_style", { p_room_id: roomId });
+  return value || "rotating";
 }
 
 export async function fetchPlayers(roomId) {

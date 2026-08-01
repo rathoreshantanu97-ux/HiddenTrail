@@ -8,6 +8,16 @@ import { supabase } from "./supabaseClient.js";
 const SESSION_TOKEN_KEY = "scotlandyard_session_token";
 
 async function callRpc(name, args) {
+  if (!supabase) {
+    // Supabase isn't configured -- this is a NORMAL, supported state
+    // (pass-and-play is explicitly designed to work without it). Throw
+    // a clear, catchable error so callers' existing try/catch fallback
+    // logic (e.g. getFeatureConfig returning sensible defaults) actually
+    // runs, instead of a raw "Cannot read properties of null" TypeError
+    // that looks the same to a catch block but is a worse signal for
+    // debugging and was masking this exact class of gap.
+    throw new Error(`Supabase not configured -- cannot call ${name}`);
+  }
   const { data, error } = await supabase.rpc(name, args);
   if (error) throw new Error(error.message || `RPC ${name} failed`);
   return data;
@@ -263,20 +273,35 @@ export async function setMapTicketOverrides({
 }
 
 export async function getFeatureConfig() {
-  const rows = await callRpc("get_feature_config", {});
-  const row = rows?.[0];
+  const defaults = {
+    takeoversEnabled: true, takeoversOverridable: true,
+    takeoverReversalEnabled: true, takeoverReversalOverridable: true,
+    endGameVoteEnabled: true, endGameVoteOverridable: true,
+    pauseResumeEnabled: true, pauseResumeOverridable: true,
+    redistributeRolesEnabled: true, redistributeRolesOverridable: true,
+    positionHighlightStyle: "ring", positionHighlightStyleOverridable: true,
+    destinationHighlightStyle: "rotating", destinationHighlightStyleOverridable: true,
+    routeExplorerEnabled: true, routeExplorerOverridable: true,
+    roundScalingRatio: 1.0, roundScalingOverridable: true,
+    publicRoomsEnabled: true,
+  };
+  let row;
+  try {
+    const rows = await callRpc("get_feature_config", {});
+    row = rows?.[0];
+  } catch (e) {
+    // Includes the "Supabase not configured" case (pass-and-play works
+    // without a server connection by design) as well as genuine network
+    // failures -- either way, fall back to sensible defaults rather than
+    // letting this propagate and silently break every UI that depends on
+    // it (this was a real gap: pass-and-play's round-scaling selector
+    // never appeared at all without a Supabase connection, since this
+    // function used to just throw instead of falling back).
+    console.error("getFeatureConfig failed, using defaults:", e.message);
+    row = null;
+  }
   if (!row) {
-    return {
-      takeoversEnabled: true, takeoversOverridable: true,
-      takeoverReversalEnabled: true, takeoverReversalOverridable: true,
-      endGameVoteEnabled: true, endGameVoteOverridable: true,
-      pauseResumeEnabled: true, pauseResumeOverridable: true,
-      redistributeRolesEnabled: true, redistributeRolesOverridable: true,
-      turnHighlightStyle: "ring", turnHighlightStyleOverridable: true,
-      routeExplorerEnabled: true, routeExplorerOverridable: true,
-      roundScalingRatio: 1.0, roundScalingOverridable: true,
-      publicRoomsEnabled: true,
-    };
+    return defaults;
   }
   return {
     takeoversEnabled: row.out_takeovers_enabled,
@@ -289,8 +314,10 @@ export async function getFeatureConfig() {
     pauseResumeOverridable: row.out_pause_resume_overridable,
     redistributeRolesEnabled: row.out_redistribute_roles_enabled,
     redistributeRolesOverridable: row.out_redistribute_roles_overridable,
-    turnHighlightStyle: row.out_turn_highlight_style,
-    turnHighlightStyleOverridable: row.out_turn_highlight_style_overridable,
+    positionHighlightStyle: row.out_position_highlight_style,
+    positionHighlightStyleOverridable: row.out_position_highlight_style_overridable,
+    destinationHighlightStyle: row.out_destination_highlight_style,
+    destinationHighlightStyleOverridable: row.out_destination_highlight_style_overridable,
     routeExplorerEnabled: row.out_route_explorer_enabled,
     routeExplorerOverridable: row.out_route_explorer_overridable,
     roundScalingRatio: row.out_round_scaling_ratio,
@@ -312,8 +339,10 @@ export async function setFeatureToggles({ callerAccountId, config }) {
     p_pause_resume_overridable: config.pauseResumeOverridable,
     p_redistribute_roles_enabled: config.redistributeRolesEnabled,
     p_redistribute_roles_overridable: config.redistributeRolesOverridable,
-    p_turn_highlight_style: config.turnHighlightStyle,
-    p_turn_highlight_style_overridable: config.turnHighlightStyleOverridable,
+    p_position_highlight_style: config.positionHighlightStyle,
+    p_position_highlight_style_overridable: config.positionHighlightStyleOverridable,
+    p_destination_highlight_style: config.destinationHighlightStyle,
+    p_destination_highlight_style_overridable: config.destinationHighlightStyleOverridable,
     p_route_explorer_enabled: config.routeExplorerEnabled,
     p_route_explorer_overridable: config.routeExplorerOverridable,
     p_round_scaling_ratio: config.roundScalingRatio,

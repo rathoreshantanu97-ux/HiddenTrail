@@ -3,6 +3,7 @@ import { supabase } from "./supabaseClient.js";
 import * as api from "./supabaseApi.js";
 import { rowToMatch } from "./matchStateAdapter.js";
 import { DETECTIVE_COLORS, TICKET_STARTS } from "./gameEngine.js";
+import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
 
 // ---------------------------------------------------------------------------
 // SUPABASE GAME STORE — online multiplayer. Implements the same interface
@@ -83,17 +84,27 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
     async (map) => {
       if (!roomId || !myPlayerId) return;
       try {
-        // Ticket counts and round/reveal schedule are both computed
-        // per-map from actual graph connectivity (see computeTicketCounts
-        // / computeRoundsAndRevealSchedule in mapSchema.js), not fixed
-        // values -- same reasoning as pass-and-play's initMatch(), kept
-        // consistent between both modes. Without passing these through,
-        // the server falls back to its own hardcoded 22/[3,8,13,18,22]
-        // defaults, which would silently ignore this map's actual
-        // computed values (this was a real, previously-shipped gap,
-        // fixed alongside the server-side hardcoded-value bugs).
+        // Ticket counts computed per-map from actual graph connectivity
+        // (see computeTicketCounts in mapSchema.js), not fixed values --
+        // same reasoning as pass-and-play's initMatch(), kept consistent
+        // between both modes.
         const ticketCounts = map.ticketCounts || TICKET_STARTS;
-        const roundsAndReveal = map.roundsAndReveal;
+
+        // Round/reveal schedule: recompute LIVE using the room's actual
+        // STORED round_scaling_ratio_override (set by the host at room
+        // creation, via CreateRoomForm's Shorter/Standard/Longer choice)
+        // rather than always using the map's static default (ratio=1.0).
+        // This is the actual fix for the reported bug where choosing
+        // "Shorter" at room creation had no effect on the real game --
+        // the override was being saved correctly to the room, but never
+        // actually READ again at game-start time.
+        const room = await api.fetchRoom(roomId);
+        const roundScalingRatio = room?.round_scaling_ratio_override;
+        const roundsAndReveal =
+          roundScalingRatio != null
+            ? computeRoundsAndRevealSchedule(map.graph, Object.keys(map.stations).map(Number), roundScalingRatio)
+            : map.roundsAndReveal;
+
         await api.startGameRpc({
           roomId,
           callerPlayerId: myPlayerId,

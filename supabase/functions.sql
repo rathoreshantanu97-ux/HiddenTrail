@@ -97,6 +97,7 @@ drop function if exists create_room(text, int, int, text, text, boolean, boolean
 drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int, text, boolean);
 drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int, text, boolean, numeric);
 drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int, text, boolean, numeric, boolean, text);
+drop function if exists create_room(text, int, int, text, text, boolean, boolean, boolean, boolean, boolean, int, int, text, text, boolean, numeric, boolean, text);
 create or replace function create_room(
   p_map_id text,
   p_num_detectives int,
@@ -127,7 +128,8 @@ create or replace function create_room(
   -- (falls back to only the admin's global bounds), so older clients
   -- that don't yet send this stay working rather than breaking outright.
   p_map_station_count int default null,
-  p_turn_highlight_style_override text default null,
+  p_position_highlight_style_override text default null,
+  p_destination_highlight_style_override text default null,
   p_route_explorer_override boolean default null,
   p_round_scaling_ratio_override numeric default null,
   p_is_public boolean default false,
@@ -153,8 +155,10 @@ declare
   v_endgame_overridable boolean := true;
   v_pause_overridable boolean := true;
   v_redistribute_overridable boolean := true;
-  v_highlight_style_overridable boolean := true;
-  v_final_highlight_style_override text;
+  v_position_highlight_overridable boolean := true;
+  v_final_position_highlight_override text;
+  v_destination_highlight_overridable boolean := true;
+  v_final_destination_highlight_override text;
   v_route_explorer_overridable boolean := true;
   v_final_route_explorer_override boolean;
   v_round_scaling_overridable boolean := true;
@@ -178,11 +182,13 @@ begin
            turn_timer_min_seconds, turn_timer_max_seconds,
            takeovers_overridable_by_host, takeover_reversal_overridable_by_host,
            end_game_vote_overridable_by_host, pause_resume_overridable_by_host,
-           redistribute_roles_overridable_by_host, turn_highlight_style_overridable_by_host,
+           redistribute_roles_overridable_by_host,
+           position_highlight_style_overridable_by_host, destination_highlight_style_overridable_by_host,
            route_explorer_overridable_by_host, round_scaling_overridable_by_host
       into v_min_det, v_max_det, v_min_players, v_max_players, v_turn_min, v_turn_max,
            v_takeovers_overridable, v_reversal_overridable, v_endgame_overridable,
-           v_pause_overridable, v_redistribute_overridable, v_highlight_style_overridable,
+           v_pause_overridable, v_redistribute_overridable,
+           v_position_highlight_overridable, v_destination_highlight_overridable,
            v_route_explorer_overridable, v_round_scaling_overridable
       from app_settings where id = 1;
   end if;
@@ -212,8 +218,16 @@ begin
     v_map_min_det := 3;
     v_min_det := greatest(v_min_det, v_map_min_det);
     v_max_det := least(v_max_det, v_map_max_det);
+    -- FIX: if the admin's global minimum genuinely exceeds what this
+    -- specific map can support, the MAP's computed ceiling wins as the
+    -- real hard constraint (consistent with this project's whole design
+    -- philosophy: a map's own computed limits are never silently
+    -- overridden by admin config). This previously did the opposite --
+    -- forced v_max_det UP to match an unreasonably high admin minimum,
+    -- collapsing the range to a single forced value (e.g. "must be
+    -- exactly 5") instead of correctly respecting the map's real ceiling.
     if v_max_det < v_min_det then
-      v_max_det := v_min_det; -- pathological case (tiny map + high admin min) -- never let max fall below min
+      v_min_det := v_max_det;
     end if;
   end if;
 
@@ -245,9 +259,13 @@ begin
   v_final_endgame_override := case when v_endgame_overridable then p_end_game_vote_override else null end;
   v_final_pause_override := case when v_pause_overridable then p_pause_resume_override else null end;
   v_final_redistribute_override := case when v_redistribute_overridable then p_redistribute_roles_override else null end;
-  v_final_highlight_style_override := case when v_highlight_style_overridable then p_turn_highlight_style_override else null end;
-  if v_final_highlight_style_override is not null and v_final_highlight_style_override not in ('ring', 'blink') then
-    raise exception 'turn_highlight_style_override must be ''ring'' or ''blink''';
+  v_final_position_highlight_override := case when v_position_highlight_overridable then p_position_highlight_style_override else null end;
+  if v_final_position_highlight_override is not null and not (v_final_position_highlight_override = any(array['ring','rotating','blink','static','none'])) then
+    raise exception 'position_highlight_style_override must be one of: ring, rotating, blink, static, none';
+  end if;
+  v_final_destination_highlight_override := case when v_destination_highlight_overridable then p_destination_highlight_style_override else null end;
+  if v_final_destination_highlight_override is not null and not (v_final_destination_highlight_override = any(array['ring','rotating','blink','static','none'])) then
+    raise exception 'destination_highlight_style_override must be one of: ring, rotating, blink, static, none';
   end if;
   v_final_route_explorer_override := case when v_route_explorer_overridable then p_route_explorer_override else null end;
   v_final_round_scaling_override := case when v_round_scaling_overridable then p_round_scaling_ratio_override else null end;
@@ -274,14 +292,16 @@ begin
     map_id, num_detectives, total_players, code, status, turn_timer_seconds,
     takeovers_enabled_override, takeover_reversal_enabled_override,
     end_game_vote_enabled_override, pause_resume_enabled_override, redistribute_roles_enabled_override,
-    turn_highlight_style_override, route_explorer_enabled_override, round_scaling_ratio_override,
+    position_highlight_style_override, destination_highlight_style_override,
+    route_explorer_enabled_override, round_scaling_ratio_override,
     is_public, room_name
   )
   values (
     p_map_id, p_num_detectives, p_total_players, v_code, 'lobby', p_turn_timer_seconds,
     v_final_takeovers_override, v_final_reversal_override,
     v_final_endgame_override, v_final_pause_override, v_final_redistribute_override,
-    v_final_highlight_style_override, v_final_route_explorer_override, v_final_round_scaling_override,
+    v_final_position_highlight_override, v_final_destination_highlight_override,
+    v_final_route_explorer_override, v_final_round_scaling_override,
     p_is_public, nullif(trim(coalesce(p_room_name, '')), '')
   )
   returning id into v_room_id;
@@ -465,14 +485,28 @@ $$;
 --      needing a vote (host status is administrative, not a gameplay
 --      role, so no consensus is required the way ending/pausing a game
 --      needs one).
--- Can be called by the CURRENT host (voluntarily stepping down) or, once
--- presence exists, by any system-level process that's determined the
--- host is inactive -- for now, exposed as a plain callable RPC so it's
--- ready to use either way.
+-- Can be called in TWO legitimate ways:
+--   1. The CURRENT host voluntarily hands off to someone else (any
+--      target player, their choice).
+--   2. ANY player claims host for THEMSELVES ONLY (p_new_host_player_id
+--      must equal p_caller_player_id), but ONLY when the current host is
+--      genuinely INACTIVE (checked via the same Presence-based signal as
+--      everywhere else, get_active_player_ids) -- this is the actual fix
+--      for a real gap found during the failure-point audit: if the host
+--      disconnects while the room is still in the LOBBY (before the game
+--      starts), the existing takeover system doesn't apply (it's only
+--      for an active game), and the "Make Host" button was only ever
+--      shown to the current host in the UI -- leaving everyone else
+--      stuck with no recovery path. This function previously had NO
+--      caller-identity check at all, which would have made "anyone can
+--      silently seize host from an active one" possible if this were
+--      ever exposed more broadly -- fixed here properly rather than
+--      just adding a UI button on top of an unsafe function.
 -- -----------------------------------------------------------------------------
 drop function if exists reassign_host(uuid, uuid);
 create or replace function reassign_host(
   p_room_id uuid,
+  p_caller_player_id uuid,
   p_new_host_player_id uuid
 ) returns void
 language plpgsql
@@ -481,13 +515,32 @@ as $$
 declare
   v_room rooms%rowtype;
   v_new_host players%rowtype;
+  v_caller players%rowtype;
+  v_active_ids uuid[];
 begin
   select * into v_room from rooms r where r.id = p_room_id for update;
   if v_room.id is null then raise exception 'Room not found'; end if;
 
+  select * into v_caller from players p where p.id = p_caller_player_id and p.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Caller is not a player in this room'; end if;
+
   select * into v_new_host from players p where p.id = p_new_host_player_id and p.room_id = p_room_id;
   if v_new_host.id is null then
     raise exception 'That player is not in this room';
+  end if;
+
+  if p_caller_player_id = v_room.host_player_id then
+    -- case 1: current host voluntarily handing off -- always allowed
+    null;
+  elsif p_new_host_player_id = p_caller_player_id then
+    -- case 2: someone claiming host for THEMSELVES -- only allowed if
+    -- the CURRENT host is genuinely inactive right now
+    select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+    if v_room.host_player_id = any(coalesce(v_active_ids, '{}'::uuid[])) then
+      raise exception 'The current host is still active -- ask them to transfer host, or wait for them to reconnect';
+    end if;
+  else
+    raise exception 'Only the current host can transfer host to someone else';
   end if;
 
   update rooms set host_player_id = p_new_host_player_id where id = p_room_id;
@@ -651,7 +704,7 @@ begin
     detectives, mrx_tickets, mrx_revealed_pos, mrx_last_reveal_round,
     mrx_travel_log, mrx_double_move_active, mrx_double_move_legs_remaining,
     winner, log, starting_mrx_tickets, starting_detective_tickets,
-    max_rounds, reveal_rounds
+    max_rounds, reveal_rounds, turn_started_at
   ) values (
     p_room_id, 'playing', 1, v_turn_order, 0,
     v_detectives, p_mrx_starting_tickets, null, 0,
@@ -659,7 +712,7 @@ begin
     null,
     jsonb_build_array(jsonb_build_object('kind', 'game_started', 'payload', jsonb_build_object('numDetectives', v_room.num_detectives))),
     p_mrx_starting_tickets, p_detective_starting_tickets,
-    p_max_rounds, p_reveal_rounds
+    p_max_rounds, p_reveal_rounds, now()
   )
   on conflict (room_id) do update set
     phase = excluded.phase, round = excluded.round, turn_order = excluded.turn_order,
@@ -672,6 +725,7 @@ begin
     starting_mrx_tickets = excluded.starting_mrx_tickets,
     starting_detective_tickets = excluded.starting_detective_tickets,
     max_rounds = excluded.max_rounds, reveal_rounds = excluded.reveal_rounds,
+    turn_started_at = now(),
     updated_at = now();
 
   insert into game_state_secret (room_id, mrx_pos, mrx_position_log)
@@ -748,7 +802,7 @@ begin
   end if;
 
   update game_state_public
-  set turn_idx = v_next_idx, round = v_next_round, updated_at = now()
+  set turn_idx = v_next_idx, round = v_next_round, turn_started_at = now(), updated_at = now()
   where room_id = p_room_id;
 
   -- Reads the actual computed max_rounds for THIS game (see
@@ -2190,6 +2244,7 @@ begin
     where room_id = p_room_id and last_seen_at > now() - (v_grace_seconds || ' seconds')::interval;
 end;
 $$;
+grant execute on function get_active_player_ids(uuid) to anon, authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -2730,13 +2785,17 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
--- get_effective_turn_highlight_style -- room-aware resolution: checks
--- the room's own override first, falls back to the admin's global
--- default. Mirrors is_feature_enabled's room-then-global pattern, just
--- for a text value instead of a boolean.
+-- get_effective_position_highlight_style / get_effective_destination_
+-- highlight_style -- room-aware resolution for the two INDEPENDENT
+-- highlight settings (position indicators vs destination/legal-move
+-- indicators). Each checks the room's own override first, falls back to
+-- the admin's global default. Mirrors is_feature_enabled's room-then-
+-- global pattern, just for a text value instead of a boolean.
+-- Valid values: 'ring' | 'rotating' | 'blink' | 'static' | 'none'.
 -- -----------------------------------------------------------------------------
 drop function if exists get_effective_turn_highlight_style(uuid);
-create or replace function get_effective_turn_highlight_style(p_room_id uuid) returns text
+drop function if exists get_effective_position_highlight_style(uuid);
+create or replace function get_effective_position_highlight_style(p_room_id uuid) returns text
 language plpgsql
 security definer
 as $$
@@ -2745,18 +2804,41 @@ declare
   v_default text := 'ring';
 begin
   if p_room_id is not null then
-    select turn_highlight_style_override into v_override from rooms where id = p_room_id;
+    select position_highlight_style_override into v_override from rooms where id = p_room_id;
     if v_override is not null then
       return v_override;
     end if;
   end if;
   if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
-    select turn_highlight_style into v_default from app_settings where id = 1;
+    select position_highlight_style into v_default from app_settings where id = 1;
   end if;
   return coalesce(v_default, 'ring');
 end;
 $$;
-grant execute on function get_effective_turn_highlight_style(uuid) to anon, authenticated;
+grant execute on function get_effective_position_highlight_style(uuid) to anon, authenticated;
+
+drop function if exists get_effective_destination_highlight_style(uuid);
+create or replace function get_effective_destination_highlight_style(p_room_id uuid) returns text
+language plpgsql
+security definer
+as $$
+declare
+  v_override text;
+  v_default text := 'rotating';
+begin
+  if p_room_id is not null then
+    select destination_highlight_style_override into v_override from rooms where id = p_room_id;
+    if v_override is not null then
+      return v_override;
+    end if;
+  end if;
+  if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
+    select destination_highlight_style into v_default from app_settings where id = 1;
+  end if;
+  return coalesce(v_default, 'rotating');
+end;
+$$;
+grant execute on function get_effective_destination_highlight_style(uuid) to anon, authenticated;
 
 
 -- -----------------------------------------------------------------------------
@@ -2791,3 +2873,233 @@ begin
 end;
 $$;
 grant execute on function get_public_rooms() to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- get_reconnectable_seats -- for a room whose game has ALREADY STARTED
+-- (join_room explicitly refuses these -- see its own status check),
+-- lists every seat whose current occupant is genuinely INACTIVE right
+-- now (using the same Presence-based signal as everywhere else in this
+-- project, get_active_player_ids), so a disconnected player's own
+-- rejoin screen can show "which seat is actually yours to reclaim"
+-- rather than a raw list of all roles (which would let someone
+-- accidentally try to claim a seat that's still genuinely in use).
+-- -----------------------------------------------------------------------------
+drop function if exists get_reconnectable_seats(text);
+create or replace function get_reconnectable_seats(p_room_code text)
+returns table (out_room_id uuid, out_player_id uuid, out_role text, out_display_name text)
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_active_ids uuid[];
+begin
+  select * into v_room from rooms r where r.code = upper(p_room_code);
+  if v_room.id is null then
+    raise exception 'Room not found';
+  end if;
+  if v_room.status = 'lobby' then
+    raise exception 'This game hasn''t started yet -- use the regular Join Room flow instead';
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(v_room.id);
+
+  return query
+    select v_room.id, p.id, p.role, p.display_name
+    from players p
+    where p.room_id = v_room.id
+      and not (p.id = any(coalesce(v_active_ids, '{}'::uuid[])));
+end;
+$$;
+grant execute on function get_reconnectable_seats(text) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- rejoin_own_seat -- the actual reconnect: given a specific player_id
+-- (chosen from get_reconnectable_seats' results -- the client shows
+-- these as "which name is yours?" so the real person self-identifies,
+-- rather than the server trying to guess), re-validates that seat is
+-- STILL genuinely inactive (defends against a race where the original
+-- player reconnected in the moments between listing seats and choosing
+-- one) and refreshes last_seen_at, so the SAME player row is simply
+-- "claimed back" -- no new player row, no takeover event, no vote, no
+-- disruption to game state whatsoever. This is deliberately much
+-- lighter-weight than the takeover system, which is for a DIFFERENT
+-- person permanently replacing someone; this is for the SAME person
+-- getting back into their own seat after a network hiccup or an
+-- accidentally-cleared browser session.
+-- -----------------------------------------------------------------------------
+drop function if exists rejoin_own_seat(uuid);
+create or replace function rejoin_own_seat(p_player_id uuid)
+returns table (out_room_id uuid, out_role text)
+language plpgsql
+security definer
+as $$
+declare
+  v_player players%rowtype;
+  v_active_ids uuid[];
+begin
+  select * into v_player from players p where p.id = p_player_id;
+  if v_player.id is null then
+    raise exception 'That seat no longer exists (the player may have been replaced via takeover)';
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(v_player.room_id);
+  if v_player.id = any(coalesce(v_active_ids, '{}'::uuid[])) then
+    raise exception 'That seat is already active -- someone else may already be connected as this player';
+  end if;
+
+  update players set last_seen_at = now() where id = p_player_id;
+
+  return query select v_player.room_id, v_player.role;
+end;
+$$;
+grant execute on function rejoin_own_seat(uuid) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- free_inactive_lobby_seat -- fixes a real gap found during the
+-- failure-point audit: a claimed LOBBY seat (before the game starts) had
+-- NO activity tracking at all, so a detective who joined and then
+-- disconnected left their seat permanently "filled" from the room's
+-- perspective -- blocking the room from ever starting, with no way for
+-- anyone (including that same player, on reconnecting) to free it up.
+-- join_room's uniqueness check couldn't tell "someone else's active
+-- seat" apart from "my own abandoned seat" -- both looked identical
+-- (role already taken).
+--
+-- Any currently-ACTIVE player in the room (verified via the same
+-- Presence signal used everywhere else, get_active_player_ids) may call
+-- this to remove a specific seat's player row, but ONLY if that seat's
+-- occupant is genuinely inactive right now -- this is a lobby-only
+-- operation (once the game starts, the existing takeover system is the
+-- correct mechanism instead, since it also handles vote/nomination for
+-- an active game's more consequential state).
+-- -----------------------------------------------------------------------------
+drop function if exists free_inactive_lobby_seat(uuid, uuid, text);
+create or replace function free_inactive_lobby_seat(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_target_role text
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_caller players%rowtype;
+  v_target players%rowtype;
+  v_active_ids uuid[];
+begin
+  select * into v_room from rooms r where r.id = p_room_id for update;
+  if v_room.id is null then raise exception 'Room not found'; end if;
+  if v_room.status <> 'lobby' then
+    raise exception 'This only applies before the game starts -- use the takeover system for an active game';
+  end if;
+
+  select * into v_caller from players p where p.id = p_caller_player_id and p.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Caller is not a player in this room'; end if;
+
+  select * into v_target from players p where p.room_id = p_room_id and p.role = p_target_role;
+  if v_target.id is null then
+    raise exception 'That seat is not currently claimed';
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+  if v_target.id = any(coalesce(v_active_ids, '{}'::uuid[])) then
+    raise exception 'That seat is still active -- it cannot be freed right now';
+  end if;
+
+  -- if the freed seat was the host, hand host to the CALLER (who we
+  -- already know is active, since they're the one making this call) --
+  -- otherwise the room would be left with a host_player_id pointing at
+  -- a row that no longer exists.
+  if v_room.host_player_id = v_target.id then
+    update rooms set host_player_id = p_caller_player_id where id = p_room_id;
+  end if;
+
+  delete from players where id = v_target.id;
+end;
+$$;
+grant execute on function free_inactive_lobby_seat(uuid, uuid, text) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- get_reconnectable_lobby_seats -- lobby-phase counterpart to
+-- get_reconnectable_seats (which is for an ALREADY-STARTED game). Lists
+-- every currently-INACTIVE seat in a lobby, so a disconnected player's
+-- own rejoin screen can show "which seat is yours to reclaim" the same
+-- way the started-game version already does.
+-- -----------------------------------------------------------------------------
+drop function if exists get_reconnectable_lobby_seats(text);
+create or replace function get_reconnectable_lobby_seats(p_room_code text)
+returns table (out_room_id uuid, out_player_id uuid, out_role text, out_display_name text)
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_active_ids uuid[];
+begin
+  select * into v_room from rooms r where r.code = upper(p_room_code);
+  if v_room.id is null then
+    raise exception 'Room not found';
+  end if;
+  if v_room.status <> 'lobby' then
+    raise exception 'This game has already started -- use the regular rejoin flow instead';
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(v_room.id);
+
+  return query
+    select v_room.id, p.id, p.role, p.display_name
+    from players p
+    where p.room_id = v_room.id
+      and not (p.id = any(coalesce(v_active_ids, '{}'::uuid[])));
+end;
+$$;
+grant execute on function get_reconnectable_lobby_seats(text) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- rejoin_lobby_seat -- the SAME player reclaiming their own lobby seat
+-- directly (no need for anyone to free it first, and no risk of someone
+-- else grabbing it in between) -- re-verifies the seat is STILL
+-- genuinely inactive (defends against a race where the original player
+-- reconnected in the moments between listing seats and choosing one),
+-- refreshes last_seen_at, and optionally updates their display name.
+-- This is the smooth path for the exact "I disconnected pre-game and
+-- want back into MY seat" case; free_inactive_lobby_seat (above) is for
+-- when someone ELSE needs to clear a stuck seat instead (e.g. the
+-- original player isn't coming back and the room needs to move on).
+-- -----------------------------------------------------------------------------
+drop function if exists rejoin_lobby_seat(uuid, text);
+create or replace function rejoin_lobby_seat(p_player_id uuid, p_display_name text default null)
+returns table (out_room_id uuid, out_role text)
+language plpgsql
+security definer
+as $$
+declare
+  v_player players%rowtype;
+  v_active_ids uuid[];
+begin
+  select * into v_player from players p where p.id = p_player_id;
+  if v_player.id is null then
+    raise exception 'That seat no longer exists';
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(v_player.room_id);
+  if v_player.id = any(coalesce(v_active_ids, '{}'::uuid[])) then
+    raise exception 'That seat is already active -- someone else may already be connected as this player';
+  end if;
+
+  update players
+  set last_seen_at = now(),
+      display_name = coalesce(nullif(trim(p_display_name), ''), display_name)
+  where id = p_player_id;
+
+  return query select v_player.room_id, v_player.role;
+end;
+$$;
+grant execute on function rejoin_lobby_seat(uuid, text) to anon, authenticated;

@@ -100,6 +100,19 @@ create table if not exists app_settings (
   -- indicator (visible only to Mr.X's own client).
   turn_highlight_style text not null default 'ring',
   turn_highlight_style_overridable_by_host boolean not null default true,
+  -- Two INDEPENDENT highlight-style settings, replacing the single
+  -- turn_highlight_style above (kept for backward compatibility, no
+  -- longer read by new code): one for POSITION indicators (the
+  -- turn-indicator on a detective's current station, and Mr.X's own
+  -- private self-locator), one for DESTINATION indicators (the
+  -- legal-move ring shown around stations you could move to). Five
+  -- styles each: 'ring' (pulsing), 'rotating' (spinning dashes),
+  -- 'blink' (fill pulse), 'static' (plain, no animation), 'none'
+  -- (nothing shown).
+  position_highlight_style text not null default 'ring',
+  position_highlight_style_overridable_by_host boolean not null default true,
+  destination_highlight_style text not null default 'rotating',
+  destination_highlight_style_overridable_by_host boolean not null default true,
   -- Route explorer: lets the player whose turn it is highlight every
   -- station reachable by a specific transport mode (only modes they
   -- actually hold a ticket for), a purely informational "what if" view,
@@ -154,6 +167,10 @@ alter table app_settings add column if not exists pause_resume_overridable_by_ho
 alter table app_settings add column if not exists redistribute_roles_overridable_by_host boolean not null default true;
 alter table app_settings add column if not exists turn_highlight_style text not null default 'ring';
 alter table app_settings add column if not exists turn_highlight_style_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists position_highlight_style text not null default 'ring';
+alter table app_settings add column if not exists position_highlight_style_overridable_by_host boolean not null default true;
+alter table app_settings add column if not exists destination_highlight_style text not null default 'rotating';
+alter table app_settings add column if not exists destination_highlight_style_overridable_by_host boolean not null default true;
 alter table app_settings add column if not exists route_explorer_enabled boolean not null default true;
 alter table app_settings add column if not exists route_explorer_overridable_by_host boolean not null default true;
 alter table app_settings add column if not exists round_scaling_ratio numeric not null default 1.0;

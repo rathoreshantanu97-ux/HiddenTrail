@@ -49,8 +49,8 @@ export function useLocalGameStore() {
   }, []);
 
   const startGame = useCallback(
-    (map, { mapId, numDetectives }) => {
-      setMatch(E.initMatch({ map, mapId, numDetectives }));
+    (map, { mapId, numDetectives, roundScalingRatio }) => {
+      setMatch(E.initMatch({ map, mapId, numDetectives, roundScalingRatio }));
     },
     [setMatch]
   );

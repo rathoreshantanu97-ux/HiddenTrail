@@ -820,7 +820,8 @@ returns table (
   out_end_game_vote_enabled boolean, out_end_game_vote_overridable boolean,
   out_pause_resume_enabled boolean, out_pause_resume_overridable boolean,
   out_redistribute_roles_enabled boolean, out_redistribute_roles_overridable boolean,
-  out_turn_highlight_style text, out_turn_highlight_style_overridable boolean,
+  out_position_highlight_style text, out_position_highlight_style_overridable boolean,
+  out_destination_highlight_style text, out_destination_highlight_style_overridable boolean,
   out_route_explorer_enabled boolean, out_route_explorer_overridable boolean,
   out_round_scaling_ratio numeric, out_round_scaling_overridable boolean,
   out_public_rooms_enabled boolean
@@ -834,7 +835,8 @@ as $$
     end_game_vote_enabled, end_game_vote_overridable_by_host,
     pause_resume_enabled, pause_resume_overridable_by_host,
     redistribute_roles_enabled, redistribute_roles_overridable_by_host,
-    turn_highlight_style, turn_highlight_style_overridable_by_host,
+    position_highlight_style, position_highlight_style_overridable_by_host,
+    destination_highlight_style, destination_highlight_style_overridable_by_host,
     route_explorer_enabled, route_explorer_overridable_by_host,
     round_scaling_ratio, round_scaling_overridable_by_host,
     public_rooms_enabled
@@ -854,6 +856,7 @@ drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boo
 drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, text, boolean, boolean, boolean);
 drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, text, boolean, boolean, boolean, numeric, boolean);
 drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, text, boolean, boolean, boolean, numeric, boolean, boolean);
+drop function if exists set_feature_toggles(uuid, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, text, boolean, text, boolean, boolean, boolean, numeric, boolean, boolean);
 create or replace function set_feature_toggles(
   p_caller_account_id uuid,
   p_takeovers_enabled boolean, p_takeovers_overridable boolean,
@@ -861,7 +864,8 @@ create or replace function set_feature_toggles(
   p_end_game_vote_enabled boolean, p_end_game_vote_overridable boolean,
   p_pause_resume_enabled boolean, p_pause_resume_overridable boolean,
   p_redistribute_roles_enabled boolean, p_redistribute_roles_overridable boolean,
-  p_turn_highlight_style text default 'ring', p_turn_highlight_style_overridable boolean default true,
+  p_position_highlight_style text default 'ring', p_position_highlight_style_overridable boolean default true,
+  p_destination_highlight_style text default 'rotating', p_destination_highlight_style_overridable boolean default true,
   p_route_explorer_enabled boolean default true, p_route_explorer_overridable boolean default true,
   p_round_scaling_ratio numeric default 1.0, p_round_scaling_overridable boolean default true,
   p_public_rooms_enabled boolean default true
@@ -871,14 +875,18 @@ security definer
 as $$
 declare
   v_caller accounts%rowtype;
+  v_valid_styles text[] := array['ring', 'rotating', 'blink', 'static', 'none'];
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
   if v_caller.id is null or not v_caller.is_admin then
     raise exception 'Only an app admin can change this setting';
   end if;
 
-  if p_turn_highlight_style not in ('ring', 'blink') then
-    raise exception 'turn_highlight_style must be ''ring'' or ''blink''';
+  if not (p_position_highlight_style = any(v_valid_styles)) then
+    raise exception 'position_highlight_style must be one of: ring, rotating, blink, static, none';
+  end if;
+  if not (p_destination_highlight_style = any(v_valid_styles)) then
+    raise exception 'destination_highlight_style must be one of: ring, rotating, blink, static, none';
   end if;
   if p_round_scaling_ratio < 0.3 or p_round_scaling_ratio > 3.0 then
     raise exception 'round_scaling_ratio must be between 0.3 and 3.0';
@@ -895,8 +903,10 @@ begin
       pause_resume_overridable_by_host = p_pause_resume_overridable,
       redistribute_roles_enabled = p_redistribute_roles_enabled,
       redistribute_roles_overridable_by_host = p_redistribute_roles_overridable,
-      turn_highlight_style = p_turn_highlight_style,
-      turn_highlight_style_overridable_by_host = p_turn_highlight_style_overridable,
+      position_highlight_style = p_position_highlight_style,
+      position_highlight_style_overridable_by_host = p_position_highlight_style_overridable,
+      destination_highlight_style = p_destination_highlight_style,
+      destination_highlight_style_overridable_by_host = p_destination_highlight_style_overridable,
       route_explorer_enabled = p_route_explorer_enabled,
       route_explorer_overridable_by_host = p_route_explorer_overridable,
       round_scaling_ratio = p_round_scaling_ratio,

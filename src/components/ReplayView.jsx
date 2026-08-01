@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { buildReplayTimeline } from "../lib/gameEngine.js";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
+import MapBackground from "./MapBackground.jsx";
 
 // ---------------------------------------------------------------------------
 // REPLAY VIEW — full-screen overlay on top of EndedScreen. Lets players
@@ -71,6 +72,7 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
       <div style={styles.body}>
         <div style={styles.boardWrap}>
           <svg viewBox={`0 0 ${map.viewW || 100} ${map.viewH || 100}`} style={styles.svg}>
+            <MapBackground map={map} />
             {map.allRenderEdges.map(([a, b, mode], i) => {
               const [ax, ay] = map.stations[a];
               const [bx, by] = map.stations[b];

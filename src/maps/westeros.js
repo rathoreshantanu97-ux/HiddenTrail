@@ -378,12 +378,12 @@ const GOT_DETECTIVE_NAMES = [
   "Melisandre", "Sansa Stark", "Tyrion Lannister", "Brienne of Tarth", "Sandor Clegane",
   "Davos Seaworth", "Samwell Tarly",
 ];
-const GOT_MRX_NAME = "The White Walker";
+const GOT_MRX_NAME = "The Night King";
 
 export const westerosMap = {
   id: "westeros",
   label: "Westeros",
-  subtitle: "Game of Thrones · White Walker vs. the realm",
+  subtitle: "Game of Thrones · Night King vs. the realm",
   stations: STATIONS_MET2,
   edges: EDGES_MET2,
   ferryEdges: [],

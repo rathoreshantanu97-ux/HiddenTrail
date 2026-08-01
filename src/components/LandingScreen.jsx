@@ -5,6 +5,8 @@ import { computeSeatLayout, computeSeatLayoutSafe, seatLabel } from "../lib/seat
 import { useMapWithOverrides } from "../lib/useMapWithOverrides.js";
 import { usePublicRooms } from "../lib/usePublicRooms.js";
 import * as auth from "../lib/accessControlApi.js";
+import * as api from "../lib/supabaseApi.js";
+import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
 
 // ---------------------------------------------------------------------------
 // LANDING SCREEN — the very first thing a player sees.
@@ -121,6 +123,20 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
   const [seatErr, setSeatErr] = useState("");
   const [featureConfig, setFeatureConfig] = useState(null);
   const [featureOverrides, setFeatureOverrides] = useState({});
+  const [timingConfig, setTimingConfig] = useState(null);
+  const [publicConfig, setPublicConfig] = useState(null);
+  const [turnTimerSeconds, setTurnTimerSecondsState] = useState(null); // null = no limit
+
+  useEffect(() => {
+    auth
+      .getTimingConfig()
+      .then(setTimingConfig)
+      .catch((e) => console.error("Failed to fetch timing config:", e));
+    auth
+      .getPublicConfig()
+      .then(setPublicConfig)
+      .catch((e) => console.error("Failed to fetch public config:", e));
+  }, []);
   const [isPublic, setIsPublic] = useState(false);
   const [roomName, setRoomName] = useState("");
 
@@ -148,7 +164,22 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
   // Fallback bounds while the map hasn't resolved yet (e.g. very first
   // render, before the effect above picks one) -- matches the server's
   // own fallback in create_room when no map data is available.
-  const selectedMapLimits = selectedMap?.mapLimits || { minDetectives: 3, maxDetectives: 20, minPlayers: 2, maxPlayers: 21 };
+  const rawMapLimits = selectedMap?.mapLimits || { minDetectives: 3, maxDetectives: 20, minPlayers: 2, maxPlayers: 21 };
+  // Intersect with the ADMIN's global min/max_detectives config -- this
+  // is the actual fix for the reported bug: the displayed range
+  // previously only ever showed the map's own numbers, completely blind
+  // to a stricter admin-configured global minimum, so a host could see
+  // "3-5" displayed and pick 3, only for the server (which DOES check
+  // the admin's global config) to reject it. Same "map's own ceiling
+  // wins if it's lower than the admin's minimum" rule as the server-side
+  // fix in create_room, kept consistent between client and server.
+  const selectedMapLimits = (() => {
+    if (!timingConfig) return rawMapLimits;
+    let minDet = Math.max(timingConfig.minDetectives, rawMapLimits.minDetectives);
+    let maxDet = Math.min(timingConfig.maxDetectives, rawMapLimits.maxDetectives);
+    if (maxDet < minDet) minDet = maxDet; // map's own ceiling wins, same as the server
+    return { minDetectives: minDet, maxDetectives: maxDet, minPlayers: rawMapLimits.minPlayers, maxPlayers: maxDet + 1 };
+  })();
 
   // If the selected map changes to one with a tighter ceiling than the
   // currently chosen detective count, clamp it down automatically rather
@@ -219,6 +250,7 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
         totalPlayers,
         hostRole,
         mapStationCount: selectedMap ? Object.keys(selectedMap.stations).length : null,
+        turnTimerSeconds,
         featureOverrides,
         isPublic,
         roomName: isPublic ? roomName.trim() : null,
@@ -406,22 +438,51 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
               />
             </label>
           )}
-          {featureConfig.turnHighlightStyleOverridable && (
+          {featureConfig.positionHighlightStyleOverridable && (
             <label style={styles.featureOverrideRow}>
-              <span>Turn highlight style</span>
+              <span>Position highlight style (your turn / Mr. X's own view)</span>
               <select
                 style={styles.featureOverrideSelect}
-                value={featureOverrides.turnHighlightStyle ?? featureConfig.turnHighlightStyle}
-                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, turnHighlightStyle: e.target.value }))}
+                value={featureOverrides.positionHighlightStyle ?? featureConfig.positionHighlightStyle}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, positionHighlightStyle: e.target.value }))}
               >
-                <option value="ring">Ring</option>
+                <option value="ring">Pulsing ring</option>
+                <option value="rotating">Rotating ring</option>
                 <option value="blink">Blink</option>
+                <option value="static">Static ring</option>
+                <option value="none">None</option>
+              </select>
+            </label>
+          )}
+          {featureConfig.destinationHighlightStyleOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Destination highlight style (legal moves)</span>
+              <select
+                style={styles.featureOverrideSelect}
+                value={featureOverrides.destinationHighlightStyle ?? featureConfig.destinationHighlightStyle}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, destinationHighlightStyle: e.target.value }))}
+              >
+                <option value="ring">Pulsing ring</option>
+                <option value="rotating">Rotating ring</option>
+                <option value="blink">Blink</option>
+                <option value="static">Static ring</option>
+                <option value="none">None</option>
               </select>
             </label>
           )}
           {featureConfig.roundScalingOverridable && (
             <label style={styles.featureOverrideRow}>
-              <span>Game length (rounds) — {selectedMap?.roundsAndReveal?.totalRounds || "?"} rounds at current setting</span>
+              <span>
+                Game length (rounds) —{" "}
+                {selectedMap
+                  ? computeRoundsAndRevealSchedule(
+                      selectedMap.graph,
+                      Object.keys(selectedMap.stations).map(Number),
+                      featureOverrides.roundScalingRatio ?? 1.0
+                    ).totalRounds
+                  : "?"}{" "}
+                rounds at current setting
+              </span>
               <select
                 style={styles.featureOverrideSelect}
                 value={featureOverrides.roundScalingRatio ?? 1.0}
@@ -431,6 +492,29 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
                 <option value={1.0}>Standard</option>
                 <option value={1.4}>Longer</option>
               </select>
+            </label>
+          )}
+
+          {publicConfig && (
+            <label style={styles.featureOverrideRow}>
+              <span>Turn timer (seconds) — blank means no time limit</span>
+              <input
+                type="number"
+                min={publicConfig.turnTimerMin}
+                max={publicConfig.turnTimerMax}
+                placeholder="No limit"
+                style={styles.featureOverrideSelect}
+                value={turnTimerSeconds ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v.trim() === "") {
+                    setTurnTimerSecondsState(null);
+                    return;
+                  }
+                  const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(v, 10) || publicConfig.turnTimerMin));
+                  setTurnTimerSecondsState(n);
+                }}
+              />
             </label>
           )}
         </div>
@@ -479,10 +563,205 @@ function PublicRoomsBrowser({ onPickRoom }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// REJOIN FLOW — shown when a looked-up room has already started (join_room
+// explicitly refuses these). Lists every seat that's currently INACTIVE
+// (via get_reconnectable_seats, using the same Presence signal as the
+// rest of the app), lets the disconnected player self-identify by name,
+// and reconnects them to their EXACT existing seat -- no new player row,
+// no vote, no disruption to game state, just picking back up.
+// ---------------------------------------------------------------------------
+function RejoinFlow({ roomCode, onBack, onJoin }) {
+  const [seats, setSeats] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+
+  useEffect(() => {
+    api
+      .getReconnectableSeats(roomCode)
+      .then(setSeats)
+      .catch((e) => setErr(e.message || "Failed to check this room."));
+  }, [roomCode]);
+
+  async function handleRejoin() {
+    const seat = seats.find((s) => s.playerId === selectedPlayerId);
+    if (!seat) {
+      setErr("Choose which seat is yours.");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      await onJoin.rejoin({
+        playerId: seat.playerId,
+        roomId: seat.roomId,
+        role: seat.role,
+        roomCode,
+        displayName: displayName.trim() || seat.displayName,
+      });
+    } catch (e) {
+      setErr(e.message || "Failed to rejoin.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={styles.form}>
+      <button style={styles.linkBtn} onClick={onBack}>
+        ← Different code
+      </button>
+
+      <div style={styles.hostNote}>
+        This game has already started. If you were disconnected, pick your seat below to rejoin exactly where you left
+        off.
+      </div>
+
+      {err && <div style={styles.errText}>{err}</div>}
+
+      {!seats && !err && <div style={styles.hostNote}>Checking this room...</div>}
+
+      {seats && seats.length === 0 && (
+        <div style={styles.hostNote}>
+          Every seat in this room currently looks active — if you were just disconnected, wait a few seconds and try
+          again.
+        </div>
+      )}
+
+      {seats && seats.length > 0 && (
+        <>
+          <label style={styles.label}>Which seat is yours?</label>
+          <div style={styles.rowCenter}>
+            {seats.map((s) => (
+              <button
+                key={s.playerId}
+                style={{ ...styles.pill, ...(selectedPlayerId === s.playerId ? styles.pillActive : {}) }}
+                onClick={() => setSelectedPlayerId(s.playerId)}
+              >
+                {seatLabel(s.role)} ({s.displayName})
+              </button>
+            ))}
+          </div>
+
+          <label style={styles.label}>Your name (optional — leave blank to keep your original name)</label>
+          <input
+            style={styles.textInput}
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="e.g. Rahul"
+            maxLength={24}
+          />
+
+          <button style={styles.primaryBtn} onClick={handleRejoin} disabled={busy || !selectedPlayerId}>
+            {busy ? "Rejoining..." : "Rejoin Game"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// LOBBY REJOIN FLOW — the lobby-phase counterpart to RejoinFlow (which is
+// for an already-started game). Triggered when a normal join attempt
+// hits "seat already taken", which can genuinely mean either a stranger
+// trying to steal an active seat (blocked server-side) or the SAME
+// player reconnecting to their own abandoned seat pre-game (previously
+// a complete dead end -- see free_inactive_lobby_seat/rejoin_lobby_seat
+// in functions.sql for the full reasoning).
+// ---------------------------------------------------------------------------
+function LobbyRejoinFlow({ roomCode, onBack, onJoin }) {
+  const [seats, setSeats] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+
+  useEffect(() => {
+    api
+      .getReconnectableLobbySeats(roomCode)
+      .then(setSeats)
+      .catch((e) => setErr(e.message || "Failed to check this room."));
+  }, [roomCode]);
+
+  async function handleRejoin() {
+    const seat = seats.find((s) => s.playerId === selectedPlayerId);
+    if (!seat) {
+      setErr("Choose which seat is yours.");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      await onJoin.lobbyRejoin({ playerId: seat.playerId, roomCode, displayName: displayName.trim() });
+    } catch (e) {
+      setErr(e.message || "Failed to rejoin.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={styles.form}>
+      <button style={styles.linkBtn} onClick={onBack}>
+        ← Different code
+      </button>
+
+      <div style={styles.hostNote}>
+        That seat is already claimed. If it's yours from before (e.g. you got disconnected), pick your name below to
+        get back into the lobby.
+      </div>
+
+      {err && <div style={styles.errText}>{err}</div>}
+
+      {!seats && !err && <div style={styles.hostNote}>Checking this room...</div>}
+
+      {seats && seats.length === 0 && (
+        <div style={styles.hostNote}>
+          Every seat in this lobby currently looks active — if you were just disconnected, wait a few seconds and try
+          again.
+        </div>
+      )}
+
+      {seats && seats.length > 0 && (
+        <>
+          <label style={styles.label}>Which seat is yours?</label>
+          <div style={styles.rowCenter}>
+            {seats.map((s) => (
+              <button
+                key={s.playerId}
+                style={{ ...styles.pill, ...(selectedPlayerId === s.playerId ? styles.pillActive : {}) }}
+                onClick={() => setSelectedPlayerId(s.playerId)}
+              >
+                {seatLabel(s.role)} ({s.displayName})
+              </button>
+            ))}
+          </div>
+
+          <label style={styles.label}>Your name (optional — leave blank to keep your original name)</label>
+          <input
+            style={styles.textInput}
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="e.g. Rahul"
+            maxLength={24}
+          />
+
+          <button style={styles.primaryBtn} onClick={handleRejoin} disabled={busy || !selectedPlayerId}>
+            {busy ? "Rejoining..." : "Rejoin Lobby"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function JoinRoomForm({ onJoin, accountDisplayName }) {
   const [displayName, setDisplayName] = useState(accountDisplayName || "");
   const [roomCode, setRoomCode] = useState("");
   const [roomInfo, setRoomInfo] = useState(null); // { numDetectives, takenRoles } once code is looked up
+  const [startedRoomCode, setStartedRoomCode] = useState(null); // set when the looked-up room has already started -- triggers the REJOIN flow instead of role selection
+  const [lobbyRejoinCode, setLobbyRejoinCode] = useState(null); // set when a "seat already taken" error suggests this is the SAME player reconnecting to their own lobby seat
   const [role, setRole] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -496,6 +775,13 @@ function JoinRoomForm({ onJoin, accountDisplayName }) {
     setErr("");
     try {
       const info = await onJoin.lookup(roomCode.trim().toUpperCase());
+      if (info.status !== "lobby") {
+        // The game has already started -- join_room would refuse this
+        // outright, so offer the REJOIN flow instead of a dead-end
+        // role-selection screen that's guaranteed to fail on submit.
+        setStartedRoomCode(roomCode.trim().toUpperCase());
+        return;
+      }
       setRoomInfo(info);
     } catch (e) {
       setErr(e.message || "Room not found.");
@@ -518,9 +804,32 @@ function JoinRoomForm({ onJoin, accountDisplayName }) {
     try {
       await onJoin.confirm({ displayName: displayName.trim(), roomCode: roomCode.trim().toUpperCase(), role });
     } catch (e) {
+      // "Seat already taken" can mean two very different things: a
+      // stranger trying to steal someone else's still-active seat (a
+      // real error, should stay blocked), OR the SAME player reconnecting
+      // to their own seat after a disconnect while still in the lobby
+      // (a real gap found during the failure-point audit -- previously a
+      // complete dead end, since this exact message gave no path
+      // forward). Offering the lobby-rejoin flow here lets the genuine
+      // case resolve itself; get_reconnectable_lobby_seats/
+      // rejoin_lobby_seat's own server-side activity check is what
+      // actually still blocks the stranger-stealing case.
+      if (e.message && e.message.includes("already been taken")) {
+        setLobbyRejoinCode(roomCode.trim().toUpperCase());
+        setBusy(false);
+        return;
+      }
       setErr(e.message || "Failed to join room.");
       setBusy(false);
     }
+  }
+
+  if (startedRoomCode) {
+    return <RejoinFlow roomCode={startedRoomCode} onBack={() => setStartedRoomCode(null)} onJoin={onJoin} />;
+  }
+
+  if (lobbyRejoinCode) {
+    return <LobbyRejoinFlow roomCode={lobbyRejoinCode} onBack={() => setLobbyRejoinCode(null)} onJoin={onJoin} />;
   }
 
   if (!roomInfo) {
@@ -561,6 +870,10 @@ function JoinRoomForm({ onJoin, accountDisplayName }) {
 
   return (
     <div style={styles.form}>
+      <button style={styles.linkBtn} onClick={() => setRoomInfo(null)}>
+        ← Different code
+      </button>
+
       <label style={styles.label}>Your name</label>
       <input
         style={styles.textInput}

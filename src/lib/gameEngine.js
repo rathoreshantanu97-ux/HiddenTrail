@@ -21,6 +21,8 @@
 // ---------------------------------------------------------------------------
 
 export const DETECTIVE_COLORS = ["#3b82f6", "#f97316", "#a855f7", "#10b981", "#ec4899"];
+import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
+
 export const REVEAL_ROUNDS = new Set([3, 8, 13, 18, 22]);
 export const MAX_ROUNDS = 22;
 export const MAX_MOVES = 24;
@@ -46,7 +48,7 @@ export function occupiedByDetective(detectives, station) {
 }
 
 // Log entries are stored as { kind, payload } data, not plain strings,
-// because rendering them needs theme context (Mr. X is "The White Walker"
+// because rendering them needs theme context (Mr. X is "The Night King"
 // on the Westeros map, detective names are GoT characters). This helper
 // turns a data entry into display text using the active theme's naming
 // functions, called at render time — the engine itself stays theme-agnostic.
@@ -98,7 +100,7 @@ export function validMovesFor(map, pos, tickets, isMrX) {
 }
 
 // Builds a fresh match state for a new game. Mirrors the old startGame().
-export function initMatch({ map, mapId, numDetectives }) {
+export function initMatch({ map, mapId, numDetectives, roundScalingRatio }) {
   const starts = randomDistinctStarts(map.startPool, numDetectives + 1);
   const mrxStart = starts[0];
   const detStarts = starts.slice(1);
@@ -135,7 +137,17 @@ export function initMatch({ map, mapId, numDetectives }) {
   // the original fixed 22/[3,8,13,18,22] if a map somehow lacks this
   // (shouldn't happen for any map built via deriveMap, but kept
   // defensive, same pattern as the ticketCounts fallback above).
-  const roundsAndReveal = map.roundsAndReveal || { totalRounds: MAX_ROUNDS, revealRounds: [...REVEAL_ROUNDS] };
+  // Round count and reveal schedule: if the player explicitly chose a
+  // non-default scaling ratio (Shorter/Standard/Longer), recompute the
+  // schedule live using THAT ratio -- this is the actual fix for the
+  // reported bug where choosing "Shorter" had no effect: the map's
+  // PRECOMPUTED default (always ratio=1.0) was being used unconditionally
+  // regardless of what was selected. Falls back to the map's own default
+  // (or the original fixed constants) when no ratio was explicitly given.
+  const roundsAndReveal =
+    roundScalingRatio != null
+      ? computeRoundsAndRevealSchedule(map.graph, Object.keys(map.stations).map(Number), roundScalingRatio)
+      : map.roundsAndReveal || { totalRounds: MAX_ROUNDS, revealRounds: [...REVEAL_ROUNDS] };
   return {
     phase: "handoff",
     mapId,

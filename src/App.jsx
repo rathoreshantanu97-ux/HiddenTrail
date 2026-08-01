@@ -23,6 +23,7 @@ import SpectatorScreen from "./components/SpectatorScreen.jsx";
 import { useRoomStatus } from "./lib/useRoomStatus.js";
 import { usePresence } from "./lib/usePresence.js";
 import { useDelayedEndedTransition } from "./lib/useDelayedEndedTransition.js";
+import { useTurnTimer } from "./lib/useTurnTimer.js";
 import { currentActor } from "./lib/gameEngine.js";
 
 // ---------------------------------------------------------------------------
@@ -156,6 +157,13 @@ export default function App({ account, onLogout }) {
     myRole: mpRole,
   });
   const { showEndedScreen: mpShowEndedScreen } = useDelayedEndedTransition(supabaseStore.match);
+  const { secondsRemaining: mpSecondsRemaining, turnTimerSeconds: mpTurnTimerSeconds } = useTurnTimer({
+    roomId: appMode === "multiplayer" ? mpRoomId : null,
+    map: MAPS[mpMapId],
+    match: supabaseStore.match,
+    onDetectiveMove: (detId, to, mode) => supabaseStore.submitDetectiveMove(MAPS[mpMapId], detId, to, mode),
+    onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(MAPS[mpMapId], to, edgeMode, ticketUsed),
+  });
 
   const [mpExploreMode, setMpExploreMode] = useState(null); // this client's own current route-explorer selection, reported up from GameBoard so it can be broadcast via Presence
 
@@ -392,6 +400,78 @@ export default function App({ account, onLogout }) {
     );
   }
 
+  // Rejoining an EXISTING seat mid-game (a disconnected/refreshed
+  // player getting back into their own seat, NOT a fresh join --
+  // join_room explicitly refuses a started game, which is exactly what
+  // this path is for). Mirrors handleConfirmJoin's final "settle into
+  // this session" steps, but starting from a known player_id/role
+  // (chosen from get_reconnectable_seats) rather than a fresh join
+  // response.
+  async function handleRejoin({ playerId, roomId, role, roomCode, displayName }) {
+    const room = await api.fetchRoom(roomId); // for mapId/numDetectives/totalPlayers/host_player_id
+    const isHost = room.host_player_id === playerId;
+    setMpRoomId(roomId);
+    setMpRoomCode(roomCode);
+    setMpPlayerId(playerId);
+    setMpRole(role);
+    setMpIsHost(isHost);
+    setMpNumDetectives(room.num_detectives);
+    setMpTotalPlayers(room.total_players);
+    setMpMapId(room.map_id);
+    setMpDisplayName(displayName);
+    setAppMode("multiplayer");
+    localStorage.setItem(
+      LOCAL_ROOM_KEY,
+      JSON.stringify({
+        roomId,
+        roomCode,
+        playerId,
+        role,
+        isHost,
+        numDetectives: room.num_detectives,
+        totalPlayers: room.total_players,
+        mapId: room.map_id,
+        displayName,
+      })
+    );
+  }
+
+  // Rejoining a LOBBY seat (game hasn't started yet) -- the disconnected
+  // player's own seat, reclaimed directly via rejoin_lobby_seat rather
+  // than a fresh join_room call (which would otherwise fail with "seat
+  // already taken", since their original row was never removed). Lands
+  // them back in the lobby exactly as if they'd never left.
+  async function handleLobbyRejoin({ playerId, roomCode, displayName }) {
+    const { roomId, role } = await api.rejoinLobbySeat({ playerId, displayName });
+    const room = await api.fetchRoom(roomId);
+    const isHost = room.host_player_id === playerId;
+    setMpRoomId(roomId);
+    setMpRoomCode(roomCode);
+    setMpPlayerId(playerId);
+    setMpRole(role);
+    setMpIsHost(isHost);
+    setMpNumDetectives(room.num_detectives);
+    setMpTotalPlayers(room.total_players);
+    setMpMapId(room.map_id);
+    setMpDisplayName(displayName || room.display_name);
+    setAppMode("multiplayer");
+    localStorage.setItem(
+      LOCAL_ROOM_KEY,
+      JSON.stringify({
+        roomId,
+        roomCode,
+        playerId,
+        role,
+        isHost,
+        numDetectives: room.num_detectives,
+        totalPlayers: room.total_players,
+        mapId: room.map_id,
+        displayName,
+        stage: "lobby",
+      })
+    );
+  }
+
   async function handleStartMultiplayerGame() {
     const map = MAPS[mpMapId];
     await supabaseStore.startGame(map);
@@ -412,10 +492,10 @@ export default function App({ account, onLogout }) {
   }
 
   // ---- Pass-and-play game flow ----
-  function handleStartPassAndPlay({ mapId, numDetectives }) {
+  function handleStartPassAndPlay({ mapId, numDetectives, roundScalingRatio }) {
     setPassAndPlayMapId(mapId);
     const map = MAPS[mapId];
-    localStore.startGame(map, { mapId, numDetectives });
+    localStore.startGame(map, { mapId, numDetectives, roundScalingRatio });
   }
 
   useEffect(() => {
@@ -454,7 +534,7 @@ export default function App({ account, onLogout }) {
       <LandingScreen
         onChoosePassAndPlay={handleChoosePassAndPlay}
         onChooseCreateRoom={handleCreateRoom}
-        onChooseJoinRoom={{ lookup: handleLookupRoom, confirm: handleConfirmJoin }}
+        onChooseJoinRoom={{ lookup: handleLookupRoom, confirm: handleConfirmJoin, rejoin: handleRejoin, lobbyRejoin: handleLobbyRejoin }}
         showAdminPanelLink={isAdmin}
         onOpenAdminPanel={() => setAppMode("adminPanel")}
         accountDisplayName={account?.displayName || ""}
@@ -596,6 +676,7 @@ export default function App({ account, onLogout }) {
             roomId={mpRoomId}
             mrxName={mrxName}
             detectiveName={detectiveName}
+            detectivePlayerNames={detectivePlayerNames}
             onDetectiveMove={() => {}}
             onMrXMove={() => {}}
             onActivateDoubleMove={() => {}}
@@ -615,6 +696,20 @@ export default function App({ account, onLogout }) {
 
     if (match.phase === "paused") {
       return <PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} />;
+    }
+
+    // Maps each detective ID -> the display name of the player
+    // controlling it, for the ticket counter's "Priya — D1" labeling.
+    // A multi-detective seat's role is comma-joined (e.g. "d0,d1"), so
+    // every individual detective ID in that list maps to the same
+    // player.
+    const detectivePlayerNames = {};
+    for (const p of mpPlayersList) {
+      if (p.role === "mrx") continue;
+      for (const seat of p.role.split(",")) {
+        const detId = parseInt(seat.slice(1), 10);
+        if (!Number.isNaN(detId)) detectivePlayerNames[detId] = p.display_name;
+      }
     }
 
     // Derive the huddle-panel data from Presence: every OTHER detective
@@ -655,6 +750,10 @@ export default function App({ account, onLogout }) {
         roomId={mpRoomId}
         mrxName={mrxName}
         detectiveName={detectiveName}
+        detectivePlayerNames={detectivePlayerNames}
+        roomCode={mpRoomCode}
+        secondsRemaining={mpSecondsRemaining}
+        turnTimerSeconds={mpTurnTimerSeconds}
         onExploreModeChange={setMpExploreMode}
         teammatesExploring={teammatesExploring}
         anyDetectiveExploring={anyDetectiveExploring}
@@ -685,9 +784,11 @@ export default function App({ account, onLogout }) {
                 totalPlayers={mpTotalPlayers}
               />
             </div>
-            <ChatPanel roomId={mpRoomId} myPlayerId={mpPlayerId} myRole={mpRole} myDisplayName={mpDisplayName} />
             <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={mpIsHost} />
           </div>
+        }
+        belowTicketsContent={
+          <ChatPanel roomId={mpRoomId} myPlayerId={mpPlayerId} myRole={mpRole} myDisplayName={mpDisplayName} />
         }
       />
     );

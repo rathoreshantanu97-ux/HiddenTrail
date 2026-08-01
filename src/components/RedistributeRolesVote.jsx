@@ -3,6 +3,7 @@ import { useRedistributeVote } from "../lib/useRedistributeVote.js";
 import VoteStatusList from "./VoteStatusList.jsx";
 import { seatLabel, computeSeatLayoutSafe } from "../lib/seatLayout.js";
 import * as api from "../lib/supabaseApi.js";
+import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 
 // ---------------------------------------------------------------------------
 // REDISTRIBUTE ROLES VOTE — host-only proposal button + assignment form,
@@ -11,10 +12,13 @@ import * as api from "../lib/supabaseApi.js";
 // this room, mirroring every other feature toggle in this project).
 // ---------------------------------------------------------------------------
 export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numDetectives, totalPlayers }) {
+  const enabled = useFeatureEnabled("redistribute_roles_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = useRedistributeVote({ roomId, myPlayerId });
   const [showForm, setShowForm] = useState(false);
   const [players, setPlayers] = useState([]);
   const [assignments, setAssignments] = useState({}); // playerId -> role
+
+  if (!enabled) return null;
 
   useEffect(() => {
     if (!showForm) return;

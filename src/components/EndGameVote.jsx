@@ -1,6 +1,7 @@
 import React from "react";
 import VoteStatusList from "./VoteStatusList.jsx";
 import { useEndGameVote } from "../lib/useEndGameVote.js";
+import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 
 // ---------------------------------------------------------------------------
 // END GAME VOTE — a small "End Game" button always visible during
@@ -9,9 +10,16 @@ import { useEndGameVote } from "../lib/useEndGameVote.js";
 // functions.sql notes on end_game_proposals): everyone in the room must
 // vote yes, there's no auto-skip for inactive players yet since presence
 // detection doesn't exist yet.
+//
+// Gated entirely on end_game_vote_enabled -- see PauseVote.jsx for the
+// full reasoning (admin-disabled features must be invisible, not just
+// non-functional).
 // ---------------------------------------------------------------------------
 export default function EndGameVote({ roomId, myPlayerId }) {
+  const enabled = useFeatureEnabled("end_game_vote_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = useEndGameVote({ roomId, myPlayerId });
+
+  if (!enabled) return null;
 
   async function handlePropose() {
     try {

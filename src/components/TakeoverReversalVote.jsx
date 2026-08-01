@@ -2,6 +2,7 @@ import React from "react";
 import { useTakeoverReversalVote } from "../lib/useTakeoverReversalVote.js";
 import VoteStatusList from "./VoteStatusList.jsx";
 import { seatLabel } from "../lib/seatLayout.js";
+import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 
 // ---------------------------------------------------------------------------
 // TAKEOVER REVERSAL VOTE — mirrors EndGameVote/PauseVote's modal pattern.
@@ -17,7 +18,10 @@ import { seatLabel } from "../lib/seatLayout.js";
 //      (unlike the request button, which only the replaced player sees).
 // ---------------------------------------------------------------------------
 export default function TakeoverReversalVote({ roomId, myPlayerId, completedTakeoverEventId }) {
+  const enabled = useFeatureEnabled("takeover_reversal_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = useTakeoverReversalVote({ roomId, myPlayerId });
+
+  if (!enabled) return null;
 
   async function handlePropose() {
     try {

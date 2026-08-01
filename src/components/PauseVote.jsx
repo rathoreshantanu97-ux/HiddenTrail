@@ -1,14 +1,23 @@
 import React from "react";
 import VoteStatusList from "./VoteStatusList.jsx";
 import { usePauseVote } from "../lib/usePauseVote.js";
+import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 
 // ---------------------------------------------------------------------------
 // PAUSE VOTE — mirrors EndGameVote.jsx exactly (same proposal/vote UI
 // pattern). A "Pause" button always visible during multiplayer play; a
 // modal appears for everyone once a proposal is active.
+//
+// Gated entirely on pause_resume_enabled -- an admin-disabled feature
+// must not be visible anywhere at all (not just non-functional when
+// clicked), so this component renders nothing whatsoever if the feature
+// is off, rather than showing a button that would just fail server-side.
 // ---------------------------------------------------------------------------
 export default function PauseVote({ roomId, myPlayerId }) {
+  const enabled = useFeatureEnabled("pause_resume_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = usePauseVote({ roomId, myPlayerId });
+
+  if (!enabled) return null;
 
   async function handlePropose() {
     try {

@@ -95,6 +95,79 @@ export default function MapBackground({ map }) {
     );
   }
 
+  if (bg.kind === "citymap" && bg.theme === "bengaluru-new") {
+    // Bengaluru — New: the 100-station redesign. Same Google-Maps-style
+    // base as the original theme, but with lakes repositioned to match
+    // the NEW map's actual station coordinates (Ulsoor/Devarabeesanahalli/
+    // Bellandur Gate/Bellandur form the real ferry chain here, at
+    // different positions than the old 64-station map), plus genuine
+    // Bengaluru garden/park landmarks and a couple of major buildings,
+    // per explicit design request -- kept as a fully separate theme so
+    // the original "bengaluru" map's visuals are never touched.
+    return (
+      <>
+        <rect x="0" y="0" width="100" height="100" fill="#eef1ec" />
+
+        {/* Soft neighborhood-tint patches, spread evenly since station
+            layout itself is now evenly distributed rather than
+            clustered by real geography */}
+        <circle cx="25" cy="25" r="15" fill="#e6e8e2" opacity="0.45" />
+        <circle cx="75" cy="25" r="15" fill="#e6e8e2" opacity="0.45" />
+        <circle cx="25" cy="75" r="15" fill="#e3e5df" opacity="0.45" />
+        <circle cx="75" cy="75" r="15" fill="#e3e5df" opacity="0.45" />
+        <circle cx="50" cy="50" r="14" fill="#e9e6da" opacity="0.4" />
+
+        {/* Cubbon Park -- real Bengaluru landmark, placed near the
+            CENTRAL region cluster (MG Road / Cubbon Park / Vidhana
+            Soudha all sit near map center per our regional naming) */}
+        <ellipse cx="54" cy="44" rx="6.5" ry="5" fill="#cfe3c4" opacity="0.85" />
+        <text x="54" y="44" fontSize="1.4" textAnchor="middle" fill="#4a7a3d" fontWeight="600" opacity="0.85">
+          Cubbon Park
+        </text>
+
+        {/* Lalbagh -- second real garden landmark, placed toward the
+            SOUTH region cluster */}
+        <ellipse cx="48" cy="12" rx="5.5" ry="4.2" fill="#cfe3c4" opacity="0.85" />
+        <text x="48" y="12" fontSize="1.3" textAnchor="middle" fill="#4a7a3d" fontWeight="600" opacity="0.85">
+          Lalbagh
+        </text>
+
+        {/* Vidhana Soudha -- major real government building landmark,
+            near the CENTRAL cluster */}
+        <rect x="56" y="52" width="3.2" height="2.4" fill="#d8cba8" opacity="0.9" rx="0.3" />
+        <text x="57.6" y="56.5" fontSize="1.1" textAnchor="middle" fill="#8a6d3a" fontWeight="600" opacity="0.85">
+          Vidhana Soudha
+        </text>
+
+        {/* Bangalore Palace -- second major building landmark, placed
+            toward the NORTHWEST cluster */}
+        <rect x="22" y="80" width="3" height="2.2" fill="#d8cba8" opacity="0.9" rx="0.3" />
+        <text x="23.5" y="84" fontSize="1.1" textAnchor="middle" fill="#8a6d3a" fontWeight="600" opacity="0.85">
+          Bangalore Palace
+        </text>
+
+        {/* Ulsoor Lake <-> Bellandur Lake water corridor -- the ferry
+            chain's real geography. Positioned using the ACTUAL new
+            station coordinates (Ulsoor at ~14,24 through Bellandur at
+            ~16,48), rendered as one connected water shape the ferry
+            line visually crosses, rather than two disconnected blobs. */}
+        <path
+          d="M 13 20 C 10 26, 8 32, 10 36 C 12 40, 14 43, 15 48
+             C 16 52, 15 55, 12 56 L 8 54 C 9 48, 9 42, 7 36
+             C 5 30, 6 24, 9 19 Z"
+          fill="url(#lakeGrad)"
+          opacity="0.9"
+        />
+        <text x="11" y="30" fontSize="1.2" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
+          Ulsoor Lake
+        </text>
+        <text x="11" y="50" fontSize="1.2" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
+          Bellandur Lake
+        </text>
+      </>
+    );
+  }
+
   // Default / "plain" — parchment base with soft district blobs and a river.
   // Used by city.js, and a reasonable fallback for any new map that hasn't
   // authored custom background art yet.

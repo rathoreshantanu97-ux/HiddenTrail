@@ -49,7 +49,6 @@ create table if not exists rooms (
   end_game_vote_enabled_override boolean,
   pause_resume_enabled_override boolean,
   redistribute_roles_enabled_override boolean,
-  turn_highlight_style_override text,
   position_highlight_style_override text,
   destination_highlight_style_override text,
   route_explorer_enabled_override boolean,
@@ -77,7 +76,9 @@ alter table rooms add column if not exists takeover_reversal_enabled_override bo
 alter table rooms add column if not exists end_game_vote_enabled_override boolean;
 alter table rooms add column if not exists pause_resume_enabled_override boolean;
 alter table rooms add column if not exists redistribute_roles_enabled_override boolean;
-alter table rooms add column if not exists turn_highlight_style_override text;
+-- Dead now (replaced by the two independent columns above) -- dropped
+-- rather than left as confusing leftover state.
+alter table rooms drop column if exists turn_highlight_style_override;
 alter table rooms add column if not exists position_highlight_style_override text;
 alter table rooms add column if not exists destination_highlight_style_override text;
 alter table rooms add column if not exists route_explorer_enabled_override boolean;

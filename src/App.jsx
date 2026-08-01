@@ -608,6 +608,28 @@ export default function App({ account, onLogout }) {
     const mrxName = () => map.mrxName || "Mr. X";
     const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
 
+    // Maps each detective ID -> the display name of the player
+    // controlling it, for the ticket counter's "Priya — D1" labeling.
+    // A multi-detective seat's role is comma-joined (e.g. "d0,d1"), so
+    // every individual detective ID in that list maps to the same
+    // player. MOVED HERE (to the top of this branch, before every
+    // early-return) -- a real, serious bug: this used to be declared
+    // much further down, but was already being REFERENCED earlier (in
+    // the "ended" phase branch above where it's used), which is a
+    // temporal-dead-zone violation in JS (referencing a `const` before
+    // its declaration throws ReferenceError, even if the declaration is
+    // later in the SAME function scope) -- an uncaught exception here
+    // crashes the entire React render tree, producing exactly a blank/
+    // black screen. Confirmed via a direct Node.js test before fixing.
+    const detectivePlayerNames = {};
+    for (const p of mpPlayersList) {
+      if (p.role === "mrx") continue;
+      for (const seat of p.role.split(",")) {
+        const detId = parseInt(seat.slice(1), 10);
+        if (!Number.isNaN(detId)) detectivePlayerNames[detId] = p.display_name;
+      }
+    }
+
     if (mpRoomNotFound) {
       return (
         <LoadingOrDeadRoom
@@ -696,20 +718,6 @@ export default function App({ account, onLogout }) {
 
     if (match.phase === "paused") {
       return <PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} />;
-    }
-
-    // Maps each detective ID -> the display name of the player
-    // controlling it, for the ticket counter's "Priya — D1" labeling.
-    // A multi-detective seat's role is comma-joined (e.g. "d0,d1"), so
-    // every individual detective ID in that list maps to the same
-    // player.
-    const detectivePlayerNames = {};
-    for (const p of mpPlayersList) {
-      if (p.role === "mrx") continue;
-      for (const seat of p.role.split(",")) {
-        const detId = parseInt(seat.slice(1), 10);
-        if (!Number.isNaN(detId)) detectivePlayerNames[detId] = p.display_name;
-      }
     }
 
     // Derive the huddle-panel data from Presence: every OTHER detective

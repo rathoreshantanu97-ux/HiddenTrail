@@ -98,17 +98,13 @@ create table if not exists app_settings (
   -- (fill/opacity pulse). Applies to both the detective turn-indicator
   -- (visible to everyone) and Mr.X's own private self-locating
   -- indicator (visible only to Mr.X's own client).
-  turn_highlight_style text not null default 'ring',
-  turn_highlight_style_overridable_by_host boolean not null default true,
-  -- Two INDEPENDENT highlight-style settings, replacing the single
-  -- turn_highlight_style above (kept for backward compatibility, no
-  -- longer read by new code): one for POSITION indicators (the
-  -- turn-indicator on a detective's current station, and Mr.X's own
-  -- private self-locator), one for DESTINATION indicators (the
-  -- legal-move ring shown around stations you could move to). Five
-  -- styles each: 'ring' (pulsing), 'rotating' (spinning dashes),
-  -- 'blink' (fill pulse), 'static' (plain, no animation), 'none'
-  -- (nothing shown).
+  -- Two INDEPENDENT highlight-style settings: one for POSITION
+  -- indicators (the turn-indicator on a detective's current station,
+  -- and Mr.X's own private self-locator), one for DESTINATION
+  -- indicators (the legal-move ring shown around stations you could
+  -- move to). Five styles each: 'ring' (pulsing), 'rotating' (spinning
+  -- dashes), 'blink' (fill pulse), 'static' (plain, no animation),
+  -- 'none' (nothing shown).
   position_highlight_style text not null default 'ring',
   position_highlight_style_overridable_by_host boolean not null default true,
   destination_highlight_style text not null default 'rotating',
@@ -165,8 +161,12 @@ alter table app_settings add column if not exists takeover_reversal_overridable_
 alter table app_settings add column if not exists end_game_vote_overridable_by_host boolean not null default true;
 alter table app_settings add column if not exists pause_resume_overridable_by_host boolean not null default true;
 alter table app_settings add column if not exists redistribute_roles_overridable_by_host boolean not null default true;
-alter table app_settings add column if not exists turn_highlight_style text not null default 'ring';
-alter table app_settings add column if not exists turn_highlight_style_overridable_by_host boolean not null default true;
+-- These two columns are now genuinely dead (replaced by the two
+-- independent position/destination columns above) -- dropped here
+-- rather than left as confusing leftover state on any database that
+-- already ran an earlier version of this file.
+alter table app_settings drop column if exists turn_highlight_style;
+alter table app_settings drop column if exists turn_highlight_style_overridable_by_host;
 alter table app_settings add column if not exists position_highlight_style text not null default 'ring';
 alter table app_settings add column if not exists position_highlight_style_overridable_by_host boolean not null default true;
 alter table app_settings add column if not exists destination_highlight_style text not null default 'rotating';

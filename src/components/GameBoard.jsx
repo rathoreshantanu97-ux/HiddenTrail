@@ -136,6 +136,20 @@ export default function GameBoard({
   const isMrXTurn = actor === "mrx";
   const activeDetective = actor && actor !== "mrx" ? match.detectives[parseInt(actor.slice(1))] : null;
 
+  // Defensive safeguard: clear any leftover "Selected [station]..."
+  // message and pending-move state whenever the actual active turn
+  // changes (new round, or turn passed to the next actor). This is IN
+  // ADDITION TO the real fix (commitMrXMove was missing setMessage(""),
+  // which is why the confirmation text stayed visible even after the
+  // turn had already moved on) -- catching the symptom here too means
+  // this exact class of stale-message bug can't resurface via some
+  // other path we haven't found yet.
+  useEffect(() => {
+    setMessage("");
+    setPendingMove(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actor, match.round]);
+
   // In pass-and-play, myRole is null, so "it's my turn to act" collapses
   // to "it's this device's turn" (== whoever the current actor is, since
   // the device controls everyone). In multiplayer, only the player whose
@@ -413,6 +427,7 @@ export default function GameBoard({
     if (!pendingMove) return;
     const { to, edgeMode } = pendingMove;
     setPendingMove(null);
+    setMessage("");
     onMrXMove(to, edgeMode, ticketUsed);
   }
 
@@ -937,15 +952,16 @@ export default function GameBoard({
                     {map.names &&
                       labelDir &&
                       (() => {
+                        const isTiny = map.tinyLabelStations && map.tinyLabelStations.has(numId);
                         const dvec = DIR_VECS[labelDir];
-                        const dist = (isMajor ? 3.0 : 2.3) * sizeScale;
+                        const dist = (isMajor ? 3.0 : isTiny ? 1.8 : 2.3) * sizeScale;
                         const lx = x + dvec[0] * dist;
                         const ly = y + dvec[1] * dist + (dvec[1] === 0 ? 0.5 * sizeScale : 0);
                         return (
                           <text
                             x={lx}
                             y={ly}
-                            fontSize={(isMajor ? 1.6 : 1.1) * sizeScale}
+                            fontSize={(isMajor ? 1.6 : isTiny ? 0.75 : 1.1) * sizeScale}
                             textAnchor={ANCHOR_FOR_DIR[labelDir]}
                             fill={isMajor ? "#1a1a1a" : "#5f6368"}
                             fontWeight={isMajor ? 700 : 600}

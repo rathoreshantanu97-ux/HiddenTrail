@@ -292,6 +292,7 @@ export function deriveMap(config) {
     majorStations: config.majorStations || null,
     majorLabelDir: config.majorLabelDir || null,
     minorLabelDir: config.minorLabelDir || null,
+    tinyLabelStations: config.tinyLabelStations || null, // optional Set of station IDs using an even smaller label font than "minor" -- used by maps with especially dense clusters (e.g. Sendhwa's town core) where the standard 2-tier system alone can't avoid every label collision
     modeTheme: config.modeTheme || null,
     viewW: config.viewW || 100,
     viewH: config.viewH || 100,

@@ -24,7 +24,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, currentMapId,
   const [mapId, setMapId] = useState(currentMapId);
   const [numDetectives, setNumDetectives] = useState(currentNumDetectives);
   const [turnTimerSeconds, setTurnTimerSeconds] = useState(null);
-  const [publicConfig, setPublicConfig] = useState(null);
+  const [publicConfig, setPublicConfig] = useState({ turnTimerMin: 30, turnTimerMax: 300, defaultInviteLimit: 20 });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 

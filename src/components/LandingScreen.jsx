@@ -124,7 +124,7 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
   const [featureConfig, setFeatureConfig] = useState(null);
   const [featureOverrides, setFeatureOverrides] = useState({});
   const [timingConfig, setTimingConfig] = useState(null);
-  const [publicConfig, setPublicConfig] = useState(null);
+  const [publicConfig, setPublicConfig] = useState({ turnTimerMin: 30, turnTimerMax: 300, defaultInviteLimit: 20 });
   const [turnTimerSeconds, setTurnTimerSecondsState] = useState(null); // null = no limit
 
   useEffect(() => {

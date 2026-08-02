@@ -170,10 +170,10 @@ export default function App({ account, onLogout }) {
   const { showEndedScreen: mpShowEndedScreen } = useDelayedEndedTransition(supabaseStore.match);
   const { secondsRemaining: mpSecondsRemaining, turnTimerSeconds: mpTurnTimerSeconds } = useTurnTimer({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
-    map: MAPS[mpMapId],
+    map: MAPS[liveMapId],
     match: supabaseStore.match,
-    onDetectiveMove: (detId, to, mode) => supabaseStore.submitDetectiveMove(MAPS[mpMapId], detId, to, mode),
-    onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(MAPS[mpMapId], to, edgeMode, ticketUsed),
+    onDetectiveMove: (detId, to, mode) => supabaseStore.submitDetectiveMove(MAPS[liveMapId], detId, to, mode),
+    onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(MAPS[liveMapId], to, edgeMode, ticketUsed),
   });
 
   const [mpExploreMode, setMpExploreMode] = useState(null); // this client's own current route-explorer selection, reported up from GameBoard so it can be broadcast via Presence

@@ -200,17 +200,13 @@ export default function MapBackground({ map }) {
         <circle cx="95" cy="75" r="16" fill="#e3e5df" opacity="0.35" />
         <circle cx="63" cy="50" r="15" fill="#e9e6da" opacity="0.35" />
 
-        {/* Ulsoor Lake -- real station at (81.2, 31.9) */}
+        {/* Ulsoor Lake -- real station at (81.2, 31.9). Icon only, no
+            text label -- per explicit instruction. */}
         <ellipse cx="84" cy="30" rx="5.5" ry="3.8" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(15 84 30)" />
-        <text x="84" y="24.5" fontSize="1.3" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
-          Ulsoor Lake
-        </text>
 
-        {/* Bellandur Lake -- real station at (108.2, 83.2), the largest water body */}
+        {/* Bellandur Lake -- real station at (108.2, 83.2), the largest
+            water body. Icon only, no text label. */}
         <ellipse cx="112" cy="86" rx="7" ry="4.5" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(-10 112 86)" />
-        <text x="112" y="79.5" fontSize="1.3" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
-          Bellandur Lake
-        </text>
 
         {/* Cubbon Park -- real station at (53.6, 42.3). Icon only -- the
             station's own name label already handles the text. */}

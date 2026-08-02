@@ -2080,37 +2080,13 @@ end;
 $$;
 
 
--- -----------------------------------------------------------------------------
--- resume_game -- any single active player can resume (lower stakes than
--- pausing, per project design -- no vote needed). Sets phase back to
--- 'playing' and clears the room_pauses row.
--- -----------------------------------------------------------------------------
+-- resume_game has been REMOVED (superseded by the vote-based
+-- propose_resume/get_active_resume_proposal/vote_resume flow above) --
+-- resuming now requires everyone's agreement, same as pausing itself,
+-- rather than letting any single player unilaterally resume. Explicit
+-- drop so re-running this file against an existing database actually
+-- cleans up the old function rather than leaving it dead and orphaned.
 drop function if exists resume_game(uuid, uuid);
-create or replace function resume_game(
-  p_room_id uuid,
-  p_caller_player_id uuid
-) returns void
-language plpgsql
-security definer
-as $$
-declare
-  v_caller players%rowtype;
-  v_gs game_state_public%rowtype;
-begin
-  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
-  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
-
-  select * into v_gs from game_state_public where room_id = p_room_id;
-  if v_gs.phase <> 'paused' then raise exception 'The game is not currently paused'; end if;
-
-  update game_state_public
-  set phase = 'playing',
-      log = log || jsonb_build_array(jsonb_build_object('kind', 'game_resumed', 'payload', jsonb_build_object('by', v_caller.display_name)))
-  where room_id = p_room_id;
-
-  delete from room_pauses where room_id = p_room_id;
-end;
-$$;
 
 
 -- -----------------------------------------------------------------------------
@@ -2696,7 +2672,7 @@ $$;
 drop function if exists get_vote_status_list(uuid, text, uuid);
 create or replace function get_vote_status_list(
   p_room_id uuid,
-  p_vote_table text, -- 'end_game_votes' | 'pause_votes' | 'takeover_reversal_votes' | 'redistribute_votes'
+  p_vote_table text, -- 'end_game_votes' | 'pause_votes' | 'resume_votes' | 'takeover_reversal_votes' | 'redistribute_votes'
   p_proposal_id uuid
 ) returns table (out_player_id uuid, out_display_name text, out_status text) -- status: 'yes' | 'no' | 'pending'
 language plpgsql
@@ -3286,3 +3262,148 @@ begin
 end;
 $$;
 grant execute on function pass_turn(uuid, uuid, text) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- propose_resume / get_active_resume_proposal / vote_resume -- mirrors
+-- propose_pause / get_active_pause_proposal / vote_pause EXACTLY (same
+-- proposal/vote/expiry shape and unanimous-yes-among-active-players
+-- logic), but for the OPPOSITE transition: unpausing. Fixes a real,
+-- confirmed gap where resuming previously let any single player
+-- unilaterally resume, unlike every other consequential group action in
+-- this game -- per explicit instruction, resume now requires the same
+-- full agreement as pausing, ending early, reversing a takeover, or
+-- redistributing roles.
+-- -----------------------------------------------------------------------------
+drop function if exists propose_resume(uuid, uuid);
+create or replace function propose_resume(
+  p_room_id uuid,
+  p_caller_player_id uuid
+) returns table (out_proposal_id uuid)
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_gs game_state_public%rowtype;
+  v_proposal_id uuid;
+begin
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  select * into v_gs from game_state_public where room_id = p_room_id;
+  if v_gs.phase <> 'paused' then raise exception 'The game is not currently paused'; end if;
+
+  insert into resume_proposals (room_id, proposed_by_player_id, proposed_by_name)
+  values (p_room_id, p_caller_player_id, v_caller.display_name)
+  returning id into v_proposal_id;
+
+  insert into resume_votes (proposal_id, player_id, vote)
+  values (v_proposal_id, p_caller_player_id, true);
+
+  return query select v_proposal_id;
+exception
+  when unique_violation then
+    raise exception 'A proposal to resume the game is already pending';
+end;
+$$;
+
+
+drop function if exists get_active_resume_proposal(uuid);
+create or replace function get_active_resume_proposal(p_room_id uuid)
+returns table (out_proposal_id uuid, out_proposed_by_name text, out_expires_at timestamptz,
+               out_total_players int, out_yes_votes int, out_no_votes int, out_voted_player_ids uuid[])
+language plpgsql
+security definer
+as $$
+declare
+  v_proposal resume_proposals%rowtype;
+  v_passed boolean;
+begin
+  select * into v_proposal from resume_proposals p where p.room_id = p_room_id and p.status = 'pending'
+    order by p.created_at desc limit 1;
+  if v_proposal.id is null then return; end if;
+  if v_proposal.expires_at < now() then
+    v_passed := auto_resolve_nonresponders(p_room_id, 'resume_votes', v_proposal.id);
+    if v_passed then
+      update resume_proposals set status = 'accepted' where id = v_proposal.id;
+      update game_state_public
+      set phase = 'playing',
+          log = log || jsonb_build_array(jsonb_build_object('kind', 'game_resumed', 'payload', jsonb_build_object('by', v_proposal.proposed_by_name)))
+      where room_id = p_room_id;
+      delete from room_pauses where room_id = p_room_id;
+    else
+      update resume_proposals set status = 'rejected' where id = v_proposal.id;
+    end if;
+    return;
+  end if;
+
+  return query
+    select v_proposal.id, v_proposal.proposed_by_name, v_proposal.expires_at,
+      (select count(*)::int from players where room_id = p_room_id),
+      (select count(*)::int from resume_votes v where v.proposal_id = v_proposal.id and v.vote = true),
+      (select count(*)::int from resume_votes v where v.proposal_id = v_proposal.id and v.vote = false),
+      (select coalesce(array_agg(v.player_id), '{}') from resume_votes v where v.proposal_id = v_proposal.id);
+end;
+$$;
+
+
+drop function if exists vote_resume(uuid, uuid, uuid, boolean);
+create or replace function vote_resume(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_proposal_id uuid,
+  p_vote boolean
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller players%rowtype;
+  v_proposal resume_proposals%rowtype;
+  v_total_players int;
+  v_yes_votes int;
+  v_active_ids uuid[];
+begin
+  select * into v_caller from players pl where pl.id = p_caller_player_id and pl.room_id = p_room_id;
+  if v_caller.id is null then raise exception 'Not a player in this room'; end if;
+
+  select * into v_proposal from resume_proposals p where p.id = p_proposal_id and p.room_id = p_room_id for update;
+  if v_proposal.id is null or v_proposal.status <> 'pending' then
+    raise exception 'This proposal is no longer active';
+  end if;
+  if v_proposal.expires_at < now() then
+    update resume_proposals set status = 'expired' where id = v_proposal.id;
+    raise exception 'This proposal has expired';
+  end if;
+
+  insert into resume_votes (proposal_id, player_id, vote)
+  values (p_proposal_id, p_caller_player_id, p_vote)
+  on conflict (proposal_id, player_id) do update set vote = excluded.vote, voted_at = now();
+
+  if not p_vote then
+    update resume_proposals set status = 'rejected' where id = p_proposal_id;
+    return;
+  end if;
+
+  select array_agg(out_player_id) into v_active_ids from get_active_player_ids(p_room_id);
+  select count(*) into v_total_players from players where room_id = p_room_id and id = any(v_active_ids);
+  select count(*) into v_yes_votes from resume_votes where proposal_id = p_proposal_id and vote = true
+    and player_id = any(v_active_ids);
+
+  if v_yes_votes >= v_total_players then
+    update resume_proposals set status = 'accepted' where id = p_proposal_id;
+
+    update game_state_public
+    set phase = 'playing',
+        log = log || jsonb_build_array(jsonb_build_object('kind', 'game_resumed', 'payload', jsonb_build_object('by', v_caller.display_name)))
+    where room_id = p_room_id;
+
+    delete from room_pauses where room_id = p_room_id;
+  end if;
+end;
+$$;
+
+grant execute on function propose_resume(uuid, uuid) to anon, authenticated;
+grant execute on function get_active_resume_proposal(uuid) to anon, authenticated;
+grant execute on function vote_resume(uuid, uuid, uuid, boolean) to anon, authenticated;

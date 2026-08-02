@@ -99,19 +99,23 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, currentMapId,
         <>
           <label style={styles.label}>Turn timer (seconds) — blank means no time limit</label>
           <input
-            type="number"
-            min={publicConfig.turnTimerMin}
-            max={publicConfig.turnTimerMax}
+            type="text"
+            inputMode="numeric"
             placeholder="No limit"
             style={styles.featureOverrideSelect}
             value={turnTimerSeconds ?? ""}
             onChange={(e) => {
               const v = e.target.value;
-              if (v.trim() === "") {
+              if (v === "" || /^\d*$/.test(v)) {
+                setTurnTimerSeconds(v === "" ? null : v);
+              }
+            }}
+            onBlur={() => {
+              if (turnTimerSeconds === null || turnTimerSeconds === "") {
                 setTurnTimerSeconds(null);
                 return;
               }
-              const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(v, 10) || publicConfig.turnTimerMin));
+              const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin));
               setTurnTimerSeconds(n);
             }}
           />

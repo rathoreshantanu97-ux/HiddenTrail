@@ -499,19 +499,30 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
             <label style={styles.featureOverrideRow}>
               <span>Turn timer (seconds) — blank means no time limit</span>
               <input
-                type="number"
-                min={publicConfig.turnTimerMin}
-                max={publicConfig.turnTimerMax}
+                type="text"
+                inputMode="numeric"
                 placeholder="No limit"
                 style={styles.featureOverrideSelect}
                 value={turnTimerSeconds ?? ""}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v.trim() === "") {
+                  // Allow free typing/clearing while the field has focus --
+                  // only digits or empty, no clamping mid-keystroke (the
+                  // real bug: clamping on every change made it impossible
+                  // to type a new value, since e.g. typing "1" of "180"
+                  // got immediately snapped to the minimum before "8" and
+                  // "0" could be typed).
+                  if (v === "" || /^\d*$/.test(v)) {
+                    setTurnTimerSecondsState(v === "" ? null : v);
+                  }
+                }}
+                onBlur={() => {
+                  // Validate and clamp only once the user is done editing.
+                  if (turnTimerSeconds === null || turnTimerSeconds === "") {
                     setTurnTimerSecondsState(null);
                     return;
                   }
-                  const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(v, 10) || publicConfig.turnTimerMin));
+                  const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin));
                   setTurnTimerSecondsState(n);
                 }}
               />

@@ -575,11 +575,10 @@ export default function GameBoard({
             </div>
           )}
 
-          {(myRole === null ? !isMrXTurn : iAmDetective) && (
-            <div style={styles.travelLogPanel}>
-              <div style={styles.travelLogTitle}>
-                {mrxName()}'s travel log ({match.maxRounds + 2} moves max — {match.maxRounds} rounds + 2 double-move legs)
-              </div>
+          <div style={styles.travelLogPanel}>
+            <div style={styles.travelLogTitle}>
+              {mrxName()}'s travel log ({match.maxRounds + 2} moves max — {match.maxRounds} rounds + 2 double-move legs)
+            </div>
               {(() => {
                 const nextReveal = [...match.revealRounds].filter((r) => r >= match.round).sort((a, b) => a - b)[0];
                 if (!nextReveal) return null;
@@ -632,17 +631,12 @@ export default function GameBoard({
                   );
                 })}
               </div>
-              {match.mrX.revealedPos && (
+              {match.mrX.revealedPos && match.mrX.lastRevealRound === match.round && (
                 <div style={styles.travelLogReveal}>
                   Last confirmed sighting: {stationLabel(match.mrX.revealedPos)} (round {match.mrX.lastRevealRound})
                 </div>
               )}
-              <div style={styles.logBoardLegendNote}>
-                Red-outlined boxes are moves made during a reveal round ({match.revealRounds.join(", ")}) — {mrxName()}'s true
-                station was shown that round. Two moves can share a round if a 2x card was used.
-              </div>
             </div>
-          )}
 
           <div style={styles.allTicketsPanel}>
             <div style={styles.travelLogTitle}>Everyone's tickets</div>
@@ -847,10 +841,11 @@ export default function GameBoard({
                 // treats this as HISTORICAL info -- the map marker should
                 // match that: strong and animated only DURING the actual
                 // reveal round, then a much quieter static outline
-                // afterward (still useful as a reference point, but no
-                // longer implying "this is happening right now").
+                // Real, explicit instruction: NO marker at all should
+                // remain visible on the map after the reveal round
+                // passes -- not even a subtle outline. Only the exact
+                // reveal round itself shows anything.
                 const isCurrentReveal = isLastKnown && match.mrX.lastRevealRound === match.round;
-                const isStaleReveal = isLastKnown && !isCurrentReveal;
                 const isExploreReachable = exploreReachable.has(numId);
                 const isPeekedReachable = peekedReachable.has(numId);
                 // Turn indicator: for a detective's turn, this is visible
@@ -880,8 +875,6 @@ export default function GameBoard({
                 if (isCurrentReveal) {
                   fill = "#1a1a1a";
                   stroke = "#e11";
-                } else if (isStaleReveal) {
-                  stroke = "#e11"; // keep a subtle red outline as a historical marker, but no longer fill it solid black like an active sighting
                 }
 
                 const sizeScale = 1;
@@ -944,9 +937,6 @@ export default function GameBoard({
                         <animate attributeName="r" values={`${nodeR + 1}; ${nodeR + 2.2}; ${nodeR + 1}`} dur="1.6s" repeatCount="indefinite" />
                         <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.6s" repeatCount="indefinite" />
                       </circle>
-                    )}
-                    {isStaleReveal && (
-                      <circle cx={x} cy={y} r={nodeR + 1.2} fill="none" stroke="#e11" strokeWidth={0.25} opacity={0.4} strokeDasharray="0.6,0.6" />
                     )}
                     {isCurrentTurnStation && highlightPositionStyle !== "blink" && (
                       <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={activeDetective.color} strokeWidth={0.4} style={highlightPositionStyle} />
@@ -1211,7 +1201,7 @@ export const styles = {
     height: "100%",
     background: "#f7f6f3",
     overflowY: "auto",
-    padding: "24px 24px 48px",
+    padding: "14px 20px 24px",
     boxShadow: "2px 0 12px rgba(0,0,0,0.06)",
     boxSizing: "border-box",
   },
@@ -1370,10 +1360,10 @@ export const styles = {
     textAlign: "right",
   },
   roomCodeLabel: { fontSize: 11, color: "#aaa", marginTop: 2, letterSpacing: 0.5 },
-  legendCompact: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 },
-  legendCompactItem: { display: "flex", alignItems: "center", gap: 3, fontSize: 10.5, color: "#888" },
+  legendCompact: { display: "flex", flexWrap: "nowrap", gap: 5, marginTop: 6, overflow: "hidden" },
+  legendCompactItem: { display: "flex", alignItems: "center", gap: 2, fontSize: 9.5, color: "#888", whiteSpace: "nowrap" },
   turnColorDot: { width: 12, height: 12, borderRadius: "50%", display: "inline-block", flexShrink: 0 },
-  ticketsPanel: { display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: 220 },
+  ticketsPanel: { display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" },
   chip: {
     border: "1.5px solid #ccc",
     borderRadius: 999,

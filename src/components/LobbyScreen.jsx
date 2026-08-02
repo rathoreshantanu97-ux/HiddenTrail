@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import EditRoomSettingsForm from "./EditRoomSettingsForm.jsx";
 import * as api from "../lib/supabaseApi.js";
+import { supabase } from "../lib/supabaseClient.js";
 import { MAP_LIST } from "../maps/index.js";
 import { computeSeatLayout, seatLabel } from "../lib/seatLayout.js";
 
@@ -78,6 +79,25 @@ export default function LobbyScreen({
     const id = setInterval(refresh, 3000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // Real-time backup for the poll above: a role/seat change (or anyone
+  // joining/leaving) now reflects for every other player the MOMENT it
+  // happens via Supabase Realtime, rather than depending solely on the
+  // next 3-second poll tick -- addresses a real reported gap where a
+  // seat switch wasn't showing up for other players until they manually
+  // refreshed the page.
+  useEffect(() => {
+    if (!supabase || !roomId) return;
+    const channel = supabase
+      .channel(`lobby_players:${roomId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `room_id=eq.${roomId}` }, () => {
+        refresh();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId, refresh]);
 
   async function handleClaimHost() {
     setReassigning(true);
@@ -281,9 +301,13 @@ export default function LobbyScreen({
         )}
 
         {isHost ? (
-          <button style={styles.primaryBtn} onClick={handleStart} disabled={starting || !allSeatsFilled}>
-            {starting ? "Starting..." : allSeatsFilled ? "Start Game" : "Waiting for players..."}
-          </button>
+          allSeatsFilled ? (
+            <button style={styles.primaryBtn} onClick={handleStart} disabled={starting}>
+              {starting ? "Starting..." : "Start Game"}
+            </button>
+          ) : (
+            <p style={styles.waitNote}>Waiting for players...</p>
+          )
         ) : (
           <p style={styles.waitNote}>
             {allSeatsFilled ? "Waiting for the host to start the game..." : "Waiting for everyone to join..."}

@@ -361,8 +361,35 @@ export async function votePause({ roomId, callerPlayerId, proposalId, vote }) {
   });
 }
 
-export async function resumeGame({ roomId, callerPlayerId }) {
-  await callRpc("resume_game", { p_room_id: roomId, p_caller_player_id: callerPlayerId });
+export async function proposeResume({ roomId, callerPlayerId }) {
+  const rows = await callRpc("propose_resume", { p_room_id: roomId, p_caller_player_id: callerPlayerId });
+  const row = rows?.[0];
+  if (!row) throw new Error("Failed to propose resuming");
+  return { proposalId: row.out_proposal_id };
+}
+
+export async function getActiveResumeProposal(roomId) {
+  const rows = await callRpc("get_active_resume_proposal", { p_room_id: roomId });
+  const row = rows?.[0];
+  if (!row) return null;
+  return {
+    proposalId: row.out_proposal_id,
+    proposedByName: row.out_proposed_by_name,
+    expiresAt: row.out_expires_at,
+    totalPlayers: row.out_total_players,
+    yesVotes: row.out_yes_votes,
+    noVotes: row.out_no_votes,
+    votedPlayerIds: row.out_voted_player_ids || [],
+  };
+}
+
+export async function voteResume({ roomId, callerPlayerId, proposalId, vote }) {
+  await callRpc("vote_resume", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_proposal_id: proposalId,
+    p_vote: vote,
+  });
 }
 
 export async function getPauseStatus(roomId) {

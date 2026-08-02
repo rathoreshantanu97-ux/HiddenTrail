@@ -660,6 +660,37 @@ create table if not exists pause_votes (
   primary key (proposal_id, player_id)
 );
 
+-- resume_proposals / resume_votes -- mirrors pause_proposals/pause_votes
+-- EXACTLY (same shape, same accept/reject/expiry logic). Fixes a real,
+-- confirmed gap: resuming after a pause previously let ANY single
+-- player resume unilaterally ("lower stakes than pausing, no vote
+-- needed" was the original design reasoning), unlike every other
+-- consequential group action in this game (pausing itself, ending the
+-- game early, reversing a takeover, redistributing roles), all of
+-- which already require everyone's agreement. Per explicit instruction,
+-- resume now needs the same full-agreement vote as those.
+create table if not exists resume_proposals (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references rooms(id) on delete cascade,
+  proposed_by_player_id uuid references players(id) on delete set null,
+  proposed_by_name text not null,
+  status text not null default 'pending', -- 'pending' | 'accepted' | 'rejected' | 'expired'
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '60 seconds')
+);
+
+create unique index if not exists resume_proposals_pending_unique
+  on resume_proposals(room_id)
+  where status = 'pending';
+
+create table if not exists resume_votes (
+  proposal_id uuid not null references resume_proposals(id) on delete cascade,
+  player_id uuid not null references players(id) on delete cascade,
+  vote boolean not null,
+  voted_at timestamptz not null default now(),
+  primary key (proposal_id, player_id)
+);
+
 -- Records when a room was actually paused and its resume deadline, so
 -- the client can show a countdown and the cleanup job (data_cleanup.sql)
 -- can find rooms that have sat paused too long. One row per room; a new
@@ -675,6 +706,8 @@ create table if not exists room_pauses (
 
 alter table pause_proposals enable row level security;
 alter table pause_votes enable row level security;
+alter table resume_proposals enable row level security;
+alter table resume_votes enable row level security;
 alter table room_pauses enable row level security;
 
 drop policy if exists pause_proposals_select_all on pause_proposals;
@@ -686,6 +719,16 @@ drop policy if exists pause_votes_select_all on pause_votes;
 create policy pause_votes_select_all on pause_votes for select using (true);
 drop policy if exists pause_votes_deny_direct_write on pause_votes;
 create policy pause_votes_deny_direct_write on pause_votes for all using (false) with check (false);
+
+drop policy if exists resume_proposals_select_all on resume_proposals;
+create policy resume_proposals_select_all on resume_proposals for select using (true);
+drop policy if exists resume_proposals_deny_direct_write on resume_proposals;
+create policy resume_proposals_deny_direct_write on resume_proposals for all using (false) with check (false);
+
+drop policy if exists resume_votes_select_all on resume_votes;
+create policy resume_votes_select_all on resume_votes for select using (true);
+drop policy if exists resume_votes_deny_direct_write on resume_votes;
+create policy resume_votes_deny_direct_write on resume_votes for all using (false) with check (false);
 
 drop policy if exists room_pauses_select_all on room_pauses;
 create policy room_pauses_select_all on room_pauses for select using (true);

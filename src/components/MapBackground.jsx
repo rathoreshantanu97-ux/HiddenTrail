@@ -133,31 +133,26 @@ export default function MapBackground({ map }) {
         </text>
 
         {/* Vidhana Soudha -- major real government building landmark,
-            near the CENTRAL cluster */}
+            near the CENTRAL cluster. Icon only -- the station's own
+            name label (with verified collision-free positioning) is
+            already rendered by the main station-labeling system; a
+            second text label here would just duplicate it. */}
         <rect x="56" y="52" width="3.2" height="2.4" fill="#d8cba8" opacity="0.9" rx="0.3" />
-        <text x="57.6" y="56.5" fontSize="1.1" textAnchor="middle" fill="#8a6d3a" fontWeight="600" opacity="0.85">
-          Vidhana Soudha
-        </text>
 
         {/* Bangalore Palace -- second major building landmark, placed
-            toward the NORTHWEST cluster */}
+            toward the NORTHWEST cluster. Icon only, same reasoning. */}
         <rect x="22" y="80" width="3" height="2.2" fill="#d8cba8" opacity="0.9" rx="0.3" />
-        <text x="23.5" y="84" fontSize="1.1" textAnchor="middle" fill="#8a6d3a" fontWeight="600" opacity="0.85">
-          Bangalore Palace
-        </text>
 
         {/* Kempegowda Airport -- real Bengaluru landmark, placed at the
             actual coordinates of the renamed station (station 4, the
             genuine northernmost station on this map, matching the real
             airport's real-world position north of the city). Simple
-            runway-stripe glyph rather than a building icon. */}
+            runway-stripe glyph rather than a building icon. Icon only --
+            the station's own name label already handles the text. */}
         <g opacity="0.85">
           <rect x="35" y="1.5" width="6" height="1" fill="#8a8f96" rx="0.15" />
           <rect x="36" y="0.8" width="4" height="0.5" fill="#d8d4c8" />
         </g>
-        <text x="38" y="5.5" fontSize="1.1" textAnchor="middle" fill="#5c6066" fontWeight="600" opacity="0.85">
-          Kempegowda Airport
-        </text>
 
         {/* Ulsoor Lake / Bellandur Lake -- kept as pure visual scenery
             (per updated design decision: lakes stay, but no longer
@@ -217,22 +212,17 @@ export default function MapBackground({ map }) {
           Bellandur Lake
         </text>
 
-        {/* Cubbon Park -- real station at (53.6, 42.3) */}
+        {/* Cubbon Park -- real station at (53.6, 42.3). Icon only -- the
+            station's own name label already handles the text. */}
         <ellipse cx="57" cy="39" rx="5.5" ry="4" fill="#cfe3c4" opacity="0.85" />
-        <text x="57" y="39" fontSize="1.2" textAnchor="middle" fill="#4a7a3d" fontWeight="600" opacity="0.85">
-          Cubbon Park
-        </text>
 
-        {/* Lalbagh -- real station at (49.2, 64.1) */}
+        {/* Lalbagh -- real station at (49.2, 64.1). Icon only. */}
         <ellipse cx="46" cy="68" rx="5" ry="3.8" fill="#cfe3c4" opacity="0.85" />
-        <text x="46" y="68" fontSize="1.2" textAnchor="middle" fill="#4a7a3d" fontWeight="600" opacity="0.85">
-          Lalbagh
-        </text>
 
         {/* Vidhana Soudha -- real Indian legislative building, rendered as
             a simplified domed-colonnade silhouette rather than a plain
             box, so it actually reads as "government building" at a
-            glance. Station at (45.0, 24.4). */}
+            glance. Station at (45.0, 24.4). Icon only. */}
         <g transform="translate(45.0, 22.5)">
           <rect x="-3" y="0" width="6" height="1.8" fill="#c9b98a" />
           <rect x="-3.4" y="1.6" width="6.8" height="0.5" fill="#a8926a" />
@@ -242,13 +232,10 @@ export default function MapBackground({ map }) {
           <circle cx="0" cy="-1.1" r="1.1" fill="#c9b98a" />
           <circle cx="0" cy="-2.0" r="0.25" fill="#8a7550" />
         </g>
-        <text x="45" y="19.5" fontSize="1.05" textAnchor="middle" fill="#8a6d3a" fontWeight="600" opacity="0.85">
-          Vidhana Soudha
-        </text>
 
         {/* Bengaluru Palace -- Tudor-style crenellated silhouette,
             distinct from the legislative dome above. Station at
-            (54.2, 9.2). */}
+            (54.2, 9.2). Icon only. */}
         <g transform="translate(54.2, 7.3)">
           <rect x="-2.6" y="0" width="5.2" height="1.8" fill="#d8b98a" />
           {[-2.2, -1.1, 0, 1.1, 2.2].map((dx, i) => (
@@ -257,57 +244,42 @@ export default function MapBackground({ map }) {
           <rect x="-0.9" y="-1.8" width="1.8" height="2.7" fill="#c2a476" />
           <polygon points="0,-3 -1,-1.8 1,-1.8" fill="#8a6d3a" />
         </g>
-        <text x="54.2" y="5" fontSize="1.05" textAnchor="middle" fill="#8a6d3a" fontWeight="600" opacity="0.85">
-          Bengaluru Palace
-        </text>
 
         {/* Kempegowda International Airport -- simple airplane
             silhouette, unmistakably distinct from every building icon.
-            Station at (78.8, 6). */}
+            Station at (78.8, 6). Icon only. */}
         <g transform="translate(78.77, 3.2) rotate(-30)">
           <path d="M 0 -2.2 L 0.5 1.5 L 2.8 2.8 L 2.8 3.5 L 0.4 2.8 L 0.55 4.3 L 1.5 5 L 1.5 5.6 L 0 5.1 L -1.5 5.6 L -1.5 5 L -0.55 4.3 L -0.4 2.8 L -2.8 3.5 L -2.8 2.8 L -0.5 1.5 Z"
                 fill="#5c6066" />
         </g>
-        <text x="78.77" y="8.6" fontSize="1.05" textAnchor="middle" fill="#5c6066" fontWeight="600" opacity="0.85">
-          Kempegowda Airport
-        </text>
 
         {/* Indian Institute of Science (IISc) -- academic institution,
             rendered as a graduation-cap/mortarboard silhouette. Station
-            at (25.8, 16.5). */}
+            at (25.8, 16.5). Icon only. */}
         <g transform="translate(25.81, 14.2)">
           <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
           <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
           <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
         </g>
-        <text x="25.81" y="12.2" fontSize="1.0" textAnchor="middle" fill="#4a5a7a" fontWeight="600" opacity="0.85">
-          IISc
-        </text>
 
         {/* IIM Bangalore -- same academic-institution mortarboard
             language as IISc (visually groups them as "institutes"),
-            station at (64.0, 94). */}
+            station at (64.0, 94). Icon only. */}
         <g transform="translate(63.96, 91.7)">
           <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
           <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
           <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
         </g>
-        <text x="63.96" y="89.7" fontSize="1.0" textAnchor="middle" fill="#4a5a7a" fontWeight="600" opacity="0.85">
-          IIM Bangalore
-        </text>
 
         {/* IKEA Nagasandra -- simplified storefront/retail-box icon,
             deliberately more distinctive than a plain rectangle (a
             gabled roofline + a shopping-bag-like handle cue). Station
-            at (7.4, 12). */}
+            at (7.4, 12). Icon only. */}
         <g transform="translate(7.38, 9.8)">
           <rect x="-2.4" y="-0.2" width="4.8" height="2.4" fill="#2a5fa5" />
           <polygon points="-2.7,-0.2 0,-1.8 2.7,-0.2" fill="#1f4a85" />
           <rect x="-0.9" y="0.4" width="1.8" height="1.2" fill="#ffcc33" />
         </g>
-        <text x="7.38" y="14" fontSize="1.0" textAnchor="middle" fill="#2a5fa5" fontWeight="600" opacity="0.85">
-          IKEA
-        </text>
       </>
     );
   }
@@ -323,40 +295,45 @@ export default function MapBackground({ map }) {
       <>
         <rect x="0" y="0" width="95" height="126" fill="#f1ede3" />
         <circle cx="30" cy="30" r="14" fill="#ece5d3" opacity="0.35" />
-        <circle cx="65" cy="30" r="12" fill="#ece5d3" opacity="0.35" />
-        <circle cx="45" cy="65" r="16" fill="#e8e0c8" opacity="0.4" />
-        <circle cx="30" cy="100" r="14" fill="#e3dcc4" opacity="0.35" />
-        <circle cx="65" cy="100" r="14" fill="#e3dcc4" opacity="0.35" />
+        <circle cx="60" cy="30" r="14" fill="#ece5d3" opacity="0.35" />
+        <circle cx="20" cy="55" r="16" fill="#e8e0c8" opacity="0.4" />
+        <circle cx="90" cy="60" r="14" fill="#e3dcc4" opacity="0.35" />
+        <circle cx="60" cy="80" r="14" fill="#e3dcc4" opacity="0.35" />
 
-        {/* Ghat/hill shading along the southern descent (nodes 82-89 per
-            spec), brown/olive contour strokes suggesting a mountain pass */}
+        {/* Ghat/hill shading near Bijasan Ghat (the map's far LEFT end,
+            per the real local layout), brown/olive contour strokes
+            suggesting a mountain pass */}
         <g opacity="0.5">
           {[0, 1, 2, 3].map((i) => (
             <path
               key={i}
-              d={`M ${18 + i * 3} 105 Q ${25 + i * 3} 112 ${20 + i * 3} 120`}
+              d={`M ${10 + i * 2.5} ${48 + i * 3} Q ${6 + i * 2.5} ${55 + i * 3} ${11 + i * 2.5} ${62 + i * 3}`}
               stroke="#8a7550"
               strokeWidth="0.8"
               fill="none"
             />
           ))}
         </g>
-        <text x="24" y="112" fontSize="1.4" textAnchor="middle" fill="#6b5636" fontWeight="600" opacity="0.7">
+        <text x="14" y="45" fontSize="1.4" textAnchor="middle" fill="#6b5636" fontWeight="600" opacity="0.7">
           Bijasan Ghat descent
         </text>
 
         {/* Fort Pond -- small internal water feature inside the fort
-            compound, per the spec's explicit instruction */}
-        <ellipse cx="45" cy="59.5" rx="2.2" ry="1.5" fill="url(#lakeGrad)" opacity="0.85" />
+            compound, per the spec's explicit instruction. Repositioned
+            to the new Fort location (74.2, 25.7). */}
+        <ellipse cx="74.5" cy="29" rx="2.2" ry="1.5" fill="url(#lakeGrad)" opacity="0.85" />
 
         {/* Goi-side seasonal drainage -- pale blue broken line, NOT a
-            large river (per explicit spec instruction not to invent one) */}
-        <path d="M 65 88 Q 62 92 60 96" stroke="#8fb8cc" strokeWidth="0.5" strokeDasharray="1,1" fill="none" opacity="0.6" />
+            large river (per explicit spec instruction not to invent
+            one). Repositioned near the rural Chachariya/Semliya/
+            Pisanawal cluster in its new location. */}
+        <path d="M 92 85 Q 87 90 82 92" stroke="#8fb8cc" strokeWidth="0.5" strokeDasharray="1,1" fill="none" opacity="0.6" />
 
         {/* Sendhwa Fort -- the board's central heritage anchor, a
             crenellated fort silhouette, distinct from every school/
-            civic icon */}
-        <g transform="translate(44.15, 55.5)">
+            civic icon. Icon only -- the station's own name label
+            already handles the text. */}
+        <g transform="translate(74.17, 22.7)">
           <rect x="-3" y="0" width="6" height="2.2" fill="#a8926a" />
           {[-2.4, -1, 0.4, 1.8].map((dx, i) => (
             <rect key={i} x={dx} y={-0.8} width="0.9" height="1" fill="#a8926a" />
@@ -364,26 +341,19 @@ export default function MapBackground({ map }) {
           <rect x="-4" y="1.8" width="8" height="0.6" fill="#8a7550" />
           <polygon points="0,-2.2 -1.2,-0.8 1.2,-0.8" fill="#6b5636" />
         </g>
-        <text x="44.15" y="52" fontSize="1.5" textAnchor="middle" fill="#6b5636" fontWeight="700" opacity="0.9">
-          Sendhwa Fort
-        </text>
 
         {/* School icon (shared silhouette language: a simple gabled
-            schoolhouse) for all 3 school landmarks */}
+            schoolhouse) for all 3 school landmarks. Icon only -- each
+            station's own name label already handles the text. */}
         {[
-          { x: 13.16, y: 38.5, label: "Govt PG College" },
-          { x: 67.61, y: 59.5, label: "Raghuwansh Public School" },
-          { x: 28.37, y: 74.4, label: "Govt Boys HSS" },
+          { x: 66.77, y: 33.0 },
+          { x: 64.31, y: 71.6 },
+          { x: 53.25, y: 41.6 },
         ].map((school, i) => (
-          <g key={i}>
-            <g transform={`translate(${school.x}, ${school.y})`}>
-              <rect x="-1.8" y="-0.3" width="3.6" height="1.8" fill="#c26b4a" />
-              <polygon points="-2.1,-0.3 0,-1.5 2.1,-0.3" fill="#8a4a30" />
-              <rect x="-0.4" y="0.5" width="0.8" height="1" fill="#f1ede3" />
-            </g>
-            <text x={school.x} y={school.y + 2.6} fontSize="1.0" textAnchor="middle" fill="#8a4a30" fontWeight="600" opacity="0.85">
-              {school.label}
-            </text>
+          <g key={i} transform={`translate(${school.x}, ${school.y})`}>
+            <rect x="-1.8" y="-0.3" width="3.6" height="1.8" fill="#c26b4a" />
+            <polygon points="-2.1,-0.3 0,-1.5 2.1,-0.3" fill="#8a4a30" />
+            <rect x="-0.4" y="0.5" width="0.8" height="1" fill="#f1ede3" />
           </g>
         ))}
 
@@ -391,34 +361,28 @@ export default function MapBackground({ map }) {
             house silhouette, no distinguishing detail beyond the
             existing alias already in the spec), per explicit privacy
             instruction: no addresses, no additional identifying
-            details. */}
+            details. Icon only -- each station's own name label already
+            handles the text. */}
         {[
-          { x: 33.02, y: 41.47, label: "Shantanu's Home" },
-          { x: 38.71, y: 34.2, label: "Aayush's Mansion" },
-          { x: 6, y: 24.98, label: "Tanu's Villa" },
-          { x: 54.25, y: 13.39, label: "Mayur's Mahal" },
-          { x: 58.45, y: 8.5, label: "Shubham's Den" },
+          { x: 64.7, y: 65.1 },
+          { x: 56.27, y: 53.3 },
+          { x: 31.22, y: 21.8 },
+          { x: 94.62, y: 31.9 },
+          { x: 83.63, y: 58.9 },
         ].map((home, i) => (
-          <g key={i}>
-            <g transform={`translate(${home.x}, ${home.y - 2})`}>
-              <rect x="-1.2" y="0" width="2.4" height="1.4" fill="#7a8a99" opacity="0.8" />
-              <polygon points="-1.5,0 0,-1.1 1.5,0" fill="#5c6d7a" opacity="0.8" />
-            </g>
-            <text x={home.x} y={home.y + 0.8} fontSize="0.9" textAnchor="middle" fill="#5c6d7a" fontWeight="600" opacity="0.8">
-              {home.label}
-            </text>
+          <g key={i} transform={`translate(${home.x}, ${home.y - 2})`}>
+            <rect x="-1.2" y="0" width="2.4" height="1.4" fill="#7a8a99" opacity="0.8" />
+            <polygon points="-1.5,0 0,-1.1 1.5,0" fill="#5c6d7a" opacity="0.8" />
           </g>
         ))}
 
-        {/* Omprakash Talkies -- cinema icon (film-reel/screen glyph) */}
-        <g transform="translate(17.97, 31.8)">
+        {/* Omprakash Talkies -- cinema icon (film-reel/screen glyph).
+            Icon only. */}
+        <g transform="translate(44.0, 49.5)">
           <rect x="-1.6" y="-0.9" width="3.2" height="1.8" fill="#4a3a5c" />
           <circle cx="-0.6" cy="0" r="0.4" fill="#7a6a9c" />
           <circle cx="0.6" cy="0" r="0.4" fill="#7a6a9c" />
         </g>
-        <text x="17.97" y="35" fontSize="1.0" textAnchor="middle" fill="#4a3a5c" fontWeight="600" opacity="0.85">
-          Omprakash Talkies
-        </text>
       </>
     );
   }

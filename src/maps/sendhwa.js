@@ -1,29 +1,32 @@
-// MAP: "Sendhwa Corridor" — a 100-node regional town map (Julwania to
-// Bijasan Ghat), built from a detailed hand-authored spec. Foot/Auto/Bike/
-// Secret-Tunnel naming (no metro/bus transit exists at this scale).
+// MAP: "Sendhwa Corridor" (v2 -- rebuilt from a REAL local mental map of the
+// town, replacing the earlier grid-derived layout entirely).
 //
-// SPACING: redistributed from the spec's literal (severely crowded, min
-// 1.33 units) grid coordinates using the proven rank-based approach --
-// min distance now 8.45, directional relationships preserved at
-// 0.979/0.990 correlation.
+// Layout is anchored on the real NH3 highway spine, right (Julwania) to
+// left (Bijasan Ghat), with Bhawani Chowk as the true geometric CENTER of
+// the whole map, exactly as described: Julwania -> New Bus Stand ->
+// Rajkamal Bhojnalay -> Old Bus Stand -> Bhawani Chowk -> Chetna Pani Puri
+// -> Omprakash Talkies -> Church -> Darul Uloom -> Bijasan. UP from Bhawani
+// Chowk splits into Fort (RIGHT) and Sadar Bazaar (LEFT), matching the real
+// town layout. DOWN from Bhawani Chowk: Aayush's Mansion -> Nale Paar
+// (containing Shantanu's Home) -> Raghuwansh Public School. Mayur's Mahal
+// sits on the perpendicular Varla-road branch off New Bus Stand. Advantage
+// City (containing Shubham's Den) sits off the highway as its own cluster.
+// VERIFIED after spacing enforcement: Julwania still right of Bijasan,
+// Fort still right of Sadar Bazaar (both explicitly checked programmatically,
+// not just assumed to have survived the spacing pass).
 //
-// TIERS: Bike thinned to 5 express stops (min 30.1, median 40.8). Auto
-// thinned to remove sub-12-unit hops (median 19.7, genuinely faster than
-// Foot). FOOT FIX: initial build left Foot fragmented into 9 disconnected
-// islands (largest only 51 stations) -- caught via verification, not
-// assumed correct; bridged all islands plus added connections for 9
-// stations with zero Foot access at all. VERIFIED: Foot now fully
-// connected across all 100 stations, matching every other map's "Foot/
-// Taxi is the universal mesh" design principle.
+// Canvas switched to LANDSCAPE (126x100) to match the highway's real
+// left-right orientation (was portrait in the earlier grid-derived version).
 //
-// LABELS: 3-tier bounding-box collision system, VERIFIED zero collisions.
-//
-// PRIVACY: private home markers use only the alias already given in the
-// spec, rendered as a deliberately generic house icon -- no addresses or
-// distinguishing detail added.
+// Same verified tier/connectivity discipline as before: Bike thinned to
+// genuine express hops (min 16.6), Auto thinned to remove sub-12-unit hops,
+// Foot bridging fixed (was fragmented into 6 islands after the relayout --
+// caught via the same verification, not assumed fixed by inheritance from
+// the old layout). VERIFIED: Foot fully connected across all 100 stations.
+// Labels: 3-tier bounding-box system, VERIFIED zero collisions.
 
 const STATIONS_SENDHWA = {
-  1:[80.83,6],2:[89,8.34],3:[79.64,14.94],4:[87.95,16.78],5:[9.15,58.56],6:[6,88.0],7:[9.37,80.2],8:[13.16,41.27],9:[6,16.48],10:[6,45.79],11:[55.85,38.25],12:[30.64,24.03],13:[47.46,35.97],14:[63.59,41.76],15:[49.75,44.15],16:[20.28,54.8],17:[35.5,52.84],18:[43.64,50.41],19:[28.34,57.4],20:[44.15,58.88],21:[41.98,67.08],22:[35.13,72.09],23:[43.78,75.37],24:[50.22,68.99],25:[54.58,76.23],26:[52.42,60.82],27:[60.37,57.87],28:[51.9,52.36],29:[41.48,42.22],30:[34.37,63.35],31:[27.5,68.35],32:[28.37,77.23],33:[36.58,80.47],34:[38.76,89.57],35:[44.96,83.78],36:[53.41,84.63],37:[59.86,49.39],38:[67.61,62.31],39:[58.86,66.36],40:[71.88,69.65],41:[64.09,73.05],42:[61.48,81.14],43:[48.58,91.62],44:[67.71,86.87],45:[71.65,78.95],46:[79.31,73.76],47:[59.83,90.16],48:[76.17,86.28],49:[83.09,81.37],50:[58.78,98.61],51:[50.39,99.92],52:[66.59,95.28],53:[81.07,102.74],54:[89,105.74],55:[75.43,109.1],56:[89,118.42],57:[80.43,120],58:[71.94,119.79],59:[59.52,114.99],60:[69.2,103.34],61:[89,97.26],62:[89,87.46],63:[82.07,92.37],64:[38.96,25.73],65:[30.33,32.83],66:[38.71,34.2],67:[24.82,39.3],68:[33.02,41.47],69:[30.74,15.54],70:[32.14,6],71:[16.01,9.8],72:[39.06,17.24],73:[12.64,66.31],74:[58.45,6],75:[83.37,112.06],76:[67.63,112.47],77:[74.91,96.91],78:[61.39,106.7],79:[53.0,108.01],80:[51.13,116.35],81:[44.9,110.56],82:[42.03,118.55],83:[33.53,118.76],84:[17.97,34.28],85:[8.33,34.24],86:[67.55,53.32],87:[71.16,45.63],88:[24.51,9.75],89:[15.54,117.24],90:[54.25,13.39],91:[47.47,18.52],92:[40.15,8.82],93:[22.81,18.8],94:[20.0,46.31],95:[28.22,48.47],96:[14.34,18.12],97:[14.33,26.62],98:[22.8,27.3],99:[6,24.98],100:[12.78,50.88],
+  1:[101.0,45.44],2:[109.17,47.78],3:[100.11,54.15],4:[108.12,56.22],5:[61.56,52.51],6:[21.63,62.36],7:[25.0,54.56],8:[66.77,35.66],9:[37.53,23.47],10:[50.9,38.74],11:[91.5,46.58],12:[67.55,52.43],13:[53.09,17.47],14:[42.73,10.37],15:[51.73,28.24],16:[75.2,51.83],17:[57.99,29.05],18:[71.71,19.88],19:[68.16,25.31],20:[74.17,25.67],21:[76.48,31.35],22:[70.48,30.87],23:[73.04,36.5],24:[82.31,32.22],25:[79.28,37.42],26:[80.28,26.37],27:[84.23,21.64],28:[77.96,20.44],29:[54.39,33.72],30:[60.52,34.74],31:[57.01,39.41],32:[53.25,44.35],33:[56.32,49.59],34:[71.18,47.25],35:[75.38,42.46],36:[67.3,62.03],37:[39.28,16.53],38:[64.31,74.33],39:[88.37,32.87],40:[33.27,18.64],41:[89.67,39.24],42:[72.77,58.27],43:[59.02,70.61],44:[77.37,63.19],45:[81.84,67.72],46:[88.17,67.95],47:[71.17,67.29],48:[89.86,61.91],49:[94.96,58.06],50:[70.57,75.86],51:[60.62,79.38],52:[77.67,72.66],53:[92.36,79.87],54:[100.29,82.87],55:[86.72,86.23],56:[100.29,94],57:[91.37,94],58:[83.38,94],59:[70.81,92.12],60:[80.49,80.47],61:[100.29,74.39],62:[100.29,64.59],63:[94.3,69.78],64:[69.04,41.44],65:[63.13,40.35],66:[56.27,56.07],67:[52.97,64.89],68:[64.7,67.86],69:[59.59,44.81],70:[59.39,18.65],71:[47.21,15.09],72:[64.3,30.12],73:[34.5,53.42],74:[83.63,61.69],75:[95.01,88.68],76:[78.77,89.45],77:[86.17,74.12],78:[72.68,83.83],79:[64.29,85.14],80:[62.42,93.48],81:[56.19,87.69],82:[53.32,94],83:[44.82,94],84:[44.0,52.28],85:[61.79,24.52],86:[59.37,64.45],87:[61.95,58.8],88:[57.33,12.71],89:[15.5,55.7],90:[94.62,34.61],91:[82.0,47.72],92:[65.58,19.61],93:[55.5,23.37],94:[50.84,52.5],95:[55.34,75.67],96:[49.27,22.48],97:[43.41,21.37],98:[45.43,27.48],99:[31.22,24.54],100:[65.2,46.5],
 };
 
 const STATION_NAMES_SENDHWA = {
@@ -130,23 +133,24 @@ const STATION_NAMES_SENDHWA = {
 };
 
 const EDGES_SENDHWA = [
-  [1,11,"underground"],
-  [11,77,"underground"],
-  [77,81,"underground"],
+  [1,77,"underground"],
+  [77,78,"underground"],
+  [78,81,"underground"],
   [81,89,"underground"],
   [89,100,"underground"],
-  [25,35,"bus"],
   [58,59,"bus"],
+  [35,36,"bus"],
   [12,13,"bus"],
+  [40,41,"bus"],
   [60,74,"bus"],
   [10,64,"bus"],
+  [17,18,"bus"],
   [74,76,"bus"],
   [54,55,"bus"],
-  [18,19,"bus"],
+  [41,42,"bus"],
   [60,61,"bus"],
   [46,47,"bus"],
   [10,11,"bus"],
-  [19,20,"bus"],
   [37,38,"bus"],
   [9,95,"bus"],
   [47,48,"bus"],
@@ -154,6 +158,7 @@ const EDGES_SENDHWA = [
   [43,44,"bus"],
   [52,53,"bus"],
   [9,64,"bus"],
+  [38,39,"bus"],
   [39,40,"bus"],
   [50,74,"bus"],
   [52,74,"bus"],
@@ -163,239 +168,242 @@ const EDGES_SENDHWA = [
   [16,17,"bus"],
   [55,57,"taxi"],
   [90,91,"taxi"],
-  [64,72,"taxi"],
+  [13,88,"taxi"],
   [20,69,"taxi"],
+  [25,35,"taxi"],
+  [73,84,"taxi"],
+  [50,52,"taxi"],
   [44,45,"taxi"],
   [55,75,"taxi"],
-  [72,88,"taxi"],
+  [14,71,"taxi"],
+  [21,22,"taxi"],
+  [24,39,"taxi"],
   [31,32,"taxi"],
   [86,87,"taxi"],
-  [40,41,"taxi"],
+  [40,99,"taxi"],
+  [92,18,"taxi"],
+  [45,74,"taxi"],
   [43,70,"taxi"],
-  [17,18,"taxi"],
-  [33,69,"taxi"],
+  [17,85,"taxi"],
+  [70,88,"taxi"],
   [17,30,"taxi"],
+  [33,69,"taxi"],
   [27,28,"taxi"],
-  [11,14,"taxi"],
   [48,72,"taxi"],
-  [74,91,"taxi"],
   [38,71,"taxi"],
+  [66,87,"taxi"],
+  [45,52,"taxi"],
   [9,99,"taxi"],
-  [79,81,"taxi"],
-  [41,42,"taxi"],
-  [85,97,"taxi"],
-  [88,93,"taxi"],
+  [64,65,"taxi"],
+  [51,95,"taxi"],
+  [18,19,"taxi"],
   [34,70,"taxi"],
-  [82,89,"taxi"],
-  [10,100,"taxi"],
   [18,28,"taxi"],
   [15,29,"taxi"],
   [55,77,"taxi"],
-  [72,93,"taxi"],
+  [15,93,"taxi"],
+  [39,90,"taxi"],
   [70,72,"taxi"],
-  [92,72,"taxi"],
+  [5,12,"taxi"],
   [2,4,"taxi"],
-  [67,94,"taxi"],
+  [65,69,"taxi"],
+  [1,11,"taxi"],
+  [34,100,"taxi"],
   [17,29,"taxi"],
-  [74,90,"taxi"],
-  [5,100,"taxi"],
-  [13,15,"taxi"],
+  [76,78,"taxi"],
+  [36,42,"taxi"],
+  [41,90,"taxi"],
+  [10,32,"taxi"],
+  [10,29,"taxi"],
   [2,92,"taxi"],
   [1,90,"taxi"],
   [54,75,"taxi"],
   [43,47,"taxi"],
   [61,62,"taxi"],
   [84,94,"taxi"],
-  [38,39,"taxi"],
   [48,49,"taxi"],
+  [8,65,"taxi"],
   [80,81,"taxi"],
   [67,96,"taxi"],
-  [8,10,"taxi"],
-  [52,77,"taxi"],
   [44,73,"taxi"],
   [35,70,"taxi"],
-  [83,89,"taxi"],
-  [11,15,"taxi"],
   [62,63,"taxi"],
-  [17,95,"taxi"],
   [71,72,"taxi"],
   [47,50,"taxi"],
-  [64,66,"taxi"],
+  [43,86,"taxi"],
   [81,82,"taxi"],
+  [43,95,"taxi"],
   [2,91,"taxi"],
   [63,77,"taxi"],
   [3,4,"taxi"],
-  [35,36,"taxi"],
-  [100,16,"taxi"],
+  [72,85,"taxi"],
   [26,97,"taxi"],
-  [5,7,"taxi"],
-  [18,29,"taxi"],
-  [59,76,"taxi"],
-  [65,67,"taxi"],
   [3,92,"taxi"],
-  [13,14,"taxi"],
+  [14,37,"taxi"],
   [36,98,"taxi"],
   [45,46,"taxi"],
   [20,68,"taxi"],
   [50,51,"taxi"],
   [32,33,"taxi"],
   [82,83,"taxi"],
+  [34,64,"taxi"],
+  [11,41,"taxi"],
   [42,44,"taxi"],
   [45,73,"taxi"],
-  [84,98,"taxi"],
-  [5,73,"taxi"],
+  [55,60,"taxi"],
+  [39,41,"taxi"],
   [23,24,"taxi"],
   [78,79,"taxi"],
-  [59,78,"taxi"],
   [52,60,"taxi"],
   [58,76,"taxi"],
-  [22,31,"taxi"],
-  [65,66,"taxi"],
   [77,98,"taxi"],
+  [51,79,"taxi"],
+  [70,93,"taxi"],
+  [19,20,"taxi"],
   [26,68,"taxi"],
+  [5,33,"taxi"],
   [16,67,"taxi"],
-  [8,84,"taxi"],
   [27,97,"taxi"],
   [19,96,"taxi"],
   [24,25,"taxi"],
   [55,58,"taxi"],
+  [7,73,"taxi"],
   [6,7,"taxi"],
-  [85,96,"taxi"],
-  [10,99,"taxi"],
-  [12,66,"taxi"],
-  [15,28,"taxi"],
+  [69,100,"taxi"],
+  [48,74,"taxi"],
   [81,83,"taxi"],
-  [68,95,"taxi"],
   [56,75,"taxi"],
   [20,21,"taxi"],
+  [6,89,"taxi"],
   [21,23,"taxi"],
-  [67,84,"taxi"],
+  [5,66,"taxi"],
   [59,80,"taxi"],
-  [14,87,"taxi"],
-  [22,33,"taxi"],
-  [37,86,"taxi"],
+  [36,87,"taxi"],
+  [19,22,"taxi"],
   [53,54,"taxi"],
   [30,31,"taxi"],
-  [78,50,"taxi"],
-  [55,60,"taxi"],
+  [9,97,"taxi"],
+  [81,79,"taxi"],
+  [33,94,"taxi"],
+  [66,94,"taxi"],
 ];
 
 const FERRY_EDGES_SENDHWA = [
-  [9,2],
-  [2,83],
-  [83,57],
-  [57,26],
+  [40,90],
+  [90,6],
+  [6,56],
+  [56,5],
 ];
 
 const MAJOR_STATIONS_SENDHWA = new Set([20,11,9,16,18,1,13,45,51,55,60,83,89,38,24,23,26,14,49,77,84,85,86,87,88]);
 
 const MAJOR_LABEL_DIR_SENDHWA = {
   1: "N", // Julwania town centre
-  9: "N", // RK Bakery
-  11: "N", // New Bus Stand
-  13: "SW", // AB Road retail / service strip
-  14: "NE", // Anandam Hospital / Kamal Nagar side
-  16: "N", // Old Bus Stand
-  18: "N", // Main market chowk
+  9: "S", // RK Bakery
+  11: "SE", // New Bus Stand
+  13: "NE", // AB Road retail / service strip
+  14: "N", // Anandam Hospital / Kamal Nagar side
+  16: "E", // Old Bus Stand
+  18: "NE", // Main market chowk
   20: "N", // Sendhwa Fort
   23: "N", // Janpad Panchayat office, fort side
-  24: "N", // Nagar Palika new office
-  26: "N", // Sendhwa Police Station
-  38: "NE", // Raghuwansh Public School / Saraswati Colony
-  45: "S", // Advantage City
-  49: "N", // SH 36 / Khetia-side outer road
-  51: "N", // Balwadi
+  24: "NE", // Nagar Palika new office
+  26: "E", // Sendhwa Police Station
+  38: "N", // Raghuwansh Public School / Saraswati Colony
+  45: "NE", // Advantage City
+  49: "SE", // SH 36 / Khetia-side outer road
+  51: "E", // Balwadi
   55: "E", // Goi / Bakee-urf-Goi cluster
   60: "N", // Gawadi
   77: "N", // South Sendhwa NH 52 exit
-  83: "N", // Bijasan Ghat approach road
-  84: "NW", // Omprakash Talkies
-  85: "S", // Daaru Godam
-  86: "NE", // Nale Paar
+  83: "S", // Bijasan Ghat approach road
+  84: "N", // Omprakash Talkies
+  85: "SW", // Daaru Godam
+  86: "NW", // Nale Paar
   87: "N", // Ramkatora
   88: "N", // Shiv Mandir
-  89: "S", // Bijasan Ghat descent / border approach
+  89: "N", // Bijasan Ghat descent / border approach
 };
 
 const MINOR_LABEL_DIR_SENDHWA = {
-  2: "SW",
-  3: "N",
-  4: "N",
+  2: "NE",
+  3: "NE",
+  4: "NE",
   5: "N",
   6: "N",
-  7: "N",
-  8: "SE",
-  10: "N",
+  7: "SE",
+  8: "S",
+  10: "S",
   12: "N",
-  15: "NE",
-  17: "SW",
-  19: "SE",
+  15: "S",
+  17: "E",
+  19: "E",
   21: "N",
   22: "E",
-  25: "E",
-  27: "E",
+  25: "S",
+  27: "NE",
   28: "N",
-  29: "NE",
-  30: "SW",
-  31: "SW",
-  32: "NW",
-  33: "E",
+  29: "SW",
+  30: "N",
+  31: "N",
+  32: "W",
+  33: "W",
   34: "S",
-  35: "S",
-  36: "N",
-  37: "N",
-  39: "N",
-  40: "N",
-  41: "N",
-  42: "N",
+  35: "E",
+  36: "S",
+  37: "NW",
+  39: "S",
+  40: "SW",
+  41: "E",
+  42: "NE",
   43: "N",
-  44: "S",
-  46: "N",
-  47: "SE",
-  48: "NE",
-  50: "N",
-  52: "SW",
+  44: "N",
+  46: "E",
+  47: "N",
+  48: "N",
+  50: "SE",
+  52: "N",
   53: "N",
-  54: "W",
+  54: "NE",
   56: "N",
-  57: "N",
+  57: "S",
   58: "N",
   59: "N",
-  61: "S",
-  62: "SW",
+  61: "NE",
+  62: "E",
   63: "NE",
   64: "N",
-  65: "N",
-  66: "N",
-  67: "N",
+  65: "S",
+  66: "SW",
+  67: "S",
   68: "S",
-  69: "NE",
-  70: "N",
-  71: "N",
-  72: "NE",
+  69: "S",
+  70: "S",
+  71: "S",
+  72: "SE",
   73: "N",
-  74: "N",
-  75: "SW",
+  74: "NW",
+  75: "E",
   76: "N",
-  78: "NW",
+  78: "E",
   79: "W",
   80: "SE",
-  81: "W",
-  82: "SE",
+  81: "S",
+  82: "N",
   90: "N",
-  91: "NE",
+  91: "N",
   92: "N",
-  93: "N",
-  94: "SW",
-  95: "NE",
+  93: "SW",
+  94: "E",
+  95: "SW",
   96: "N",
-  97: "N",
-  98: "N",
-  99: "N",
-  100: "S",
+  97: "S",
+  98: "SW",
+  99: "SW",
+  100: "N",
 };
 
-const TINY_LABEL_STATIONS_SENDHWA = new Set([23,77,28,36,48,63,76]);
+const TINY_LABEL_STATIONS_SENDHWA = new Set([13,20,23,38,8,12,15,17,19,21,22,25,28,30,31,33,34,36,44,46,47,48,64,65,68,69,72,76,82,92,94,96,100]);
 
 const MODE_SENDHWA = {
   taxi: { color: "#c9971f", label: "Foot", short: "F" },
@@ -408,7 +416,7 @@ const MODE_SENDHWA = {
 export const sendhwaMap = {
   id: "sendhwa",
   label: "Sendhwa Corridor",
-  subtitle: "Julwania to Bijasan Ghat · regional town map · Foot/Auto/Bike",
+  subtitle: "Julwania to Bijasan Ghat · real local layout · Foot/Auto/Bike",
   stations: STATIONS_SENDHWA,
   edges: EDGES_SENDHWA,
   ferryEdges: FERRY_EDGES_SENDHWA,
@@ -418,8 +426,8 @@ export const sendhwaMap = {
   minorLabelDir: MINOR_LABEL_DIR_SENDHWA,
   tinyLabelStations: TINY_LABEL_STATIONS_SENDHWA,
   modeTheme: MODE_SENDHWA,
-  viewW: 95,
-  viewH: 126,
+  viewW: 126,
+  viewH: 100,
   background: { kind: "citymap", theme: "sendhwa" },
   characterNames: null,
   mrxName: null,

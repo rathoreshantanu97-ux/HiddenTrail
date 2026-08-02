@@ -338,7 +338,7 @@ export default function App({ account, onLogout }) {
     setAppMode("passandplay");
   }
 
-  async function handleCreateRoom({ displayName, mapId, numDetectives, totalPlayers, hostRole, mapStationCount, featureOverrides, isPublic, roomName }) {
+  async function handleCreateRoom({ displayName, mapId, numDetectives, totalPlayers, hostRole, mapStationCount, turnTimerSeconds, featureOverrides, isPublic, roomName }) {
     const { roomId, roomCode, hostPlayerId } = await api.createRoom({
       mapId,
       numDetectives,
@@ -346,6 +346,7 @@ export default function App({ account, onLogout }) {
       hostDisplayName: displayName,
       hostRole,
       mapStationCount,
+      turnTimerSeconds,
       featureOverrides,
       isPublic,
       roomName,

@@ -33,6 +33,33 @@ import {
 //                 Mr. X has their own device, so there's no reason to
 //                 hide it from themselves outside their turn.
 // ---------------------------------------------------------------------------
+// timerBarColor — smooth linear interpolation across three stops (green
+// at full time, yellow at half time, red as time runs out), so the turn
+// timer bar's color genuinely CHANGES continuously as time reduces,
+// rather than snapping abruptly at one threshold.
+function timerBarColor(fraction) {
+  const f = Math.max(0, Math.min(1, fraction));
+  // Stops: 1.0 -> green (#2e9e4f), 0.5 -> yellow (#e0b400), 0.0 -> red (#c0392b)
+  const stops = [
+    { at: 1.0, color: [46, 158, 79] },
+    { at: 0.5, color: [224, 180, 0] },
+    { at: 0.0, color: [192, 57, 43] },
+  ];
+  let lower = stops[1], upper = stops[0];
+  if (f <= 0.5) {
+    lower = stops[2];
+    upper = stops[1];
+  }
+  const span = upper.at - lower.at;
+  const t = span === 0 ? 0 : (f - lower.at) / span;
+  const [r1, g1, b1] = lower.color;
+  const [r2, g2, b2] = upper.color;
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 export default function GameBoard({
   map,
   match,
@@ -448,9 +475,18 @@ export default function GameBoard({
                 )}
                 {isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}
               </div>
-              {secondsRemaining != null && (
-                <div style={{ ...styles.turnTimerLabel, ...(secondsRemaining <= 10 ? styles.turnTimerLabelUrgent : {}) }}>
-                  ⏱ {secondsRemaining}s {turnTimerSeconds ? `/ ${turnTimerSeconds}s` : ""}
+              {secondsRemaining != null && turnTimerSeconds && (
+                <div style={styles.turnTimerBarWrap}>
+                  <div style={styles.turnTimerBarTrack}>
+                    <div
+                      style={{
+                        ...styles.turnTimerBarFill,
+                        width: `${Math.max(0, Math.min(100, (secondsRemaining / turnTimerSeconds) * 100))}%`,
+                        background: timerBarColor(secondsRemaining / turnTimerSeconds),
+                      }}
+                    />
+                  </div>
+                  <div style={styles.turnTimerBarText}>{secondsRemaining}s</div>
                 </div>
               )}
               {roomCode && <div style={styles.roomCodeLabel}>Room code: {roomCode}</div>}
@@ -704,6 +740,9 @@ export default function GameBoard({
             style={{
               ...styles.boardWrap,
               maxWidth: "100%",
+              maxHeight: "100%",
+              width: baseW >= baseH ? "100%" : "auto",
+              height: baseH > baseW ? "100%" : "auto",
               aspectRatio: `${baseW} / ${baseH}`,
             }}
           >
@@ -1186,7 +1225,7 @@ export const styles = {
     minHeight: 0,
     overflowY: "auto",
     minWidth: 0,
-    padding: "24px",
+    padding: "12px",
   },
   setupCard: {
     background: "#fff",
@@ -1303,8 +1342,33 @@ export const styles = {
   },
   roundLabel: { fontSize: 12, color: "#888" },
   turnLabel: { fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 },
-  turnTimerLabel: { fontSize: 13, fontWeight: 600, color: "#666", marginTop: 2 },
-  turnTimerLabelUrgent: { color: "#c0392b" },
+  turnTimerBarWrap: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+    width: "100%",
+    maxWidth: 220,
+  },
+  turnTimerBarTrack: {
+    flex: 1,
+    height: 8,
+    borderRadius: 5,
+    background: "#e5e2d8",
+    overflow: "hidden",
+  },
+  turnTimerBarFill: {
+    height: "100%",
+    borderRadius: 5,
+    transition: "width 1s linear, background-color 1s linear",
+  },
+  turnTimerBarText: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#666",
+    minWidth: 28,
+    textAlign: "right",
+  },
   roomCodeLabel: { fontSize: 11, color: "#aaa", marginTop: 2, letterSpacing: 0.5 },
   legendCompact: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 },
   legendCompactItem: { display: "flex", alignItems: "center", gap: 3, fontSize: 10.5, color: "#888" },

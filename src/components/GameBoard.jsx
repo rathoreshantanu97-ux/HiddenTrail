@@ -86,7 +86,8 @@ export default function GameBoard({
   onMrXMove,
   onActivateDoubleMove,
   onPassTurn, // (actor) => void -- called when the current actor genuinely has zero legal moves; fixes the real bug where this situation permanently soft-locked the game
-  extraHeaderContent, // e.g. a "pass to X" banner slot in pass-and-play; votes in multiplayer -- renders at the very TOP, above everything else
+  extraHeaderContent, // shares a row with the "Play 2x card" button (e.g. Pause/End Game in multiplayer, End Game in pass-and-play) -- kept small/short controls only, since it's meant to sit alongside the 2x button without wrapping badly
+  extraHeaderContentBelow, // renders as its OWN row, below the 2x/Pause/End-Game row -- for bulkier controls that shouldn't crowd that first row (e.g. multiplayer's Takeover Reversal / Redistribute Roles votes, and the TakeoverPanel)
   belowTicketsContent, // e.g. chat in multiplayer -- renders AFTER the log/tickets panels, per the agreed sidebar order (votes -> huddle -> explorer -> log -> tickets -> chat)
   onExploreModeChange, // (mode|null) => void -- reports this client's own explore-mode selection upward, so App.jsx can broadcast it via Presence
   teammatesExploring = [], // [{playerId, displayName, color, exploreMode}] -- OTHER detectives' current exploration, for the huddle panel (multiplayer only)
@@ -538,23 +539,53 @@ export default function GameBoard({
             </div>
           </div>
 
-          {isMrXTurn && isMyTurnToAct && !pendingMove && (
-            <div style={{ ...styles.rowCenter, justifyContent: "flex-end", marginBottom: 8 }}>
-              <button
-                style={{
-                  ...styles.doubleBtnCompact,
-                  opacity: match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive ? 1 : 0.4,
-                  cursor: match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive ? "pointer" : "default",
-                }}
-                disabled={match.mrX.tickets.double <= 0 || match.mrX.doubleMoveActive}
-                onClick={onActivateDoubleMove}
-              >
-                Play 2x card ({match.mrX.tickets.double} left)
-              </button>
+          {(isMrXTurn && isMyTurnToAct && !pendingMove) || extraHeaderContent ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+              {isMrXTurn && isMyTurnToAct && !pendingMove && (
+                <button
+                  style={{
+                    ...styles.doubleBtnCompact,
+                    opacity: match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive ? 1 : 0.4,
+                    cursor: match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive ? "pointer" : "default",
+                    flexShrink: 0,
+                  }}
+                  disabled={match.mrX.tickets.double <= 0 || match.mrX.doubleMoveActive}
+                  onClick={onActivateDoubleMove}
+                >
+                  Play 2x ({match.mrX.tickets.double})
+                </button>
+              )}
+              {/* extraHeaderContent (End Game in pass-and-play; Pause +
+                  End Game vote in multiplayer -- deliberately kept SHORT
+                  here) shares this same row instead of stacking on its
+                  own line below -- for Mr.X specifically, this was
+                  pushing these controls far enough down to require
+                  scrolling before they were visible; putting them side by
+                  side with the 2x button keeps everything reachable
+                  without scrolling, matching how the detective view
+                  already looked (it never had the 2x button competing for
+                  space). justifyContent switched from "space-between" to
+                  "flex-end": space-between pushed the 2x button to the far
+                  LEFT edge and extraHeaderContent to the far RIGHT edge of
+                  the row, which -- combined with flexWrap -- was enough
+                  horizontal spread to make the row wrap onto two lines
+                  well before it actually ran out of room; flex-end packs
+                  everything together on the right, matching how
+                  extraHeaderContent's own internal buttons are already
+                  right-aligned, and wraps only when genuinely necessary.
+                  The div below strips extraHeaderContent's own
+                  marginBottom so it doesn't create extra vertical gap now
+                  that it's inline rather than stacked. */}
+              {extraHeaderContent && <div style={{ marginBottom: 0, display: "flex", gap: 8 }}>{extraHeaderContent}</div>}
             </div>
-          )}
+          ) : null}
 
-          {extraHeaderContent}
+          {/* extraHeaderContentBelow: a SECOND, separate row for bulkier
+              controls that shouldn't crowd the 2x/Pause/End-Game row above
+              -- multiplayer's Takeover Reversal + Redistribute Roles votes
+              (and the TakeoverPanel) land here instead of competing for
+              space with the first row. */}
+          {extraHeaderContentBelow}
 
           {isMrXTurn && anyDetectiveExploring && (
             <div style={styles.huddleAmbientNote}>👀 Detectives are discussing...</div>

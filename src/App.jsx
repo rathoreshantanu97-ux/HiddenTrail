@@ -626,11 +626,7 @@ export default function App({ account, onLogout }) {
         onMrXMove={(to, edgeMode, ticketUsed) => localStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => localStore.activateDoubleMove()}
         onPassTurn={(actor) => localStore.passTurn(actor)}
-        extraHeaderContent={
-          <div style={{ marginBottom: 10, display: "flex", justifyContent: "flex-end" }}>
-            <EndGameEarlyButton onEndGame={() => localStore.endGameEarly()} />
-          </div>
-        }
+        extraHeaderContent={<EndGameEarlyButton onEndGame={() => localStore.endGameEarly()} />}
       />
     );
   }
@@ -810,10 +806,14 @@ export default function App({ account, onLogout }) {
         onActivateDoubleMove={() => supabaseStore.activateDoubleMove()}
         onPassTurn={(actor) => supabaseStore.passTurn(actor)}
         extraHeaderContent={
+          <>
+            <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
+            <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
+          </>
+        }
+        extraHeaderContentBelow={
           <div style={{ marginBottom: 10 }}>
             <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
-              <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
               {/* Single instance handles both roles: shows a "request my
                   seat back" button when completedTakeoverEventId is
                   known (only true for the replaced player themself, via

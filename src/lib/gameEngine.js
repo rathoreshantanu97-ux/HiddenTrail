@@ -270,7 +270,22 @@ export function applyDetectiveMove(map, match, detId, to, mode) {
 // Applies Mr. X's move (one leg — double-move calls this twice in a row
 // without an intervening advanceTurn, same as the original logic).
 export function applyMrXMove(map, match, to, edgeMode, ticketUsed) {
-  const isReveal = match.revealRounds.includes(match.round);
+  // isReveal is keyed off the MOVE index (travelLog.length + 1 -- i.e.
+  // which logbook entry this is), not match.round. This matches the
+  // real board's actual rule: reveal points are fixed LOGBOOK SLOTS
+  // (the 3rd, 8th, 13th, 18th, 24th entry), independent of round
+  // number. Confirmed this matters concretely: match.round does NOT
+  // advance between the two legs of a double-move (both legs happen on
+  // Mr.X's turn without an intervening advanceTurn), so checking
+  // isReveal against match.round would make BOTH legs of a double-move
+  // played during a reveal round count as reveals -- but the real rule
+  // is Mr.X surfaces on whichever single move (first or second half)
+  // actually lands on the reveal slot, and the other half stays hidden.
+  // Keying off the move index instead reproduces that correctly, since
+  // each leg of a double-move gets its own distinct move number even
+  // though they share a round number.
+  const thisMoveNumber = match.mrX.travelLog.length + 1;
+  const isReveal = match.revealRounds.includes(thisMoveNumber);
   const spent = edgeMode === "ferry" ? "black" : ticketUsed;
   const loggedMode = spent === "black" ? "black" : edgeMode;
   const prevMrX = match.mrX;

@@ -27,6 +27,14 @@ import { useChat } from "../lib/useChat.js";
 // scrollbar at all).
 // ---------------------------------------------------------------------------
 const NEAR_BOTTOM_PX = 24;
+// Simple fixed height, per explicit instruction -- with the sidebar
+// restructure (round/turn/timer moved to the map-top bar, the redundant
+// standalone ticket-chip panel dropped, explore-mode regrouped with the
+// other controls), there's real freed-up vertical space now, so a fixed
+// 270px doesn't need the self-adjusting/shrink-to-fit logic an earlier
+// version of this file had -- that complexity is no longer the right
+// tradeoff once the sidebar itself is shorter.
+const CHAT_HEIGHT = 270;
 
 export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName }) {
   const { allMessages, detectiveMessages, canUseDetectiveChannel, sendToAll, sendToDetectives } = useChat({
@@ -115,7 +123,7 @@ export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName })
   }
 
   return (
-    <div style={styles.panel}>
+    <div style={{ ...styles.panel, height: CHAT_HEIGHT }}>
       <div style={styles.tabs}>
         <button
           style={{
@@ -173,6 +181,10 @@ export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName })
           }}
           placeholder={activeTab === "detectives" ? "Message detectives only..." : "Message everyone..."}
           maxLength={500}
+          autoCorrect="off"
+          autoCapitalize="off"
+          autoComplete="off"
+          spellCheck="false"
         />
         <button style={styles.sendBtn} onClick={handleSend}>
           Send
@@ -190,7 +202,7 @@ const styles = {
     borderRadius: 12,
     boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
     overflow: "hidden",
-    height: 240,
+    height: 270,
   },
   tabs: { display: "flex", borderBottom: "1px solid #eee" },
   tab: {

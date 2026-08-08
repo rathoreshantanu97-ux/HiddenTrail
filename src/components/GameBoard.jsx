@@ -164,6 +164,67 @@ export default function GameBoard({
   const [message, setMessage] = useState("");
   const dragState = React.useRef(null);
   const svgRef = React.useRef(null);
+  const boardColumnRef = React.useRef(null);
+  // Tracks the board column's own real pixel size via ResizeObserver, so
+  // the board wrapper's width/height can be computed with EXACT
+  // arithmetic in JS -- after multiple CSS-only attempts (manual vh
+  // calc(), aspect-ratio + max-height, min()-based calc()) all failed to
+  // reliably preserve the map's true aspect ratio across different
+  // screen shapes (verified by direct measurement each time: several
+  // "fixes" left the map visibly stretched on wide/ultrawide screens,
+  // confirmed via automated ratio checks, not just eyeballing), this is
+  // the one approach that's actually reliable: measure the real
+  // available box, then compute the largest width/height pair that (a)
+  // fits within that box on both axes and (b) preserves baseW:baseH
+  // exactly, with no CSS derivation ambiguity involved at all.
+  const [columnSize, setColumnSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = boardColumnRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        const { width, height } = entry.contentRect;
+        setColumnSize({ width, height });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // The new top-of-map bar (round/turn banner + timer) sits ABOVE the
+  // map inside the same boardColumnFull element that columnSize measures
+  // as a whole -- so its own rendered height needs to be subtracted from
+  // columnSize.height before that feeds into the map's fit-to-box math
+  // below, or the map would be sized as if it had the FULL column height
+  // available and overflow past the bottom by exactly the bar's height.
+  const topBarRef = React.useRef(null);
+  const [topBarHeight, setTopBarHeight] = useState(0);
+  useEffect(() => {
+    const el = topBarRef.current;
+    if (!el) {
+      setTopBarHeight(0);
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      // getBoundingClientRect (not entry.contentRect) so this includes
+      // the element's own padding/border -- and marginBottom is added
+      // explicitly on top, since margin is never included in ANY
+      // element measurement API (getBoundingClientRect or
+      // ResizeObserver's contentRect/borderBoxSize) -- it's genuinely
+      // outside the element's own box in the DOM model. Confirmed this
+      // was a real, reproducible bug: using contentRect.height alone
+      // undercounted by exactly the bar's 8px marginBottom on every
+      // viewport size tested, which let the map wrapper claim 8px more
+      // height than was actually available and overflow past the
+      // bottom of the viewport by that same fixed 8px on every screen.
+      const rect = el.getBoundingClientRect();
+      const marginBottom = parseFloat(getComputedStyle(el).marginBottom) || 0;
+      setTopBarHeight(rect.height + marginBottom);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Converts a station's coordinates (in the SVG's own viewBox
   // coordinate space, e.g. 0-100) into actual SCREEN pixels, accounting
@@ -452,19 +513,41 @@ export default function GameBoard({
     if (!isMyTurnToAct) return;
     if (isMrXTurn) {
       if (myRole !== null && myRole !== "mrx") return; // multiplayer: not your role
-      const edge = (map.graph[match.mrX.pos] || []).find((m) => m.to === station);
-      if (!edge) {
+      // FIX: was .find(), which only returns the FIRST matching edge --
+      // silently ignoring any other mode also connecting to this same
+      // station (e.g. a station reachable by both taxi AND bus). That
+      // caused two real bugs: (1) the mode-selection popup only ever
+      // offered ONE mode, even when several were genuinely available,
+      // and (2) the ticket-availability check below only tested that
+      // one mode, so a player with plenty of tickets for a DIFFERENT
+      // available mode to the same station would incorrectly be told
+      // they had no valid ticket. .filter() collects every parallel
+      // edge to this station instead of just the first one found.
+      const edges = (map.graph[match.mrX.pos] || []).filter((m) => m.to === station);
+      if (edges.length === 0) {
         setMessage("No direct connection there.");
         return;
       }
-      if (edge.mode === "ferry" && match.mrX.tickets.black <= 0) {
-        setMessage(`No black tickets left — ${activeMode.ferry.label.toLowerCase()} crossings require one.`);
+      // Only offer modes Mr.X can actually pay for right now (own
+      // ticket for that mode, OR a black ticket as camouflage/ferry
+      // fare) -- mirrors the original single-edge check, just applied
+      // across every available mode instead of only the first.
+      const usableModes = edges.filter(
+        (e) => (e.mode === "ferry" ? match.mrX.tickets.black > 0 : match.mrX.tickets[e.mode] > 0 || match.mrX.tickets.black > 0)
+      );
+      if (usableModes.length === 0) {
+        const hasFerry = edges.some((e) => e.mode === "ferry");
+        setMessage(
+          hasFerry
+            ? `No black tickets left — ${activeMode.ferry.label.toLowerCase()} crossings require one.`
+            : "No tickets left for any available route there."
+        );
         return;
       }
-      setPendingMove({ to: station, mode: edge.mode, edgeMode: edge.mode });
+      setPendingMove({ to: station, availableModes: usableModes.map((e) => e.mode) });
       if (occupiedByDetective(match.detectives, station)) {
         setMessage(`${stationLabel(station)} has a detective on it. Moving there is legal but ends the game — ${mrxName()} would be caught.`);
-      } else if (edge.mode === "ferry") {
+      } else if (usableModes.length === 1 && usableModes[0].mode === "ferry") {
         setMessage(`Selected ${stationLabel(station)} via ${activeMode.ferry.label.toLowerCase()}. This will cost a black ticket.`);
       } else {
         setMessage(`Selected ${stationLabel(station)}. Choose which ticket to spend.`);
@@ -476,17 +559,26 @@ export default function GameBoard({
         setMessage("Another detective already occupies that station.");
         return;
       }
-      const edge = (map.graph[d.pos] || []).find((m) => m.to === station);
-      if (!edge) {
+      // Same .find() -> .filter() fix as Mr.X's branch above, for the
+      // same reason: a detective could have a valid ticket for a second
+      // available mode to this station even when they're out of the
+      // first-found mode's tickets.
+      const edges = (map.graph[d.pos] || []).filter((m) => m.to === station);
+      if (edges.length === 0) {
         setMessage("No direct connection there.");
         return;
       }
-      if (d.tickets[edge.mode] <= 0) {
-        setMessage(`No ${activeMode[edge.mode].label} tickets left.`);
+      const usableModes = edges.filter((e) => d.tickets[e.mode] > 0);
+      if (usableModes.length === 0) {
+        setMessage(`No ${edges.map((e) => activeMode[e.mode].label).join("/")} tickets left.`);
         return;
       }
-      setPendingMove({ to: station, mode: edge.mode, edgeMode: edge.mode });
-      setMessage(`Selected ${stationLabel(station)} via ${activeMode[edge.mode].label}. Confirm to move.`);
+      setPendingMove({ to: station, availableModes: usableModes.map((e) => e.mode) });
+      setMessage(
+        usableModes.length === 1
+          ? `Selected ${stationLabel(station)} via ${activeMode[usableModes[0].mode].label}. Confirm to move.`
+          : `Selected ${stationLabel(station)}. Choose which ticket to spend.`
+      );
     }
   }
 
@@ -496,9 +588,9 @@ export default function GameBoard({
     onDetectiveMove(detId, to, mode);
   }
 
-  function commitMrXMove(ticketUsed) {
+  function commitMrXMove(edgeMode, ticketUsed) {
     if (!pendingMove) return;
-    const { to, edgeMode } = pendingMove;
+    const { to } = pendingMove;
     setPendingMove(null);
     setMessage("");
     onMrXMove(to, edgeMode, ticketUsed);
@@ -510,49 +602,22 @@ export default function GameBoard({
     <div style={styles.pagePlaying}>
       <div style={styles.playingLayoutSidebar}>
         <div style={styles.sidebarPermanent}>
-          <div style={styles.headerBar}>
-            <div>
-              <div style={styles.roundLabel}>
-                Round {match.round} / {match.maxRounds}
-              </div>
-              <div style={styles.turnLabel}>
-                {!isMrXTurn && (
-                  <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />
-                )}
-                {isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}
-              </div>
-              {secondsRemaining != null && turnTimerSeconds && (
-                <div style={styles.turnTimerBarWrap}>
-                  <div style={styles.turnTimerBarTrack}>
-                    <div
-                      style={{
-                        ...styles.turnTimerBarFill,
-                        width: `${Math.max(0, Math.min(100, (secondsRemaining / turnTimerSeconds) * 100))}%`,
-                        background: timerBarColor(secondsRemaining / turnTimerSeconds),
-                      }}
-                    />
-                  </div>
-                  <div style={styles.turnTimerBarText}>{secondsRemaining}s</div>
-                </div>
-              )}
-              {roomCode && <div style={styles.roomCodeLabel}>Room code: {roomCode}</div>}
-              <div style={styles.legendCompact}>
-                {Object.entries(activeMode).map(([key, m]) => (
-                  <span key={key} style={styles.legendCompactItem}>
-                    <span style={{ ...styles.legendDot, background: m.color }} />
-                    {m.label}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div style={styles.ticketsPanel}>
-              {isMrXTurn
-                ? sortTicketEntries(match.mrX.tickets)
-                    .filter(([mode]) => mode !== "double")
-                    .map(([mode, count]) => <TicketChip key={mode} mode={mode} count={count} modeTheme={activeMode} />)
-                : sortTicketEntries(activeDetective.tickets).map(([mode, count]) => (
-                    <TicketChip key={mode} mode={mode} count={count} modeTheme={activeMode} />
-                  ))}
+          <div style={styles.headerBarSlim}>
+            {/* Round, turn label, timer, and this-player's ticket chips
+                all moved to the new top-of-map bar (round+turn+timer) and
+                "Everyone's tickets" below (ticket chips -- see that
+                section for why the standalone chip panel was dropped
+                rather than duplicated). Only room code and the mode
+                legend stay here, since they're static reference info,
+                not per-turn status. */}
+            {roomCode && <div style={styles.roomCodeLabel}>Room code: {roomCode}</div>}
+            <div style={styles.legendCompact}>
+              {Object.entries(activeMode).map(([key, m]) => (
+                <span key={key} style={styles.legendCompactItem}>
+                  <span style={{ ...styles.legendDot, background: m.color }} />
+                  {m.label}
+                </span>
+              ))}
             </div>
           </div>
 
@@ -604,30 +669,12 @@ export default function GameBoard({
               space with the first row. */}
           {extraHeaderContentBelow}
 
-          {isMrXTurn && anyDetectiveExploring && (
-            <div style={styles.huddleAmbientNote}>👀 Detectives are discussing...</div>
-          )}
-
-          {iAmDetective && teammatesExploring.length > 0 && (
-            <div style={styles.huddlePanel}>
-              <div style={styles.exploreLabel}>Teammates exploring:</div>
-              {teammatesExploring.map((t) => (
-                <button
-                  key={t.playerId}
-                  style={{
-                    ...styles.huddleRow,
-                    ...(peekedTeammateId === t.playerId ? styles.huddleRowActive : {}),
-                  }}
-                  onClick={() => setPeekedTeammateId(peekedTeammateId === t.playerId ? null : t.playerId)}
-                >
-                  <span style={{ ...styles.huddleDot, background: t.color }} />
-                  {t.displayName}: {activeMode[t.exploreMode]?.label || t.exploreMode}
-                  {peekedTeammateId === t.playerId ? " (peeking)" : ""}
-                </button>
-              ))}
-            </div>
-          )}
-
+          {/* Explore-mode row moved here (previously sat between the
+              huddle notes and the travel log) -- it's a CONTROL (a tool
+              you actively use to query the map), so it's grouped with
+              the other controls above (2x/Pause/End-Game, Takeover) 
+              rather than sitting among the read-only INFORMATION panels
+              (huddle notes, travel log, tickets, chat) below. */}
           {(isMrXTurn ? isMyTurnToAct : iAmDetective || myRole === null) && routeExplorerEnabled && exploreModeOptions.length > 0 && (
             <div style={styles.exploreRow}>
               {myOwnDetectives.length > 1 && (
@@ -667,26 +714,147 @@ export default function GameBoard({
             </div>
           )}
 
+          {/* Pass Turn moved here (previously sat at the very BOTTOM of
+              the sidebar, after chat -- the last thing in the whole
+              panel) per explicit request: it's a genuinely urgent,
+              time-sensitive action (you're stuck and need to act to keep
+              the game moving), not something that belongs buried below
+              read-only information like the travel log or chat. Grouped
+              with the other action controls (2x/Pause/End-Game,
+              Takeover, explore-mode) rather than left at the bottom. */}
+          {isMyTurnToAct && !pendingMove && legalTargets.size === 0 && (
+            <div style={styles.rowCenter}>
+              <div style={styles.passTurnNote}>
+                No legal moves available from your current station with your remaining tickets.
+              </div>
+              <button
+                style={styles.primaryBtn}
+                onClick={() => {
+                  if (onPassTurn) onPassTurn(actor);
+                }}
+              >
+                Pass Turn
+              </button>
+            </div>
+          )}
+
+          {isMrXTurn && anyDetectiveExploring && (
+            <div style={styles.huddleAmbientNote}>👀 Detectives are discussing...</div>
+          )}
+
+          {iAmDetective && teammatesExploring.length > 0 && (
+            <div style={styles.huddlePanel}>
+              <div style={styles.exploreLabel}>Teammates exploring:</div>
+              {teammatesExploring.map((t) => (
+                <button
+                  key={t.playerId}
+                  style={{
+                    ...styles.huddleRow,
+                    ...(peekedTeammateId === t.playerId ? styles.huddleRowActive : {}),
+                  }}
+                  onClick={() => setPeekedTeammateId(peekedTeammateId === t.playerId ? null : t.playerId)}
+                >
+                  <span style={{ ...styles.huddleDot, background: t.color }} />
+                  {t.displayName}: {activeMode[t.exploreMode]?.label || t.exploreMode}
+                  {peekedTeammateId === t.playerId ? " (peeking)" : ""}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div style={styles.allTicketsPanel}>
+            <div style={styles.travelLogTitle}>Everyone's tickets</div>
+            <div style={styles.detectiveOverviewRow}>
+              <div
+                style={{
+                  ...styles.detectiveOverviewCard,
+                  // The standalone "this player's own tickets" chip panel
+                  // (previously in the sidebar header) was dropped as
+                  // redundant once this list already shows every player's
+                  // tickets, including the current mover's -- but that
+                  // meant there was no more quick "whose turn, what do
+                  // they have" glance without reading every row. This
+                  // visually emphasizes whichever row belongs to the
+                  // player whose turn it currently is, so that glance is
+                  // still just as fast as the old dedicated panel was.
+                  ...(isMrXTurn ? styles.detectiveOverviewCardActive : {}),
+                }}
+              >
+                <div style={{ ...styles.detectiveOverviewDot, background: "#1a1a1a" }} />
+                <span style={{ fontWeight: 700, marginRight: 4 }}>{mrxName()}</span>
+                {sortTicketEntries(match.mrX.tickets).map(([mode, count]) => (
+                  <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode] ? activeMode[mode].color : "#666" }}>
+                    {mode === "double" ? "2x" : activeMode[mode].short}
+                    {count}
+                  </span>
+                ))}
+              </div>
+              {match.detectives.map((d) => {
+                // Naming rules (agreed): pass-and-play (myRole===null, no
+                // real player identities) keeps the old bare "Dn" label,
+                // since there's nothing else to show. Multiplayer: your
+                // OWN seat(s) show "You" (or "You — Character" on
+                // Westeros, where players pick a fixed character rather
+                // than typing their own name); other players show their
+                // real display name (or their chosen character name on
+                // Westeros) — never a bare seat number once real
+                // identities exist.
+                const isMine = controlsSeat(`d${d.id}`);
+                let label;
+                if (myRole === null) {
+                  label = `D${d.id + 1}`;
+                } else if (isWesteros) {
+                  label = isMine ? `You — ${detectiveName(d.id)}` : `${detectiveName(d.id)} — D${d.id + 1}`;
+                } else {
+                  const playerName = detectivePlayerNames[d.id];
+                  label = isMine ? `You — D${d.id + 1}` : playerName ? `${playerName} — D${d.id + 1}` : `D${d.id + 1}`;
+                }
+                const isActiveMover = !isMrXTurn && activeDetective && activeDetective.id === d.id;
+                return (
+                  <div
+                    key={d.id}
+                    style={{
+                      ...styles.detectiveOverviewCard,
+                      ...(isActiveMover ? styles.detectiveOverviewCardActive : {}),
+                    }}
+                  >
+                    <div style={{ ...styles.detectiveOverviewDot, background: d.color }} />
+                    <span style={{ fontWeight: 700, marginRight: 4 }}>{label}</span>
+                    {sortTicketEntries(d.tickets).map(([mode, count]) => (
+                      <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode].color }}>
+                        {activeMode[mode].short}
+                        {count}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div style={styles.travelLogPanel}>
             <div style={styles.travelLogTitle}>
               {mrxName()}'s travel log ({match.maxRounds + 2} moves max — {match.maxRounds} rounds + 2 double-move legs)
             </div>
-              {(() => {
-                const nextReveal = [...match.revealRounds].filter((r) => r >= match.round).sort((a, b) => a - b)[0];
-                if (!nextReveal) return null;
-                const roundsAway = nextReveal - match.round;
-                return (
-                  <div style={styles.nextRevealBanner}>
-                    {roundsAway === 0
-                      ? `👁 Reveal round is NOW (round ${nextReveal}) — ${mrxName()}'s true station will show once they move.`
-                      : `👁 Next reveal in ${roundsAway} round${roundsAway === 1 ? "" : "s"} (round ${nextReveal})`}
-                  </div>
-                );
-              })()}
+              {/* "Next reveal in N moves" banner removed -- now redundant
+                  with the log grid below, which highlights EVERY reveal
+                  move (including upcoming ones, not just past ones) with
+                  a red border and an explicit tooltip on hover. Keeping
+                  both said the same thing twice and cost real vertical
+                  space in the sidebar. */}
               <div style={styles.logBoard}>
                 {Array.from({ length: match.maxRounds + 2 }, (_, i) => i + 1).map((moveNum) => {
                   const entry = match.mrX.travelLog.find((e) => e.move === moveNum);
-                  const belongsToRevealRound = entry && match.revealRounds.includes(entry.round);
+                  // Fixed move-number-based reveal slots -- known in
+                  // advance regardless of whether this specific move has
+                  // been played yet, unlike the old round-based check
+                  // which could only tell you about ALREADY-PLAYED moves
+                  // (a future move's eventual ROUND number is genuinely
+                  // unknowable in advance, since double-moves shift it --
+                  // but its MOVE NUMBER is fixed the whole game, so this
+                  // now correctly highlights upcoming reveal slots too,
+                  // not just past ones).
+                  const belongsToRevealRound = match.revealRounds.includes(moveNum);
                   const isFuture = !entry;
                   return (
                     <div
@@ -698,8 +866,8 @@ export default function GameBoard({
                       }}
                       title={
                         entry
-                          ? `Move ${moveNum} (round ${entry.round}): ${activeMode[entry.mode].label}${belongsToRevealRound ? " — reveal round" : ""}`
-                          : `Move ${moveNum}: not yet played`
+                          ? `Move ${moveNum} (round ${entry.round}): ${activeMode[entry.mode].label}${belongsToRevealRound ? " — reveal move" : ""}`
+                          : `Move ${moveNum}${belongsToRevealRound ? " — reveal move (upcoming)" : ""}: not yet played`
                       }
                     >
                       <div style={styles.logBoardRoundNum}>
@@ -730,74 +898,9 @@ export default function GameBoard({
               )}
             </div>
 
-          <div style={styles.allTicketsPanel}>
-            <div style={styles.travelLogTitle}>Everyone's tickets</div>
-            <div style={styles.detectiveOverviewRow}>
-              <div style={styles.detectiveOverviewCard}>
-                <div style={{ ...styles.detectiveOverviewDot, background: "#1a1a1a" }} />
-                <span style={{ fontWeight: 700, marginRight: 4 }}>{mrxName()}</span>
-                {sortTicketEntries(match.mrX.tickets).map(([mode, count]) => (
-                  <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode] ? activeMode[mode].color : "#666" }}>
-                    {mode === "double" ? "2x" : activeMode[mode].short}
-                    {count}
-                  </span>
-                ))}
-              </div>
-              {match.detectives.map((d) => {
-                // Naming rules (agreed): pass-and-play (myRole===null, no
-                // real player identities) keeps the old bare "Dn" label,
-                // since there's nothing else to show. Multiplayer: your
-                // OWN seat(s) show "You" (or "You — Character" on
-                // Westeros, where players pick a fixed character rather
-                // than typing their own name); other players show their
-                // real display name (or their chosen character name on
-                // Westeros) — never a bare seat number once real
-                // identities exist.
-                const isMine = controlsSeat(`d${d.id}`);
-                let label;
-                if (myRole === null) {
-                  label = `D${d.id + 1}`;
-                } else if (isWesteros) {
-                  label = isMine ? `You — ${detectiveName(d.id)}` : `${detectiveName(d.id)} — D${d.id + 1}`;
-                } else {
-                  const playerName = detectivePlayerNames[d.id];
-                  label = isMine ? `You — D${d.id + 1}` : playerName ? `${playerName} — D${d.id + 1}` : `D${d.id + 1}`;
-                }
-                return (
-                  <div key={d.id} style={styles.detectiveOverviewCard}>
-                    <div style={{ ...styles.detectiveOverviewDot, background: d.color }} />
-                    <span style={{ fontWeight: 700, marginRight: 4 }}>{label}</span>
-                    {sortTicketEntries(d.tickets).map(([mode, count]) => (
-                      <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode].color }}>
-                        {activeMode[mode].short}
-                        {count}
-                      </span>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
           {belowTicketsContent}
 
           {message && <div style={styles.messageBar}>{message}</div>}
-
-          {isMyTurnToAct && !pendingMove && legalTargets.size === 0 && (
-            <div style={styles.rowCenter}>
-              <div style={styles.passTurnNote}>
-                No legal moves available from your current station with your remaining tickets.
-              </div>
-              <button
-                style={styles.primaryBtn}
-                onClick={() => {
-                  if (onPassTurn) onPassTurn(actor);
-                }}
-              >
-                Pass Turn
-              </button>
-            </div>
-          )}
 
           {/* "Waiting for X..." note removed here -- it duplicated the
               turn label already shown at the top of the sidebar next to
@@ -808,48 +911,81 @@ export default function GameBoard({
 
         </div>
 
-        <div style={styles.boardColumnFull}>
+        <div style={styles.boardColumnFull} ref={boardColumnRef}>
+          {/* Top-of-map bar: round + turn banner (left) and the turn
+              timer (filling the rest), always visible regardless of
+              sidebar scroll -- moved here from the sidebar header per
+              explicit request, since the sidebar can scroll but this
+              column's content above the map cannot. Width matches the
+              map wrapper's own computed width (see boardWrap below) via
+              the same maxTopBarWidth value, so the two align exactly. */}
+          <div
+            ref={topBarRef}
+            style={{
+              ...styles.mapTopBar,
+              width: columnSize.width ? Math.min(columnSize.width, baseW * 10) : "100%",
+            }}
+          >
+            <div style={styles.mapTopBarTurn}>
+              {!isMrXTurn && <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />}
+              <span style={styles.mapTopBarRound}>Round {match.round}/{match.maxRounds}</span>
+              <span style={styles.mapTopBarDivider}>—</span>
+              <span>{isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}</span>
+            </div>
+            {secondsRemaining != null && turnTimerSeconds && (
+              <div style={styles.mapTopBarTimerWrap}>
+                <div style={styles.turnTimerBarTrack}>
+                  <div
+                    style={{
+                      ...styles.turnTimerBarFill,
+                      width: `${Math.max(0, Math.min(100, (secondsRemaining / turnTimerSeconds) * 100))}%`,
+                      background: timerBarColor(secondsRemaining / turnTimerSeconds),
+                    }}
+                  />
+                </div>
+                <div style={styles.turnTimerBarText}>{secondsRemaining}s</div>
+              </div>
+            )}
+          </div>
           <div
             style={{
               ...styles.boardWrap,
-              // Simplest correct approach: the wrapper just fills its
-              // TRUE flex-allocated box (boardColumnFull already has the
-              // real available width via flex:1 and real available
-              // height via height:100% cascading from pagePlaying's
-              // 100vh -- no manual vh/% arithmetic needed, and no
-              // aspect-ratio contradiction from trying to force both
-              // axes to 100% while also constraining the ratio). The
-              // actual "preserve the map's shape and fit it inside this
-              // box, using whichever axis is tighter" job is handled by
-              // the SVG's own native viewBox + preserveAspectRatio
-              // below, which is exactly what that mechanism exists
-              // for -- this replaces two earlier attempts (manual vh
-              // calc(), then a width/height-swap heuristic) that were
-              // both still fighting the browser's layout engine instead
-              // of using the tool actually designed for this.
-              width: "100%",
-              height: "100%",
+              // Exact JS-computed fit, using the REAL measured container
+              // size from ResizeObserver (columnSize) above -- see that
+              // hook's comment for why CSS-only approaches (tried four
+              // different ways across this file's history) kept failing
+              // to reliably hold the map's true aspect ratio across
+              // different screen shapes. This is plain "letterbox" math:
+              // try fitting to the full column width first (deriving the
+              // height baseW:baseH would require); if that derived
+              // height fits within the column's actual height, use it;
+              // otherwise fit to the full column height instead and
+              // derive width from THAT. Either branch preserves the
+              // exact ratio with no CSS derivation ambiguity, and it's
+              // trivially verifiable by direct measurement (which is how
+              // this was actually confirmed correct, not assumed).
+              // topBarHeight is now subtracted from the available height
+              // FIRST, since that space is genuinely occupied by the new
+              // top bar above and was not available to the map before.
+              ...(() => {
+                const { width: colW, height: colHRaw } = columnSize;
+                const colH = Math.max(0, colHRaw - topBarHeight);
+                if (!colW || !colH) return { width: "100%", height: "100%" }; // before the first ResizeObserver measurement lands
+                const ratio = baseW / baseH;
+                const heightIfFullWidth = colW / ratio;
+                if (heightIfFullWidth <= colH) {
+                  return { width: colW, height: heightIfFullWidth };
+                }
+                const widthIfFullHeight = colH * ratio;
+                return { width: widthIfFullHeight, height: colH };
+              })(),
+              margin: "0 auto",
             }}
           >
             <svg
               ref={svgRef}
               viewBox={`${pan.x} ${pan.y} ${viewSizeW} ${viewSizeH}`}
-              // "none" instead of "xMidYMid meet": meet PRESERVES the
-              // exact map aspect ratio and letterboxes/pillarboxes
-              // whatever's left over -- that's what was causing the
-              // large empty bands on left/right in practice (the
-              // container's own shape is usually much wider than the
-              // map's own 126x108ish shape, so "meet" was adding
-              // significant pillarbox margin completely independent of
-              // the EDGE_MARGIN constants below, which only affect the
-              // viewBox's own coordinate bounds, not this separate
-              // scaling behavior). "none" stretches the content to fill
-              // the container exactly on both axes -- no letterboxing,
-              // uses all available space, at the cost of not perfectly
-              // preserving the map's literal aspect ratio (a small,
-              // usually unnoticeable stretch, not a real design cost
-              // here).
-              preserveAspectRatio="none"
+              preserveAspectRatio="xMidYMid meet"
               style={{
                 ...styles.board,
                 width: "100%",
@@ -1340,25 +1476,52 @@ export default function GameBoard({
               const [sx, sy] = map.stations[pendingMove.to];
               const screenPos = svgPointToScreenPoint(sx, sy);
               if (isMrXTurn) {
+                // Build one option per genuinely available mode to this
+                // destination (fixes the old single-edge bug: previously
+                // pendingMove only ever carried ONE mode, so a station
+                // reachable by e.g. both taxi and bus only ever offered
+                // one of them here, and black-ticket eligibility was
+                // checked against only that one mode too). Ferry always
+                // costs a black ticket specifically (no separate "ferry
+                // ticket" exists), so it gets its own distinct option
+                // rather than being lumped with the generic black-ticket
+                // fallback below.
                 const options = [];
-                if (pendingMove.edgeMode === "ferry") {
+                const nonFerryModes = pendingMove.availableModes.filter((m) => m !== "ferry");
+                const hasFerry = pendingMove.availableModes.includes("ferry");
+
+                for (const mode of nonFerryModes) {
+                  if (match.mrX.tickets[mode] > 0) {
+                    options.push({
+                      key: `mode-${mode}`,
+                      label: `${activeMode[mode].label} ticket`,
+                      onClick: () => commitMrXMove(mode, mode),
+                    });
+                  }
+                }
+                if (hasFerry && match.mrX.tickets.black > 0) {
                   options.push({
                     key: "ferry",
                     label: `${activeMode.ferry.label} (black ticket)`,
                     accent: activeMode.ferry.color,
-                    onClick: () => commitMrXMove("black"),
+                    onClick: () => commitMrXMove("ferry", "black"),
                   });
-                } else {
-                  if (match.mrX.tickets[pendingMove.edgeMode] > 0) {
-                    options.push({
-                      key: "mode",
-                      label: `${activeMode[pendingMove.edgeMode].label} ticket`,
-                      onClick: () => commitMrXMove(pendingMove.edgeMode),
-                    });
-                  }
-                  if (match.mrX.tickets.black > 0) {
-                    options.push({ key: "black", label: "Black ticket (camouflage)", accent: "#2b2b2b", onClick: () => commitMrXMove("black") });
-                  }
+                }
+                // Generic black-ticket camouflage option: ONE shared
+                // entry (not one per mode) since black substitutes for
+                // whichever non-ferry mode the player mentally intends --
+                // the actual edge used is whichever non-ferry mode is
+                // available; if more than one non-ferry mode exists,
+                // default to the first (matches prior behavior of
+                // "black" always being offered as a single blanket
+                // camouflage option, not mode-specific).
+                if (nonFerryModes.length > 0 && match.mrX.tickets.black > 0) {
+                  options.push({
+                    key: "black",
+                    label: "Black ticket (camouflage)",
+                    accent: "#2b2b2b",
+                    onClick: () => commitMrXMove(nonFerryModes[0], "black"),
+                  });
                 }
                 return (
                   <MovePopup
@@ -1374,20 +1537,26 @@ export default function GameBoard({
               }
 
               if (activeDetective) {
+                // Same fix for detectives: one option per available mode
+                // to this destination, instead of assuming only one mode
+                // was ever possible.
+                const options = pendingMove.availableModes.map((mode) => ({
+                  key: mode,
+                  label: `${activeMode[mode].label} ticket`,
+                  onClick: () => commitDetectiveMove(activeDetective.id, pendingMove.to, mode),
+                }));
                 return (
                   <MovePopup
                     x={screenPos.x}
                     y={screenPos.y}
                     fallback={screenPos.fallback}
                     openDirection={screenPos.openDirection}
-                    title={`Move to ${stationLabel(pendingMove.to)} using ${activeMode[pendingMove.mode].label}?`}
-                    options={[
-                      {
-                        key: "confirm",
-                        label: "Confirm move",
-                        onClick: () => commitDetectiveMove(activeDetective.id, pendingMove.to, pendingMove.mode),
-                      },
-                    ]}
+                    title={
+                      pendingMove.availableModes.length === 1
+                        ? `Move to ${stationLabel(pendingMove.to)} using ${activeMode[pendingMove.availableModes[0]].label}?`
+                        : `Move to ${stationLabel(pendingMove.to)} via:`
+                    }
+                    options={options}
                     onClose={() => setPendingMove(null)}
                   />
                 );
@@ -1607,6 +1776,49 @@ export const styles = {
     alignItems: "flex-start",
     marginBottom: 10,
   },
+  // headerBarSlim replaces headerBar's old role in the sidebar -- round
+  // label, turn label, timer, and this-player's ticket chips all moved
+  // out (to the new map-top bar and "Everyone's tickets"), so this is
+  // now just room code + mode legend, stacked simply rather than the old
+  // two-column layout (which existed to make room for the ticket chips
+  // on the right -- no longer needed).
+  headerBarSlim: {
+    width: "100%",
+    marginBottom: 10,
+  },
+  // New bar rendered above the map itself (see boardColumnFull) --
+  // round + turn banner on the left, timer filling the rest. Always
+  // visible regardless of sidebar scroll, which was the whole point of
+  // moving it out of the sidebar.
+  mapTopBar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    background: "#fff",
+    borderRadius: 10,
+    padding: "8px 14px",
+    marginBottom: 8,
+    boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+    boxSizing: "border-box",
+  },
+  mapTopBarTurn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 15,
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  },
+  mapTopBarRound: { color: "#888", fontWeight: 600, fontSize: 13 },
+  mapTopBarDivider: { color: "#ccc", fontWeight: 400 },
+  mapTopBarTimerWrap: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+    minWidth: 60,
+  },
   roundLabel: { fontSize: 12, color: "#888" },
   turnLabel: { fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 },
   turnTimerBarWrap: {
@@ -1722,6 +1934,16 @@ export const styles = {
     gap: 6,
     fontSize: 12,
     flexWrap: "wrap",
+  },
+  // Highlights whichever row belongs to the player whose turn it
+  // currently is -- see the comment at its usage for why this exists
+  // (replaces the old standalone this-player ticket-chip panel).
+  detectiveOverviewCardActive: {
+    background: "#fdf6e8",
+    borderRadius: 6,
+    padding: "3px 6px",
+    margin: "-3px -6px",
+    boxShadow: "0 0 0 1px #eecf8a",
   },
   detectiveOverviewDot: { width: 9, height: 9, borderRadius: "50%", flexShrink: 0 },
   miniChip: {

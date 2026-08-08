@@ -71,7 +71,17 @@ export default function MapBackground({ map }) {
     // station layout. viewBox is 126 x 102 (see bengaluru.js).
     return (
       <>
-        <rect x="0" y="0" width="126" height="102" fill="#eef1ec" />
+        {/* Base fill extended well beyond the map's own 0,0-126,102
+            coordinate bounds (to -10,-10 through 146,122) so it also
+            covers the small EDGE_MARGIN strip GameBoard.jsx adds around
+            the viewBox for label/Airport clearance -- without this, that
+            margin strip had NO fill of its own and fell through to
+            whatever's behind the SVG (the page background), which read
+            as a visible white/mismatched seam around the map's actual
+            drawn area. 10 units of overshoot is comfortably more than
+            the current margin values (6 top, 0.5 other sides) need, so
+            this stays correct even if those constants change later. */}
+        <rect x="-10" y="-10" width="146" height="122" fill="#eef1ec" />
 
         {/* Rural Lake -- station #86 @ (84.4, 8.85) */}
         <ellipse cx="84.4" cy="8.5" rx="4.5" ry="3" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(10 84.4 8.5)" />

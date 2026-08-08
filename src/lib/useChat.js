@@ -16,37 +16,66 @@ export function useChat({ roomId, myPlayerId, myRole }) {
   const [detectiveMessages, setDetectiveMessages] = useState([]);
   const lastAllRef = useRef("1970-01-01T00:00:00Z");
   const lastDetRef = useRef("1970-01-01T00:00:00Z");
+  // Guards against a real race condition that was causing duplicate
+  // messages: poll() reads lastAllRef/lastDetRef SYNCHRONOUSLY, then
+  // awaits the network call -- during that await, JS is free to run
+  // OTHER code, including a second concurrent poll() call (e.g. the
+  // scheduled setInterval firing right as sendToAll's own explicit
+  // .then(poll) call is also in flight, which happens often since
+  // sending a message triggers an immediate poll on top of the regular
+  // 2.5s interval). Both concurrent calls would read the SAME
+  // not-yet-updated "after" timestamp, both fetch the SAME "new"
+  // message, and both append it to state -- confirmed this is exactly
+  // why it was specifically the SENDER who saw their own message appear
+  // more than once (their send-triggered poll was the one most likely
+  // to overlap with the interval's own poll). inFlightRef makes any
+  // poll() call that starts while one is already running simply wait
+  // for the in-progress one and return its result, rather than kicking
+  // off a second, independently-racing fetch.
+  const inFlightRef = useRef(null);
 
   const isDetective = myRole && myRole !== "mrx";
 
   const poll = useCallback(async () => {
     if (!roomId) return;
-    try {
-      const newAll = await api.getAllChannelMessages({ roomId, after: lastAllRef.current });
-      if (newAll.length) {
-        setAllMessages((prev) => [...prev, ...newAll]);
-        lastAllRef.current = newAll[newAll.length - 1].createdAt;
-      }
-    } catch (e) {
-      console.error("chat poll (all) failed:", e);
-    }
+    if (inFlightRef.current) return inFlightRef.current;
 
-    if (isDetective) {
+    const run = (async () => {
       try {
-        const newDet = await api.getDetectiveMessages({
-          roomId,
-          callerPlayerId: myPlayerId,
-          after: lastDetRef.current,
-        });
-        if (newDet.length) {
-          setDetectiveMessages((prev) => [...prev, ...newDet]);
-          lastDetRef.current = newDet[newDet.length - 1].createdAt;
+        const newAll = await api.getAllChannelMessages({ roomId, after: lastAllRef.current });
+        if (newAll.length) {
+          setAllMessages((prev) => [...prev, ...newAll]);
+          lastAllRef.current = newAll[newAll.length - 1].createdAt;
         }
       } catch (e) {
-        console.error("chat poll (detectives) failed:", e);
+        console.error("chat poll (all) failed:", e);
       }
+
+      if (isDetective) {
+        try {
+          const newDet = await api.getDetectiveMessages({
+            roomId,
+            callerPlayerId: myPlayerId,
+            after: lastDetRef.current,
+          });
+          if (newDet.length) {
+            setDetectiveMessages((prev) => [...prev, ...newDet]);
+            lastDetRef.current = newDet[newDet.length - 1].createdAt;
+          }
+        } catch (e) {
+          console.error("chat poll (detectives) failed:", e);
+        }
+      }
+    })();
+
+    inFlightRef.current = run;
+    try {
+      await run;
+    } finally {
+      inFlightRef.current = null;
     }
   }, [roomId, myPlayerId, isDetective]);
+
 
   useEffect(() => {
     if (!roomId) return;

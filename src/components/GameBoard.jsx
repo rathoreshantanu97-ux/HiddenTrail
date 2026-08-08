@@ -912,76 +912,85 @@ export default function GameBoard({
         </div>
 
         <div style={styles.boardColumnFull} ref={boardColumnRef}>
-          {/* Top-of-map bar: round + turn banner (left) and the turn
-              timer (filling the rest), always visible regardless of
-              sidebar scroll -- moved here from the sidebar header per
-              explicit request, since the sidebar can scroll but this
-              column's content above the map cannot. Width matches the
-              map wrapper's own computed width (see boardWrap below) via
-              the same maxTopBarWidth value, so the two align exactly. */}
-          <div
-            ref={topBarRef}
-            style={{
-              ...styles.mapTopBar,
-              width: columnSize.width ? Math.min(columnSize.width, baseW * 10) : "100%",
-            }}
-          >
-            <div style={styles.mapTopBarTurn}>
-              {!isMrXTurn && <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />}
-              <span style={styles.mapTopBarRound}>Round {match.round}/{match.maxRounds}</span>
-              <span style={styles.mapTopBarDivider}>—</span>
-              <span>{isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}</span>
-            </div>
-            {secondsRemaining != null && turnTimerSeconds && (
-              <div style={styles.mapTopBarTimerWrap}>
-                <div style={styles.turnTimerBarTrack}>
-                  <div
-                    style={{
-                      ...styles.turnTimerBarFill,
-                      width: `${Math.max(0, Math.min(100, (secondsRemaining / turnTimerSeconds) * 100))}%`,
-                      background: timerBarColor(secondsRemaining / turnTimerSeconds),
-                    }}
-                  />
+          {/* Computed ONCE and reused by both the top bar and the map
+              wrapper below, so they always share the EXACT same width --
+              previously the top bar used the raw column width while the
+              map used this letterbox-fit width, and those two values
+              only coincidentally matched when the column's WIDTH was the
+              binding constraint; on a tall/narrow screen where the
+              column's HEIGHT binds instead, the map shrinks narrower
+              than the full column while the top bar (not knowing that)
+              stayed at the full column width, visibly wider than the
+              map beneath it. Computing this once up front and using it
+              for both elements makes that mismatch structurally
+              impossible rather than something that has to stay in sync
+              by coincidence. */}
+          {(() => {
+            const { width: colW, height: colHRaw } = columnSize;
+            const colH = Math.max(0, colHRaw - topBarHeight);
+            let fittedWidth, fittedHeight;
+            if (!colW || !colH) {
+              fittedWidth = "100%";
+              fittedHeight = "100%";
+            } else {
+              const ratio = baseW / baseH;
+              const heightIfFullWidth = colW / ratio;
+              if (heightIfFullWidth <= colH) {
+                fittedWidth = colW;
+                fittedHeight = heightIfFullWidth;
+              } else {
+                fittedWidth = colH * ratio;
+                fittedHeight = colH;
+              }
+            }
+            return (
+              <>
+                {/* Top-of-map bar: round + turn banner (left) and the
+                    turn timer (filling the rest), always visible
+                    regardless of sidebar scroll -- moved here from the
+                    sidebar header per explicit request, since the
+                    sidebar can scroll but this column's content above
+                    the map cannot. */}
+                <div ref={topBarRef} style={{ ...styles.mapTopBar, width: fittedWidth }}>
+                  <div style={styles.mapTopBarTurn}>
+                    {!isMrXTurn && <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />}
+                    <span style={styles.mapTopBarRound}>Round {match.round}/{match.maxRounds}</span>
+                    <span style={styles.mapTopBarDivider}>—</span>
+                    <span>{isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}</span>
+                  </div>
+                  {secondsRemaining != null && turnTimerSeconds && (
+                    <div style={styles.mapTopBarTimerWrap}>
+                      <div style={styles.turnTimerBarTrack}>
+                        <div
+                          style={{
+                            ...styles.turnTimerBarFill,
+                            width: `${Math.max(0, Math.min(100, (secondsRemaining / turnTimerSeconds) * 100))}%`,
+                            background: timerBarColor(secondsRemaining / turnTimerSeconds),
+                          }}
+                        />
+                      </div>
+                      <div style={styles.turnTimerBarText}>{secondsRemaining}s</div>
+                    </div>
+                  )}
                 </div>
-                <div style={styles.turnTimerBarText}>{secondsRemaining}s</div>
-              </div>
-            )}
-          </div>
-          <div
-            style={{
-              ...styles.boardWrap,
-              // Exact JS-computed fit, using the REAL measured container
-              // size from ResizeObserver (columnSize) above -- see that
-              // hook's comment for why CSS-only approaches (tried four
-              // different ways across this file's history) kept failing
-              // to reliably hold the map's true aspect ratio across
-              // different screen shapes. This is plain "letterbox" math:
-              // try fitting to the full column width first (deriving the
-              // height baseW:baseH would require); if that derived
-              // height fits within the column's actual height, use it;
-              // otherwise fit to the full column height instead and
-              // derive width from THAT. Either branch preserves the
-              // exact ratio with no CSS derivation ambiguity, and it's
-              // trivially verifiable by direct measurement (which is how
-              // this was actually confirmed correct, not assumed).
-              // topBarHeight is now subtracted from the available height
-              // FIRST, since that space is genuinely occupied by the new
-              // top bar above and was not available to the map before.
-              ...(() => {
-                const { width: colW, height: colHRaw } = columnSize;
-                const colH = Math.max(0, colHRaw - topBarHeight);
-                if (!colW || !colH) return { width: "100%", height: "100%" }; // before the first ResizeObserver measurement lands
-                const ratio = baseW / baseH;
-                const heightIfFullWidth = colW / ratio;
-                if (heightIfFullWidth <= colH) {
-                  return { width: colW, height: heightIfFullWidth };
-                }
-                const widthIfFullHeight = colH * ratio;
-                return { width: widthIfFullHeight, height: colH };
-              })(),
-              margin: "0 auto",
-            }}
-          >
+                <div
+                  style={{
+                    ...styles.boardWrap,
+                    // Exact JS-computed fit, using the REAL measured
+                    // container size from ResizeObserver (columnSize)
+                    // above -- see the long-standing comment history in
+                    // this file for why CSS-only approaches kept failing
+                    // to reliably hold the map's true aspect ratio.
+                    // topBarHeight is subtracted from the available
+                    // height first (that space is genuinely occupied by
+                    // the top bar above), and fittedWidth/fittedHeight
+                    // are the SAME values just used for the top bar
+                    // above, guaranteeing the two always match exactly.
+                    width: fittedWidth,
+                    height: fittedHeight,
+                    margin: "0 auto",
+                  }}
+                >
             <svg
               ref={svgRef}
               viewBox={`${pan.x} ${pan.y} ${viewSizeW} ${viewSizeH}`}
@@ -1577,6 +1586,9 @@ export default function GameBoard({
               )}
             </div>
           </div>
+              </>
+            );
+          })()}
 
         </div>
       </div>

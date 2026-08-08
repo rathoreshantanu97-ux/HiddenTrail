@@ -799,9 +799,12 @@ export default function GameBoard({
             </div>
           )}
 
-          {!isMyTurnToAct && myRole !== null && (
-            <div style={styles.ruleNote}>Waiting for {isMrXTurn ? mrxName() : detectiveName(activeDetective.id)}...</div>
-          )}
+          {/* "Waiting for X..." note removed here -- it duplicated the
+              turn label already shown at the top of the sidebar next to
+              the round/timer ("Mr. X's Turn" / "Detective N's Turn"),
+              per explicit request. That header is always visible without
+              scrolling, so this second copy lower in the panel added
+              nothing. */}
 
         </div>
 

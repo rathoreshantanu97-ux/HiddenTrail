@@ -73,14 +73,6 @@ export default function MapBackground({ map }) {
       <>
         <rect x="0" y="0" width="126" height="102" fill="#eef1ec" />
 
-        {/* Soft neighborhood-tint patches, spread across the board so the
-            base doesn't read as a flat, empty rectangle */}
-        <circle cx="25" cy="20" r="16" fill="#e6e8e2" opacity="0.4" />
-        <circle cx="95" cy="20" r="15" fill="#e6e8e2" opacity="0.4" />
-        <circle cx="20" cy="70" r="16" fill="#e3e5df" opacity="0.4" />
-        <circle cx="90" cy="75" r="17" fill="#e3e5df" opacity="0.4" />
-        <circle cx="60" cy="50" r="15" fill="#e9e6da" opacity="0.35" />
-
         {/* Rural Lake -- station #86 @ (84.4, 8.85) */}
         <ellipse cx="84.4" cy="8.5" rx="4.5" ry="3" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(10 84.4 8.5)" />
 

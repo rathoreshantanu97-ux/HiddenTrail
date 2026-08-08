@@ -148,7 +148,7 @@ function averageShortestPathForMode(graph, stationIds, mode) {
   return pairCount > 0 ? totalDist / pairCount : null;
 }
 
-export function computeTicketCounts(graph, stationIds) {
+export function computeTicketCounts(graph, stationIds, totalRounds = null) {
   const scaleFactor = {};
   for (const mode of ["taxi", "bus", "underground"]) {
     const mapAvg = averageShortestPathForMode(graph, stationIds, mode);
@@ -177,7 +177,102 @@ export function computeTicketCounts(graph, stationIds) {
     }
   }
 
+  enforceRealBoardProportions(detective, mrx);
+
+  // On the real board, detective total tickets (10+8+4=22) essentially
+  // EQUAL the round count (22) -- by design, a detective playing
+  // efficiently (favoring taxi) can just barely last the whole game,
+  // while running dry before round 22 is a genuine, intended way for
+  // detectives to lose (confirmed: "if none of the detectives can move
+  // because they have run out of fare tickets, Mr. X wins"). That ratio
+  // (total tickets / rounds = 1.0) is a real design target, not
+  // incidental -- but it can currently be violated on this project's
+  // maps because ticket counts and round count are calibrated by two
+  // independent formulas with no cross-check between them (confirmed:
+  // one real map here computed 19 total detective tickets against a
+  // 24-round game, meaning detectives were guaranteed to run out with
+  // 5 "free" rounds still on the clock, through no fault of their own
+  // play -- that's a broken game, not intended tension). If a
+  // totalRounds value is provided, raise TAXI (the cheap, plentiful
+  // tier -- same logic as enforceRealBoardProportions above: taxi's
+  // measurement is the reliable one to flex) until the detective total
+  // reaches the round count.
+  if (totalRounds) {
+    const detTotal = detective.taxi + detective.bus + detective.underground;
+    if (detTotal < totalRounds) {
+      detective.taxi += totalRounds - detTotal;
+    }
+  }
+
   return { detective, mrx };
+}
+
+// enforceRealBoardProportions — each transport mode is scaled
+// INDEPENDENTLY against its own historical baseline (see comment above
+// computeTicketCounts), which can invert the real game's resource
+// hierarchy on a map where one mode's subgraph happens to be unusually
+// sparse or dense relative to the others. Concretely confirmed on a real
+// map in this project: bus is a genuinely sparse tier (a minority of
+// stations have it at all), so a bus-only shortest-path search naturally
+// produces a SMALL average distance relative to bus's own baseline --
+// which the independent per-mode scaling read as "bus is efficient here,
+// give MORE bus tickets," producing 14 bus tickets vs only 9 taxi tickets
+// for detectives. That's backwards: on the real Scotland Yard board, taxi
+// is deliberately the most plentiful, lowest-value resource and bus/
+// underground are progressively scarcer, HIGHER-value resources -- that
+// hierarchy is a fixed design property of the game, not something that
+// should be able to invert based on a single map's graph shape.
+//
+// This clamps the SCALED counts (so map-size-driven scaling is still
+// fully preserved -- a bigger, more spread-out map still gets more
+// tickets overall) to never violate the real board's own minimum
+// proportions between tiers, computed directly from the real board's
+// known-good values (detective 10/8/4, Mr.X 4/3/3):
+//   detective taxi >= bus * 1.25   (10/8)
+//   detective bus  >= underground * 2.0   (8/4)
+//   mrx taxi >= bus * 1.33   (4/3)
+//   mrx bus  >= underground * 1.0   (3/3)
+// Enforced by CAPPING bus/underground down to what taxi's own (reliable)
+// scaling earned, rather than raising taxi to match an inflated bus
+// count -- see the long comment inside the function for why taxi is the
+// trustworthy anchor here.
+const REAL_BOARD_MIN_RATIO = {
+  detective: { taxiPerBus: 10 / 8, busPerUnderground: 8 / 4 },
+  mrx: { taxiPerBus: 4 / 3, busPerUnderground: 3 / 3 },
+};
+
+function enforceRealBoardProportions(detective, mrx) {
+  for (const [counts, ratios] of [
+    [detective, REAL_BOARD_MIN_RATIO.detective],
+    [mrx, REAL_BOARD_MIN_RATIO.mrx],
+  ]) {
+    // Anchor on TAXI, not bus. Taxi's own scaling measurement is the
+    // reliable one here: taxi connects nearly every station (dense,
+    // fully/near-fully connected subgraph), so its average-shortest-path
+    // measurement genuinely reflects the map's overall size. Bus and
+    // underground are sparse minority tiers by design (a majority of
+    // stations have neither) -- searched in isolation, their subgraphs
+    // can produce a misleadingly small average distance that has more to
+    // do with "few stations to search between" than "this map needs
+    // fewer bus tickets." Anchoring on taxi and capping the scarcer
+    // tiers DOWN to it (rather than raising taxi to match an inflated
+    // bus count) keeps the map's overall generosity calibrated to what
+    // taxi's trustworthy measurement actually earned, instead of having
+    // an unreliable bus measurement drag every tier upward with it.
+    const maxBus = Math.floor(counts.taxi / ratios.taxiPerBus);
+    if (counts.bus > maxBus) counts.bus = Math.max(1, maxBus);
+
+    const maxUnderground = Math.floor(counts.bus / ratios.busPerUnderground);
+    if (counts.underground > maxUnderground) counts.underground = Math.max(1, maxUnderground);
+
+    // Still guard the floor direction too (bus/underground unexpectedly
+    // scaled to near-zero on some future pathological map shape) so the
+    // hierarchy holds from both sides, not just "not too generous."
+    const minBus = Math.ceil(counts.underground * ratios.busPerUnderground);
+    if (counts.bus < minBus) counts.bus = minBus;
+    const minTaxi = Math.ceil(counts.bus * ratios.taxiPerBus);
+    if (counts.taxi < minTaxi) counts.taxi = minTaxi;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +312,105 @@ export function computeRoundsAndRevealSchedule(graph, stationIds, roundScalingRa
   const totalRounds = Math.max(10, Math.round(ROUNDS_CALIBRATION_ROUND_COUNT * scale));
   const revealRounds = REVEAL_ROUND_FRACTIONS.map((f) => Math.max(1, Math.round(f * totalRounds)));
   return { totalRounds, revealRounds };
+}
+
+// computeStartPool — the real board doesn't let starting positions be
+// drawn from all 199 stations uniformly at random: detectives and Mr.X
+// each draw from a curated pool of exactly 18 positions, specifically
+// chosen to be spread far enough apart that Mr.X cannot be caught in the
+// very first round no matter how the draw comes out. Confirmed this was
+// a real gap here: with every station in the pool and pure uniform
+// sampling, simulation showed Mr.X landing as close as the single
+// tightest adjacent-station gap on the whole map (same distance as two
+// directly-connected neighbors) purely by bad luck -- a plausible
+// round-1 capture with no real chase involved.
+//
+// METHOD: greedy farthest-point sampling. Start from a SEED station (see
+// randomSeed param below), then repeatedly add whichever remaining
+// station has the LARGEST minimum distance to every station already
+// chosen. This is a standard, well-behaved algorithm for "pick a
+// well-spread subset" and runs in O(poolSize x stationCount), trivial at
+// these map sizes.
+//
+// RANDOMIZED PER GAME: unlike a fixed printed card deck, this pool can be
+// cheaply recomputed, so instead of caching one pool per map forever, the
+// actual game-start flow (see gameEngine.js) calls this fresh each new
+// game with a RANDOM seed station, so different games use different
+// regions of the map as starting zones -- not just the same 8-9 spots
+// forever -- while the greedy algorithm still guarantees the same
+// spacing quality every time regardless of which seed was picked. A
+// deterministic (no-seed) call is kept as the default for anything that
+// just wants "a reasonable spread pool" without per-game randomization
+// (e.g. a preview/admin tool).
+//
+// POOL SIZE: scaled proportionally from the real board's 18-of-199 ratio
+// (~9%) rather than hardcoded to 18, since our maps range from ~70 to
+// ~100 stations, not 199 -- a fixed 18 would be a much larger fraction of
+// a smaller map's stations (less genuine "curation") or, on a bigger
+// future map, a much smaller one. Floors at 8 so even a small map still
+// gets real variety rather than a near-fixed rotation of start spots.
+const START_POOL_RATIO = 18 / 199;
+
+export function computeStartPool(stations, randomSeed = false) {
+  const ids = Object.keys(stations).map(Number);
+  const poolSize = Math.max(8, Math.round(ids.length * START_POOL_RATIO));
+  if (ids.length <= poolSize) return ids; // small map: every station is already "curated enough"
+
+  const dist = (a, b) => {
+    const [ax, ay] = stations[a];
+    const [bx, by] = stations[b];
+    return Math.hypot(ax - bx, ay - by);
+  };
+
+  let seed;
+  if (randomSeed) {
+    // Per-game randomization: pick any station as the seed at random,
+    // rather than always the one farthest from the centroid. The greedy
+    // farthest-point pass that follows still guarantees a well-spread
+    // pool regardless of which seed it started from -- only WHICH
+    // stations end up in the pool varies, not the quality of the spread.
+    seed = ids[Math.floor(Math.random() * ids.length)];
+  } else {
+    // Deterministic default: the station farthest from the map's
+    // centroid, so repeated calls without randomSeed are stable/
+    // reproducible (useful for anything inspecting "the" pool rather
+    // than starting an actual game).
+    const cx = ids.reduce((s, id) => s + stations[id][0], 0) / ids.length;
+    const cy = ids.reduce((s, id) => s + stations[id][1], 0) / ids.length;
+    seed = ids[0];
+    let seedDist = -1;
+    for (const id of ids) {
+      const d = Math.hypot(stations[id][0] - cx, stations[id][1] - cy);
+      if (d > seedDist) {
+        seedDist = d;
+        seed = id;
+      }
+    }
+  }
+
+  const chosen = [seed];
+  const remaining = new Set(ids);
+  remaining.delete(seed);
+
+  while (chosen.length < poolSize && remaining.size > 0) {
+    let best = null;
+    let bestMinDist = -1;
+    for (const candidate of remaining) {
+      let minDist = Infinity;
+      for (const c of chosen) {
+        const d = dist(candidate, c);
+        if (d < minDist) minDist = d;
+      }
+      if (minDist > bestMinDist) {
+        bestMinDist = minDist;
+        best = candidate;
+      }
+    }
+    chosen.push(best);
+    remaining.delete(best);
+  }
+
+  return chosen;
 }
 
 export function deriveMap(config) {
@@ -288,7 +482,7 @@ export function deriveMap(config) {
     allRenderEdges,
     edgeGroups,
     stationModes,
-    startPool: Object.keys(stations).map(Number),
+    startPool: computeStartPool(stations),
     majorStations: config.majorStations || null,
     majorLabelDir: config.majorLabelDir || null,
     minorLabelDir: config.minorLabelDir || null,
@@ -298,7 +492,11 @@ export function deriveMap(config) {
     viewH: config.viewH || 100,
     background: config.background || { kind: "plain" },
     mapLimits: computeMapLimits(Object.keys(stations).length, config.detectiveDensityRatio),
-    ticketCounts: computeTicketCounts(graph, Object.keys(stations).map(Number)),
+    ticketCounts: computeTicketCounts(
+      graph,
+      Object.keys(stations).map(Number),
+      computeRoundsAndRevealSchedule(graph, Object.keys(stations).map(Number), config.roundScalingRatio).totalRounds
+    ),
     roundsAndReveal: computeRoundsAndRevealSchedule(graph, Object.keys(stations).map(Number), config.roundScalingRatio),
     characterNames: config.characterNames || null,
     mrxName: config.mrxName || "Mr. X",

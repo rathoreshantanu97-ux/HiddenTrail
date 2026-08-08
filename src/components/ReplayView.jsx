@@ -98,7 +98,17 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
           <svg viewBox={`0 0 ${map.viewW || 100} ${map.viewH || 100}`} style={styles.svg}>
             <MapBackground map={map} />
             <MapFrameAndCompass map={map} />
-            {map.allRenderEdges.map(([a, b, mode], i) => {
+            {[...map.allRenderEdges]
+              .map((e, i) => [e, i])
+              // Same render-order fix as GameBoard.jsx: taxi first, then
+              // bus, then underground/metro, then ferry -- so the rarer
+              // tiers always draw on top instead of getting visually
+              // buried under a dense taxi mesh.
+              .sort(([[, , modeA]], [[, , modeB]]) => {
+                const order = { taxi: 0, bus: 1, underground: 2, ferry: 3 };
+                return (order[modeA] ?? 0) - (order[modeB] ?? 0);
+              })
+              .map(([[a, b, mode], i]) => {
               const [ax, ay] = map.stations[a];
               const [bx, by] = map.stations[b];
               // Same parallel-edge fan-out as the live GameBoard: when two
@@ -113,12 +123,23 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
               const total = group.length;
               const mx = (ax + bx) / 2;
               const my = (ay + by) / 2;
-              const dx = bx - ax,
-                dy = by - ay;
+              // Compute the perpendicular normal from a FIXED reference
+              // direction (lower station id -> higher station id), matching
+              // GameBoard.jsx's fix -- see that file for why this matters
+              // (using each edge's own (a,b) order let two parallel edges'
+              // offsets cancel out and land on the exact same point instead
+              // of mirroring apart, when their raw endpoint order differed).
+              const [refX0, refY0] = a < b ? [ax, ay] : [bx, by];
+              const [refX1, refY1] = a < b ? [bx, by] : [ax, ay];
+              const dx = refX1 - refX0,
+                dy = refY1 - refY0;
               const len = Math.sqrt(dx * dx + dy * dy) || 1;
               const nx = -dy / len,
                 ny = dx / len;
-              const spread = 1.6;
+              // Widened from 1.6 to 2.8, matching GameBoard.jsx's fix --
+              // see that file for why (a thicker tier's casing could
+              // visually swallow a thinner parallel line at the old spread).
+              const spread = 2.8;
               const offset = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
               const cx = mx + nx * offset;
               const cy = my + ny * offset;
@@ -128,7 +149,7 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
                   d={`M ${ax} ${ay} Q ${cx} ${cy} ${bx} ${by}`}
                   fill="none"
                   stroke={activeMode[mode]?.color || "#ccc"}
-                  strokeWidth={mode === "underground" ? 0.45 : mode === "bus" ? 0.35 : 0.2}
+                  strokeWidth={mode === "underground" ? 0.5 : mode === "bus" ? 0.35 : 0.2}
                   opacity={0.5}
                 />
               );

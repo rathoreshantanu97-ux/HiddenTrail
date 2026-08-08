@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 
 export const DETECTIVE_COLORS = ["#3b82f6", "#f97316", "#a855f7", "#10b981", "#ec4899"];
-import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
+import { computeRoundsAndRevealSchedule, computeStartPool } from "../maps/mapSchema.js";
 
 export const REVEAL_ROUNDS = new Set([3, 8, 13, 18, 22]);
 export const MAX_ROUNDS = 22;
@@ -105,7 +105,18 @@ export function validMovesFor(map, pos, tickets, isMrX) {
 
 // Builds a fresh match state for a new game. Mirrors the old startGame().
 export function initMatch({ map, mapId, numDetectives, roundScalingRatio }) {
-  const starts = randomDistinctStarts(map.startPool, numDetectives + 1);
+  // Generate a FRESH, randomly-seeded starting pool for this specific
+  // game, rather than reusing the map's one static pool every time.
+  // Real board comparison: printed starting-position cards are a fixed
+  // deck, so a fixed pool is the closer analog -- but since ours is
+  // cheap to recompute, this gives more long-run variety (different
+  // games use different regions of the map as starting zones) while the
+  // greedy farthest-point algorithm still guarantees the same spacing
+  // quality regardless of which random seed produced this particular
+  // pool. Falls back to the map's static pool if stations data is
+  // somehow unavailable (shouldn't happen for any real map).
+  const gameStartPool = map.stations ? computeStartPool(map.stations, true) : map.startPool;
+  const starts = randomDistinctStarts(gameStartPool, numDetectives + 1);
   const mrxStart = starts[0];
   const detStarts = starts.slice(1);
   // Ticket counts are computed per-map from actual graph connectivity
@@ -249,7 +260,7 @@ export function applyDetectiveMove(map, match, detId, to, mode) {
       ...next,
       winner: "detectives",
       phase: "ended",
-      log: [...next.log, { kind: "detective_capture", payload: { to } }],
+      log: [...next.log, { kind: "detective_capture", payload: { to, detId } }],
     };
     return next;
   }

@@ -99,6 +99,19 @@ export default function GameBoard({
       ? lastLogEntry.payload?.to
       : match.mrX.pos
     : null;
+  // Which detective actually made the catch (only known for the
+  // "detective_capture" ending -- when Mr.X walks into a detective
+  // instead, it's the SAME collision but Mr.X's own mistake, so there's
+  // no single "capturing" detective to credit; that station may also
+  // have multiple detectives on it in principle, though in practice only
+  // one can legally occupy a station at a time). Used to color the catch
+  // effect with the actual detective's color instead of a generic red,
+  // so it reads as "Priya caught Mr.X" rather than a generic system event.
+  const capturingDetective =
+    isCaptureEnding && lastLogEntry.kind === "detective_capture"
+      ? match.detectives.find((d) => d.id === lastLogEntry.payload?.detId)
+      : null;
+  const collisionColor = capturingDetective ? capturingDetective.color : "#c0392b";
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [pendingMove, setPendingMove] = useState(null);
@@ -733,10 +746,27 @@ export default function GameBoard({
           <div
             style={{
               ...styles.boardWrap,
+              // Robust "contain" sizing: constrain BOTH width and height to
+              // the available space simultaneously via min(), rather than
+              // picking one axis to be 100% and trusting aspect-ratio to
+              // shrink the other to fit. The previous approach (width:
+              // baseW>=baseH ? "100%" : "auto") worked for tall/narrow maps
+              // but silently overflowed past the top of the viewport for
+              // wide/short maps like Bengaluru (126x102) whenever the
+              // available height was tighter than the width-derived height
+              // -- aspect-ratio computes height FROM width and doesn't clamp
+              // back down against max-height in that scenario, so the board
+              // grew upward out of its container instead of scaling down.
+              // 56px = pagePlaying's own top+bottom padding (16px each =
+              // 32px) plus boardColumnFull's own top+bottom padding (12px
+              // each = 24px) -- the total vertical chrome between the true
+              // 100vh and the board's actual available box, in the SAME
+              // flex column as the board (the sidebar's header/log/legend
+              // live in a separate sibling column and don't count here).
+              width: `min(100%, calc((100vh - 56px) * ${baseW} / ${baseH}))`,
+              height: `min(calc(100vh - 56px), calc(100% * ${baseH} / ${baseW}))`,
               maxWidth: "100%",
               maxHeight: "100%",
-              width: baseW >= baseH ? "100%" : "auto",
-              height: baseH > baseW ? "100%" : "auto",
               aspectRatio: `${baseW} / ${baseH}`,
             }}
           >
@@ -784,7 +814,22 @@ export default function GameBoard({
               <MapBackground map={map} />
               <MapFrameAndCompass map={map} />
 
-              {map.allRenderEdges.map(([a, b, mode], i) => {
+              {[...map.allRenderEdges]
+                .map((e, i) => [e, i])
+                // Render taxi first, then bus, then underground/metro, then
+                // ferry last -- so the rarer/more important tiers always
+                // draw ON TOP of the dense taxi mesh instead of being
+                // interleaved with it in data order. On a dense map (200+
+                // edges), a metro or bus line that happens to be listed
+                // early in the data was getting visually buried under
+                // taxi lines drawn afterward, even though every edge was
+                // technically rendering -- this fixes visibility without
+                // touching any actual map data.
+                .sort(([[, , modeA]], [[, , modeB]]) => {
+                  const order = { taxi: 0, bus: 1, underground: 2, ferry: 3 };
+                  return (order[modeA] ?? 0) - (order[modeB] ?? 0);
+                })
+                .map(([[a, b, mode], i]) => {
                 const [ax, ay] = map.stations[a];
                 const [bx, by] = map.stations[b];
                 const key = a < b ? `${a}-${b}` : `${b}-${a}`;
@@ -793,16 +838,51 @@ export default function GameBoard({
                 const total = group.length;
                 const mx = (ax + bx) / 2;
                 const my = (ay + by) / 2;
-                const dx = bx - ax,
-                  dy = by - ay;
+                // IMPORTANT: compute the perpendicular normal from a FIXED
+                // reference direction (lower station id -> higher station
+                // id), not from (a,b) as listed in this specific edge
+                // tuple. Two parallel edges between the same pair of
+                // stations don't always list their endpoints in the same
+                // order in the raw data (e.g. [32,40,"underground"] but
+                // [40,32,"bus"] -- this happened organically since edges
+                // were added across many separate visual-editor sessions,
+                // sometimes clicking the two stations in a different
+                // order). If direction were taken from each edge's own
+                // (a,b), the normal flips sign between the two edges, and
+                // an opposite-signed offset lands at the exact SAME
+                // physical point instead of the intended mirror-image
+                // point -- so two "parallel" curves collapse onto each
+                // other and one completely hides the other. Confirmed:
+                // this was happening for real between Majestic and JP
+                // Nagar's underground+bus pair, not just a theoretical
+                // edge case.
+                const [refX0, refY0] = a < b ? [ax, ay] : [bx, by];
+                const [refX1, refY1] = a < b ? [bx, by] : [ax, ay];
+                const dx = refX1 - refX0,
+                  dy = refY1 - refY0;
                 const len = Math.sqrt(dx * dx + dy * dy) || 1;
                 const nx = -dy / len,
                   ny = dx / len;
-                const spread = 1.6;
+                // Spread widened from 1.6 to 2.8: with the wider casing on
+                // underground (strokeW 0.5+0.35=0.85) added to another
+                // tier's own casing, a 1.6 total spread wasn't enough
+                // separation at the midpoint of a typical edge -- the
+                // thicker line's white casing could still visually swallow
+                // a thinner parallel line sitting only ~0.8 units away
+                // (confirmed: this was actually happening for the
+                // Majestic<->JP Nagar bus+underground pair, not just a
+                // theoretical risk). 2.8 keeps enough clearance even
+                // between the widest (underground) and thinnest (ferry)
+                // tiers.
+                const spread = 2.8;
                 const offset = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
                 const cx = mx + nx * offset;
                 const cy = my + ny * offset;
-                const strokeW = mode === "underground" ? 0.45 : mode === "bus" ? 0.35 : mode === "ferry" ? 0.22 : 0.32;
+                // Underground/metro gets a small additional weight boost
+                // (0.5 vs the earlier 0.45) so it reads clearly even amid
+                // a dense taxi mesh, since it's the rarest/most important
+                // tier on the map.
+                const strokeW = mode === "underground" ? 0.5 : mode === "bus" ? 0.35 : mode === "ferry" ? 0.22 : 0.32;
                 const taxiFadeOpacity = zoom < 1.6 ? 0.35 : 0.85;
                 const lineOpacity = mode === "taxi" ? taxiFadeOpacity : mode === "ferry" ? 0.4 : 0.85;
                 return (
@@ -820,7 +900,7 @@ export default function GameBoard({
                       fill="none"
                       stroke={activeMode[mode].color}
                       strokeWidth={strokeW}
-                                            opacity={lineOpacity}
+                      opacity={lineOpacity}
                       strokeLinecap="round"
                     />
                   </g>
@@ -1039,20 +1119,38 @@ export default function GameBoard({
                 );
               })}
 
-              {/* Collision effect: a brief burst at the shared station
-                  once a capture ending is detected (see isCaptureEnding /
-                  collisionStationId above) -- purely decorative, drawn
-                  only for the short deliberate pause App.jsx holds before
-                  switching to EndedScreen (see useDelayedEndedTransition),
-                  so players actually SEE the moment of capture rather
-                  than being whisked straight to the results screen. */}
+              {/* Collision effect: once a capture ending is detected (see
+                  isCaptureEnding / collisionStationId above), draw a
+                  richer catch animation at the shared station for the
+                  short deliberate pause App.jsx holds before switching to
+                  EndedScreen (see useDelayedEndedTransition) -- so players
+                  actually SEE and FEEL the moment of capture. Three
+                  layered pieces: (1) an expanding shockwave ring using
+                  the CAPTURING DETECTIVE'S OWN COLOR when known, so a
+                  detective-made capture reads as "that detective got him"
+                  rather than a generic system event; Mr.X walking into a
+                  detective himself keeps the muted red, since there's no
+                  single detective to credit for that kind of ending. (2)
+                  radiating burst lines, same as before. (3) NEW: Mr.X's
+                  own station marker briefly "shatters" into small
+                  fragments flying outward -- a concrete, game-specific
+                  "gotcha" moment rather than an abstract starburst. */}
               {isCaptureEnding && collisionStationId != null && map.stations[collisionStationId] && (
                 <g>
                   {(() => {
                     const [cx, cy] = map.stations[collisionStationId];
                     return (
                       <>
-                        <circle cx={cx} cy={cy} r={2} fill="none" stroke="#c0392b" strokeWidth={0.6} opacity={0.9}>
+                        {/* Shockwave: a single fast expanding ring, distinct
+                            timing from the slower pulsing ring below, to
+                            read as an initial "impact" moment. */}
+                        <circle cx={cx} cy={cy} r={1.6} fill="none" stroke={collisionColor} strokeWidth={0.5} opacity={0.9}>
+                          <animate attributeName="r" values="1.6;7" dur="0.6s" repeatCount="indefinite" />
+                          <animate attributeName="opacity" values="0.9;0" dur="0.6s" repeatCount="indefinite" />
+                        </circle>
+                        {/* Pulsing ring, slower/looping, gives the effect
+                            some duration rather than a single flash. */}
+                        <circle cx={cx} cy={cy} r={2} fill="none" stroke={collisionColor} strokeWidth={0.6} opacity={0.9}>
                           <animate attributeName="r" values="1.5;5;1.5" dur="0.9s" repeatCount="indefinite" />
                           <animate attributeName="opacity" values="0.9;0;0.9" dur="0.9s" repeatCount="indefinite" />
                         </circle>
@@ -1065,12 +1163,55 @@ export default function GameBoard({
                               y1={cy}
                               x2={cx + Math.cos(angle) * 3.5}
                               y2={cy + Math.sin(angle) * 3.5}
-                              stroke="#c0392b"
+                              stroke={collisionColor}
                               strokeWidth={0.35}
                               opacity={0.8}
                             >
                               <animate attributeName="opacity" values="0.8;0;0.8" dur="0.9s" repeatCount="indefinite" />
                             </line>
+                          );
+                        })}
+                        {/* Shatter fragments: small dark chips (echoing
+                            Mr.X's own token color) flying outward and
+                            fading, like his marker breaking apart at the
+                            moment he's caught. Offset timing (starts
+                            slightly after the shockwave) so the sequence
+                            reads as impact -> shatter, not everything at
+                            once. */}
+                        {[...Array(8)].map((_, i) => {
+                          const angle = (i / 8) * 2 * Math.PI + 0.3;
+                          const dist = 4.2;
+                          return (
+                            <circle
+                              key={`shard-${i}`}
+                              cx={cx}
+                              cy={cy}
+                              r={0.35}
+                              fill="#1a1a1a"
+                              opacity={0}
+                            >
+                              <animate
+                                attributeName="cx"
+                                values={`${cx};${cx + Math.cos(angle) * dist}`}
+                                dur="0.9s"
+                                begin="0.15s"
+                                repeatCount="indefinite"
+                              />
+                              <animate
+                                attributeName="cy"
+                                values={`${cy};${cy + Math.sin(angle) * dist}`}
+                                dur="0.9s"
+                                begin="0.15s"
+                                repeatCount="indefinite"
+                              />
+                              <animate
+                                attributeName="opacity"
+                                values="0.9;0"
+                                dur="0.9s"
+                                begin="0.15s"
+                                repeatCount="indefinite"
+                              />
+                            </circle>
                           );
                         })}
                       </>

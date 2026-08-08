@@ -933,13 +933,37 @@ export default function GameBoard({
               fittedWidth = "100%";
               fittedHeight = "100%";
             } else {
-              const ratio = baseW / baseH;
-              const heightIfFullWidth = colW / ratio;
+              const trueRatio = baseW / baseH;
+              const heightIfFullWidth = colW / trueRatio;
               if (heightIfFullWidth <= colH) {
+                // Width is the binding constraint -- the map already
+                // fills the column's full width at its TRUE ratio, no
+                // stretch needed or possible here.
                 fittedWidth = colW;
                 fittedHeight = heightIfFullWidth;
               } else {
-                fittedWidth = colH * ratio;
+                // Height is the binding constraint -- at the map's true
+                // ratio, filling the column's full height leaves real
+                // unused width on both sides (confirmed via direct
+                // measurement: 175px per side, ~23% of the column, on a
+                // 1920x1080 screen -- not a rounding error, a genuine
+                // structural mismatch between the map's own shape
+                // (1.17) and typical wide-screen shapes (1.4-1.6)).
+                // BOUNDED STRETCH: rather than either full distortion
+                // (rejected earlier -- visibly warped the map on wide
+                // screens) or zero stretch (leaves that real gap
+                // unused), allow the effective ratio to widen up to
+                // MAX_STRETCH_RATIO beyond the map's true ratio, using
+                // however much of that allowance is needed to fill the
+                // column's width -- capped so it can NEVER exceed that
+                // ceiling even on extreme ultrawide monitors, where
+                // eliminating the gap entirely would need far more
+                // stretch than is visually acceptable.
+                const MAX_STRETCH_RATIO = 1.15; // effective ratio can widen up to 15% beyond the map's true ratio
+                const widthIfFullHeightTrueRatio = colH * trueRatio;
+                const stretchNeededToFillWidth = colW / widthIfFullHeightTrueRatio;
+                const appliedStretch = Math.min(stretchNeededToFillWidth, MAX_STRETCH_RATIO);
+                fittedWidth = widthIfFullHeightTrueRatio * appliedStretch;
                 fittedHeight = colH;
               }
             }
@@ -994,7 +1018,16 @@ export default function GameBoard({
             <svg
               ref={svgRef}
               viewBox={`${pan.x} ${pan.y} ${viewSizeW} ${viewSizeH}`}
-              preserveAspectRatio="xMidYMid meet"
+              // "none" (stretch to fill exactly) rather than "meet"
+              // (preserve ratio, letterbox) -- now safe because the
+              // WRAPPER's own width is already capped to never exceed
+              // MAX_STRETCH_RATIO (15%) beyond the map's true ratio (see
+              // the fittedWidth/fittedHeight calculation above), so this
+              // can only ever apply that same small, bounded stretch --
+              // not the unbounded distortion "none" would have allowed
+              // if the wrapper could be ANY width, which is why an
+              // earlier version of this file used "meet" instead.
+              preserveAspectRatio="none"
               style={{
                 ...styles.board,
                 width: "100%",

@@ -95,7 +95,7 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
 
       <div style={styles.body}>
         <div style={styles.boardWrap}>
-          <svg viewBox={`0 0 ${map.viewW || 100} ${map.viewH || 100}`} style={styles.svg}>
+          <svg viewBox={`-6 -6 ${(map.viewW || 100) + 12} ${(map.viewH || 100) + 12}`} style={styles.svg}>
             <MapBackground map={map} />
             <MapFrameAndCompass map={map} />
             {[...map.allRenderEdges]

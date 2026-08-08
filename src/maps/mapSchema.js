@@ -112,6 +112,12 @@ export function computeMapLimits(stationCount, detectiveDensityRatio = 0.08) {
 // confirmed by direct computation before this function was written.
 // ---------------------------------------------------------------------------
 const TICKET_CALIBRATION_BASELINE_AVG_DISTANCE = { taxi: 5.7733, bus: 2.09, underground: 2.5933 };
+// Real Scotland Yard board reference: 199 stations total, taxi at every
+// one (100%), bus at 62 (31.2%), underground at 14 (7.0%). Used as the
+// second calibration signal alongside average shortest-path distance --
+// see the long comment in computeTicketCounts for why coverage alone
+// isn't redundant with distance.
+const TICKET_CALIBRATION_BASELINE_COVERAGE = { taxi: 1.0, bus: 0.312, underground: 0.07 };
 const TICKET_CALIBRATION_DETECTIVE_COUNTS = { taxi: 10, bus: 8, underground: 4 };
 const TICKET_CALIBRATION_MRX_COUNTS = { taxi: 4, bus: 3, underground: 3, black: 5, double: 2 };
 
@@ -150,12 +156,44 @@ function averageShortestPathForMode(graph, stationIds, mode) {
 
 export function computeTicketCounts(graph, stationIds, totalRounds = null) {
   const scaleFactor = {};
+  // COVERAGE ratio: what fraction of all stations have at least one edge
+  // of this mode. Added alongside the existing distance-based scaling
+  // because distance alone under-counts a genuinely large, useful
+  // network: confirmed on a real map here that a metro network covering
+  // MORE of the map than the real board's own reference ratio (11.1% of
+  // stations vs the real board's 7.0%) was still landing on FEWER
+  // tickets (3) than the real board's own baseline (4) -- distance-only
+  // scaling was picking up "this subgraph is small and tightly
+  // clustered, so it's efficient" and translating that into "give fewer
+  // tickets," when a bigger, more-covered network arguably deserves
+  // MORE opportunities to use it, not fewer. Blending 50/50 with the
+  // distance-based factor keeps both signals: a mode that's both compact
+  // AND covers a lot of the map (genuinely efficient) still scores high;
+  // a mode that's sparse and inefficient scores low on both.
+  const coverageRatio = {};
+  const totalStations = stationIds.length;
+  for (const mode of ["taxi", "bus", "underground"]) {
+    const stationsWithMode = new Set();
+    for (const id of stationIds) {
+      for (const edge of graph[id] || []) {
+        if (edge.mode === mode) stationsWithMode.add(id);
+      }
+    }
+    coverageRatio[mode] = totalStations > 0 ? stationsWithMode.size / totalStations : 0;
+  }
+  const distanceScale = {};
   for (const mode of ["taxi", "bus", "underground"]) {
     const mapAvg = averageShortestPathForMode(graph, stationIds, mode);
     // if this map has no edges of a mode at all (shouldn't happen for a
     // valid map, but guards against a divide-by-zero), fall back to a
     // neutral 1.0 scale (i.e. keep the calibration value unchanged)
-    scaleFactor[mode] = mapAvg ? mapAvg / TICKET_CALIBRATION_BASELINE_AVG_DISTANCE[mode] : 1.0;
+    distanceScale[mode] = mapAvg ? mapAvg / TICKET_CALIBRATION_BASELINE_AVG_DISTANCE[mode] : 1.0;
+  }
+  for (const mode of ["taxi", "bus", "underground"]) {
+    const coverageScale = TICKET_CALIBRATION_BASELINE_COVERAGE[mode] > 0
+      ? coverageRatio[mode] / TICKET_CALIBRATION_BASELINE_COVERAGE[mode]
+      : 1.0;
+    scaleFactor[mode] = (distanceScale[mode] + coverageScale) / 2;
   }
 
   const detective = {};

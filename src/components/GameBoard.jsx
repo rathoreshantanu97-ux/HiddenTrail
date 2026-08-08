@@ -60,6 +60,19 @@ function timerBarColor(fraction) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// EDGE_MARGIN: a fixed buffer added around every map's own declared
+// viewW/viewH, so stations sitting right at (or slightly past) the
+// nominal edge -- and their labels, which extend further out from the
+// node than the node itself -- always have room to render fully
+// on-canvas. Confirmed necessary, not just precautionary: at least one
+// real station (Bengaluru's Airport) has a y-coordinate of -1.19,
+// slightly negative relative to the map's own 0-based viewBox origin, so
+// without this margin that station's node was PARTIALLY OFF-CANVAS
+// outright, independent of any label-direction choice. Module-level
+// (not component-local) so both the initial pan state and the later
+// viewBox/clamp calculations reference the same value.
+const EDGE_MARGIN = 6;
+
 export default function GameBoard({
   map,
   match,
@@ -113,7 +126,7 @@ export default function GameBoard({
       : null;
   const collisionColor = capturingDetective ? capturingDetective.color : "#c0392b";
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [pan, setPan] = useState({ x: -EDGE_MARGIN, y: -EDGE_MARGIN });
   const [pendingMove, setPendingMove] = useState(null);
   const [exploreMode, setExploreMode] = useState(null); // null | "taxi" | "bus" | "underground" -- which mode's reachable stations to highlight
   const [exploreFromDetectiveId, setExploreFromDetectiveId] = useState(null); // which of MY OWN detectives to explore from, if I control more than one
@@ -229,15 +242,15 @@ export default function GameBoard({
 
   const MIN_ZOOM = 1;
   const MAX_ZOOM = 4;
-  const baseW = map.viewW || 100;
-  const baseH = map.viewH || 100;
+  const baseW = (map.viewW || 100) + EDGE_MARGIN * 2;
+  const baseH = (map.viewH || 100) + EDGE_MARGIN * 2;
   const viewSizeW = baseW / zoom;
   const viewSizeH = baseH / zoom;
   const maxPanX = baseW - viewSizeW;
   const maxPanY = baseH - viewSizeH;
   const clampPan = (p) => ({
-    x: Math.max(0, Math.min(maxPanX, p.x)),
-    y: Math.max(0, Math.min(maxPanY, p.y)),
+    x: Math.max(-EDGE_MARGIN, Math.min(maxPanX - EDGE_MARGIN, p.x)),
+    y: Math.max(-EDGE_MARGIN, Math.min(maxPanY - EDGE_MARGIN, p.y)),
   });
 
   function zoomBy(factor, centerX = baseW / 2, centerY = baseH / 2) {
@@ -259,7 +272,7 @@ export default function GameBoard({
 
   function resetView() {
     setZoom(1);
-    setPan({ x: 0, y: 0 });
+    setPan({ x: -EDGE_MARGIN, y: -EDGE_MARGIN });
   }
 
   function handleWheel(e) {
@@ -746,33 +759,29 @@ export default function GameBoard({
           <div
             style={{
               ...styles.boardWrap,
-              // Robust "contain" sizing: constrain BOTH width and height to
-              // the available space simultaneously via min(), rather than
-              // picking one axis to be 100% and trusting aspect-ratio to
-              // shrink the other to fit. The previous approach (width:
-              // baseW>=baseH ? "100%" : "auto") worked for tall/narrow maps
-              // but silently overflowed past the top of the viewport for
-              // wide/short maps like Bengaluru (126x102) whenever the
-              // available height was tighter than the width-derived height
-              // -- aspect-ratio computes height FROM width and doesn't clamp
-              // back down against max-height in that scenario, so the board
-              // grew upward out of its container instead of scaling down.
-              // 56px = pagePlaying's own top+bottom padding (16px each =
-              // 32px) plus boardColumnFull's own top+bottom padding (12px
-              // each = 24px) -- the total vertical chrome between the true
-              // 100vh and the board's actual available box, in the SAME
-              // flex column as the board (the sidebar's header/log/legend
-              // live in a separate sibling column and don't count here).
-              width: `min(100%, calc((100vh - 56px) * ${baseW} / ${baseH}))`,
-              height: `min(calc(100vh - 56px), calc(100% * ${baseH} / ${baseW}))`,
-              maxWidth: "100%",
-              maxHeight: "100%",
-              aspectRatio: `${baseW} / ${baseH}`,
+              // Simplest correct approach: the wrapper just fills its
+              // TRUE flex-allocated box (boardColumnFull already has the
+              // real available width via flex:1 and real available
+              // height via height:100% cascading from pagePlaying's
+              // 100vh -- no manual vh/% arithmetic needed, and no
+              // aspect-ratio contradiction from trying to force both
+              // axes to 100% while also constraining the ratio). The
+              // actual "preserve the map's shape and fit it inside this
+              // box, using whichever axis is tighter" job is handled by
+              // the SVG's own native viewBox + preserveAspectRatio
+              // below, which is exactly what that mechanism exists
+              // for -- this replaces two earlier attempts (manual vh
+              // calc(), then a width/height-swap heuristic) that were
+              // both still fighting the browser's layout engine instead
+              // of using the tool actually designed for this.
+              width: "100%",
+              height: "100%",
             }}
           >
             <svg
               ref={svgRef}
               viewBox={`${pan.x} ${pan.y} ${viewSizeW} ${viewSizeH}`}
+              preserveAspectRatio="xMidYMid meet"
               style={{
                 ...styles.board,
                 width: "100%",
@@ -1042,7 +1051,15 @@ export default function GameBoard({
                       )}
                     </circle>
                     {[...map.stationModes[id]].map((m, mi, arr) => {
-                      const angle = (mi / arr.length) * 2 * Math.PI - Math.PI / 2;
+                      // Start mode dots at a slight clockwise offset from
+                      // straight-up (was exactly "-90°", i.e. dead center
+                      // top) so the very top of the node stays clear for
+                      // the station's NAME LABEL, which now defaults to
+                      // pointing north (see labelDir below) -- without
+                      // this offset, a station's first mode dot and its
+                      // name label would both want the same spot directly
+                      // above the node and visually collide.
+                      const angle = (mi / arr.length) * 2 * Math.PI - Math.PI / 2 + Math.PI / 6;
                       const dotR = nodeR + 0.55;
                       const dx2 = Math.cos(angle) * dotR;
                       const dy2 = Math.sin(angle) * dotR;
@@ -1337,7 +1354,13 @@ export const styles = {
     gap: 0,
   },
   sidebarPermanent: {
-    width: 420,
+    // Reduced from 420 to 360 to hand more width back to the map itself
+    // -- checked that the content that actually lives here (ticket
+    // chips, the 26-cell travel log grid, chat) all use flexible
+    // layouts (flex-wrap / CSS grid auto-fill) rather than fixed pixel
+    // widths, so they reflow cleanly at this narrower width instead of
+    // clipping or forcing horizontal scroll.
+    width: 360,
     flexShrink: 0,
     height: "100%",
     background: "#f7f6f3",

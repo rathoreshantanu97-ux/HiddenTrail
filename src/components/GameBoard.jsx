@@ -60,18 +60,24 @@ function timerBarColor(fraction) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-// EDGE_MARGIN: a fixed buffer added around every map's own declared
-// viewW/viewH, so stations sitting right at (or slightly past) the
+// EDGE_MARGIN: a small buffer added around every map's own declared
+// viewW/viewH so stations sitting right at (or slightly past) the
 // nominal edge -- and their labels, which extend further out from the
-// node than the node itself -- always have room to render fully
-// on-canvas. Confirmed necessary, not just precautionary: at least one
-// real station (Bengaluru's Airport) has a y-coordinate of -1.19,
-// slightly negative relative to the map's own 0-based viewBox origin, so
-// without this margin that station's node was PARTIALLY OFF-CANVAS
-// outright, independent of any label-direction choice. Module-level
-// (not component-local) so both the initial pan state and the later
-// viewBox/clamp calculations reference the same value.
-const EDGE_MARGIN = 6;
+// node than the node itself -- have room to render fully on-canvas.
+// ASYMMETRIC, not a uniform margin on all four sides: checked the actual
+// overflow on the real map data (Bengaluru's Airport sits at y=-1.19,
+// the only station anywhere near an edge) and a uniform 6-unit margin
+// was wildly oversized for that -- it left roughly 9-10% of the visible
+// canvas as pure empty space on every side, most of it solving nothing
+// (the left/right/bottom edges had no actual overflow at all, up to
+// 9-11 units of natural clearance already). This targets just enough
+// margin on the TOP (where the real, measured problem is: ~1.2 units of
+// coordinate overflow + a "N"-direction label needs roughly 5 units of
+// clearance above a major station) while keeping the other three sides
+// minimal, so the map fills the available canvas rather than floating
+// in a mostly-empty box.
+const EDGE_MARGIN_TOP = 5;
+const EDGE_MARGIN_OTHER = 1;
 
 export default function GameBoard({
   map,
@@ -126,7 +132,7 @@ export default function GameBoard({
       : null;
   const collisionColor = capturingDetective ? capturingDetective.color : "#c0392b";
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: -EDGE_MARGIN, y: -EDGE_MARGIN });
+  const [pan, setPan] = useState({ x: -EDGE_MARGIN_OTHER, y: -EDGE_MARGIN_TOP });
   const [pendingMove, setPendingMove] = useState(null);
   const [exploreMode, setExploreMode] = useState(null); // null | "taxi" | "bus" | "underground" -- which mode's reachable stations to highlight
   const [exploreFromDetectiveId, setExploreFromDetectiveId] = useState(null); // which of MY OWN detectives to explore from, if I control more than one
@@ -242,15 +248,15 @@ export default function GameBoard({
 
   const MIN_ZOOM = 1;
   const MAX_ZOOM = 4;
-  const baseW = (map.viewW || 100) + EDGE_MARGIN * 2;
-  const baseH = (map.viewH || 100) + EDGE_MARGIN * 2;
+  const baseW = (map.viewW || 100) + EDGE_MARGIN_OTHER * 2;
+  const baseH = (map.viewH || 100) + EDGE_MARGIN_TOP + EDGE_MARGIN_OTHER;
   const viewSizeW = baseW / zoom;
   const viewSizeH = baseH / zoom;
   const maxPanX = baseW - viewSizeW;
   const maxPanY = baseH - viewSizeH;
   const clampPan = (p) => ({
-    x: Math.max(-EDGE_MARGIN, Math.min(maxPanX - EDGE_MARGIN, p.x)),
-    y: Math.max(-EDGE_MARGIN, Math.min(maxPanY - EDGE_MARGIN, p.y)),
+    x: Math.max(-EDGE_MARGIN_OTHER, Math.min(maxPanX - EDGE_MARGIN_OTHER, p.x)),
+    y: Math.max(-EDGE_MARGIN_TOP, Math.min(maxPanY - EDGE_MARGIN_TOP, p.y)),
   });
 
   function zoomBy(factor, centerX = baseW / 2, centerY = baseH / 2) {
@@ -272,7 +278,7 @@ export default function GameBoard({
 
   function resetView() {
     setZoom(1);
-    setPan({ x: -EDGE_MARGIN, y: -EDGE_MARGIN });
+    setPan({ x: -EDGE_MARGIN_OTHER, y: -EDGE_MARGIN_TOP });
   }
 
   function handleWheel(e) {
@@ -1050,21 +1056,52 @@ export default function GameBoard({
                         <animate attributeName="opacity" values="1;0.35;1" dur="1s" repeatCount="indefinite" />
                       )}
                     </circle>
-                    {[...map.stationModes[id]].map((m, mi, arr) => {
-                      // Start mode dots at a slight clockwise offset from
-                      // straight-up (was exactly "-90°", i.e. dead center
-                      // top) so the very top of the node stays clear for
-                      // the station's NAME LABEL, which now defaults to
-                      // pointing north (see labelDir below) -- without
-                      // this offset, a station's first mode dot and its
-                      // name label would both want the same spot directly
-                      // above the node and visually collide.
-                      const angle = (mi / arr.length) * 2 * Math.PI - Math.PI / 2 + Math.PI / 6;
+                    {(() => {
+                      const modes = [...map.stationModes[id]];
                       const dotR = nodeR + 0.55;
-                      const dx2 = Math.cos(angle) * dotR;
-                      const dy2 = Math.sin(angle) * dotR;
-                      return <circle key={m} cx={x + dx2} cy={y + dy2} r={0.42} fill={activeMode[m].color} stroke="#fff" strokeWidth={0.12} />;
-                    })}
+                      // Explicit per-count layout, per design spec, rather
+                      // than evenly distributing dots around a full circle
+                      // (the previous approach): labels now default to
+                      // sitting directly above the node (north), so mode
+                      // dots need to consistently stay OUT of that space
+                      // -- never placed at the top -- while still reading
+                      // clearly as a small cluster rather than a random
+                      // scatter.
+                      //   1 mode  -> straight down (bottom)
+                      //   2 modes -> left and right (sideways)
+                      //   3 modes -> bottom, plus left and right
+                      //   4 modes -> bottom, plus three more spread across
+                      //              the lower-left/left/right/lower-right
+                      //              arc (still nothing at the top)
+                      const DOWN = Math.PI / 2;
+                      const LEFT = Math.PI;
+                      const RIGHT = 0;
+                      let angles;
+                      if (modes.length <= 1) {
+                        angles = [DOWN];
+                      } else if (modes.length === 2) {
+                        angles = [LEFT, RIGHT];
+                      } else if (modes.length === 3) {
+                        angles = [DOWN, LEFT, RIGHT];
+                      } else {
+                        // 4 (or more, defensively): bottom, plus the rest
+                        // spread evenly across the lower semicircle
+                        // (excluding straight-up), so they fan out below
+                        // the node rather than stacking awkwardly.
+                        const extra = modes.length - 1;
+                        const spread = Math.PI * 0.8; // just short of the full lower semicircle, keeps them off the horizontal extremes too
+                        angles = [DOWN, ...Array.from({ length: extra }, (_, k) => {
+                          const t = extra === 1 ? 0.5 : k / (extra - 1);
+                          return DOWN - spread / 2 + t * spread;
+                        })];
+                      }
+                      return modes.map((m, mi) => {
+                        const angle = angles[mi] ?? DOWN;
+                        const dx2 = Math.cos(angle) * dotR;
+                        const dy2 = Math.sin(angle) * dotR;
+                        return <circle key={m} cx={x + dx2} cy={y + dy2} r={0.42} fill={activeMode[m].color} stroke="#fff" strokeWidth={0.12} />;
+                      });
+                    })()}
                     <text
                       x={x}
                       y={y + 0.55 * sizeScale}

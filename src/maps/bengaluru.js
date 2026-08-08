@@ -326,7 +326,7 @@ const FERRY_EDGES_BENGALURU = [
 const MAJOR_STATIONS_BENGALURU = new Set([1,2,3,5,11,14,20,25,27,30,32,36,39,40,46,48,58]);
 
 const MAJOR_LABEL_DIR_BENGALURU = {
-  1: "N",
+  1: "S",
   2: "N",
   3: "N",
   5: "N",

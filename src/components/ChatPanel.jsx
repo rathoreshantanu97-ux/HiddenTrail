@@ -196,6 +196,7 @@ export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName })
 
 const styles = {
   panel: {
+    width: "100%",
     display: "flex",
     flexDirection: "column",
     background: "#fff",

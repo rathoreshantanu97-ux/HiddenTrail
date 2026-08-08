@@ -2024,9 +2024,17 @@ export const styles = {
   },
   travelLogReveal: { fontSize: 12, color: "#a33", marginTop: 8, fontWeight: 600 },
   doubleBtnCompact: {
-    border: "1.5px solid #6b4fa0",
+    // Neutral default look (matches the other buttons that share this
+    // row -- Pause, End Game, exploreBtn elsewhere -- all plain white/
+    // light-grey by default), per explicit request: the old solid
+    // purple border + tinted background made this button look already
+    // "selected" or "active" even in its normal, not-yet-clicked state,
+    // which was genuinely misleading. The purple accent is kept only in
+    // the TEXT color, just enough to signal "this is a special power"
+    // without implying it's currently toggled on.
+    border: "1.5px solid #ddd",
     color: "#6b4fa0",
-    background: "#f4effa",
+    background: "#fff",
     borderRadius: 8,
     padding: "6px 12px",
     fontSize: 12.5,

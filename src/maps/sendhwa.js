@@ -415,7 +415,7 @@ const MODE_SENDHWA = {
 
 export const sendhwaMap = {
   id: "sendhwa",
-  label: "Sendhwa Corridor",
+  label: "WIP",
   subtitle: "Julwania to Bijasan Ghat · real local layout · Foot/Auto/Bike",
   stations: STATIONS_SENDHWA,
   edges: EDGES_SENDHWA,

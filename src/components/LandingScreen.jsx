@@ -39,7 +39,7 @@ export default function LandingScreen({
       <div style={styles.card}>
         <div style={styles.headerRow}>
           <div>
-            <h1 style={styles.title}>Scotland Yard</h1>
+            <h1 style={styles.title}>Hidden Trail</h1>
             <p style={styles.subtitle}>Hidden-movement detective game</p>
           </div>
           {mode !== null ? (
@@ -498,34 +498,62 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
           {publicConfig && (
             <label style={styles.featureOverrideRow}>
               <span>Turn timer (seconds) — blank means no time limit</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="No limit"
-                style={styles.featureOverrideSelect}
-                value={turnTimerSeconds ?? ""}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  // Allow free typing/clearing while the field has focus --
-                  // only digits or empty, no clamping mid-keystroke (the
-                  // real bug: clamping on every change made it impossible
-                  // to type a new value, since e.g. typing "1" of "180"
-                  // got immediately snapped to the minimum before "8" and
-                  // "0" could be typed).
-                  if (v === "" || /^\d*$/.test(v)) {
-                    setTurnTimerSecondsState(v === "" ? null : v);
-                  }
-                }}
-                onBlur={() => {
-                  // Validate and clamp only once the user is done editing.
-                  if (turnTimerSeconds === null || turnTimerSeconds === "") {
-                    setTurnTimerSecondsState(null);
-                    return;
-                  }
-                  const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin));
-                  setTurnTimerSecondsState(n);
-                }}
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  type="button"
+                  aria-label="Decrease turn timer by 10 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const current = turnTimerSeconds === null || turnTimerSeconds === "" ? publicConfig.turnTimerMin : parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin;
+                    const next = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, current - 10));
+                    setTurnTimerSecondsState(next);
+                  }}
+                >
+                  −
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="No limit"
+                  style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+                  value={turnTimerSeconds ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    // Allow free typing/clearing while the field has focus --
+                    // only digits or empty, no clamping mid-keystroke (the
+                    // real bug: clamping on every change made it impossible
+                    // to type a new value, since e.g. typing "1" of "180"
+                    // got immediately snapped to the minimum before "8" and
+                    // "0" could be typed).
+                    if (v === "" || /^\d*$/.test(v)) {
+                      setTurnTimerSecondsState(v === "" ? null : v);
+                    }
+                  }}
+                  onBlur={() => {
+                    // Validate and clamp only once the user is done editing.
+                    if (turnTimerSeconds === null || turnTimerSeconds === "") {
+                      setTurnTimerSecondsState(null);
+                      return;
+                    }
+                    const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin));
+                    setTurnTimerSecondsState(n);
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Increase turn timer by 10 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const current = turnTimerSeconds === null || turnTimerSeconds === "" ? publicConfig.turnTimerMin : parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin;
+                    const next = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, current + 10));
+                    setTurnTimerSecondsState(next);
+                  }}
+                >
+                  +
+                </button>
+              </div>
             </label>
           )}
         </div>
@@ -1040,6 +1068,19 @@ const styles = {
     padding: "5px 0",
   },
   featureOverrideSelect: { padding: "3px 6px", borderRadius: 6, border: "1px solid #ddd", fontSize: 12 },
+  timerStepBtn: {
+    width: 26,
+    height: 26,
+    flexShrink: 0,
+    borderRadius: 6,
+    border: "1px solid #ddd",
+    background: "#fff",
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#333",
+    cursor: "pointer",
+    lineHeight: 1,
+  },
   publicRoomsNote: { fontSize: 12.5, color: "#999", marginTop: 14, textAlign: "center" },
   publicRoomsBox: { marginTop: 16, textAlign: "left" },
   publicRoomsTitle: { fontSize: 12.5, fontWeight: 700, color: "#555", marginBottom: 8 },

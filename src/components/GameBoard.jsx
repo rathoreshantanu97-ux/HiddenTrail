@@ -510,6 +510,22 @@ export default function GameBoard({
             </div>
           </div>
 
+          {isMrXTurn && isMyTurnToAct && !pendingMove && (
+            <div style={{ ...styles.rowCenter, justifyContent: "flex-end", marginBottom: 8 }}>
+              <button
+                style={{
+                  ...styles.doubleBtnCompact,
+                  opacity: match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive ? 1 : 0.4,
+                  cursor: match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive ? "pointer" : "default",
+                }}
+                disabled={match.mrX.tickets.double <= 0 || match.mrX.doubleMoveActive}
+                onClick={onActivateDoubleMove}
+              >
+                Play 2x card ({match.mrX.tickets.double} left)
+              </button>
+            </div>
+          )}
+
           {extraHeaderContent}
 
           {isMrXTurn && anyDetectiveExploring && (
@@ -690,22 +706,6 @@ export default function GameBoard({
           {belowTicketsContent}
 
           {message && <div style={styles.messageBar}>{message}</div>}
-
-          {isMrXTurn && isMyTurnToAct && !pendingMove && (
-            <div style={styles.rowCenter}>
-              <button
-                style={{
-                  ...styles.doubleBtn,
-                  opacity: match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive ? 1 : 0.4,
-                  cursor: match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive ? "pointer" : "default",
-                }}
-                disabled={match.mrX.tickets.double <= 0 || match.mrX.doubleMoveActive}
-                onClick={onActivateDoubleMove}
-              >
-                Play 2x card ({match.mrX.tickets.double} left)
-              </button>
-            </div>
-          )}
 
           {isMyTurnToAct && !pendingMove && legalTargets.size === 0 && (
             <div style={styles.rowCenter}>
@@ -1240,6 +1240,20 @@ export const styles = {
     flexShrink: 0,
   },
   label: { display: "block", fontSize: 13, color: "#555", marginBottom: 8, fontWeight: 600 },
+  featureOverrideSelect: { padding: "8px 10px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 14, flex: 1, minWidth: 0 },
+  timerStepBtn: {
+    width: 32,
+    height: 32,
+    flexShrink: 0,
+    borderRadius: 8,
+    border: "1.5px solid #ddd",
+    background: "#fff",
+    fontSize: 16,
+    fontWeight: 700,
+    color: "#333",
+    cursor: "pointer",
+    lineHeight: 1,
+  },
   rowCenter: { display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" },
   characterPickerGrid: {
     display: "flex",
@@ -1512,15 +1526,14 @@ export const styles = {
     padding: "3px 6px",
   },
   travelLogReveal: { fontSize: 12, color: "#a33", marginTop: 8, fontWeight: 600 },
-  doubleBtn: {
+  doubleBtnCompact: {
     border: "1.5px solid #6b4fa0",
     color: "#6b4fa0",
     background: "#f4effa",
-    borderRadius: 10,
-    padding: "8px 14px",
-    fontSize: 13,
+    borderRadius: 8,
+    padding: "6px 12px",
+    fontSize: 12.5,
     fontWeight: 600,
-    marginTop: 8,
   },
   passTurnNote: {
     fontSize: 12.5,

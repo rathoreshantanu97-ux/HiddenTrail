@@ -127,7 +127,14 @@ export default function App({ account, onLogout }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [passAndPlayMapId, setPassAndPlayMapId] = useState("city");
+  // IMPORTANT: must never default to a hardcoded map id like "city" here
+  // -- if that specific map is ever removed/deactivated, MAPS[id] would
+  // resolve to undefined and break map lookups downstream (this was the
+  // exact bug already found and fixed once in SetupScreen.jsx; applying
+  // the same fix here). Starts null; SetupScreen/LandingScreen's own
+  // "snap to first active map" logic fills in a real id once MAP_LIST
+  // loads.
+  const [passAndPlayMapId, setPassAndPlayMapId] = useState(null);
   const [handoffFor, setHandoffFor] = useState(null);
 
   // ---- Multiplayer specific state ----
@@ -138,7 +145,7 @@ export default function App({ account, onLogout }) {
   const [mpIsHost, setMpIsHost] = useState(false);
   const [mpNumDetectives, setMpNumDetectives] = useState(3);
   const [mpTotalPlayers, setMpTotalPlayers] = useState(2);
-  const [mpMapId, setMpMapId] = useState("city");
+  const [mpMapId, setMpMapId] = useState(null); // same reasoning as passAndPlayMapId above -- never hardcode a specific map id as the default
   const [mpDisplayName, setMpDisplayName] = useState("");
   // mpStage used to be local-only state that only the HOST's own click
   // ever updated -- meaning a detective's browser had no way to learn the

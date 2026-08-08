@@ -98,27 +98,53 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, currentMapId,
       {publicConfig && (
         <>
           <label style={styles.label}>Turn timer (seconds) — blank means no time limit</label>
-          <input
-            type="text"
-            inputMode="numeric"
-            placeholder="No limit"
-            style={styles.featureOverrideSelect}
-            value={turnTimerSeconds ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "" || /^\d*$/.test(v)) {
-                setTurnTimerSeconds(v === "" ? null : v);
-              }
-            }}
-            onBlur={() => {
-              if (turnTimerSeconds === null || turnTimerSeconds === "") {
-                setTurnTimerSeconds(null);
-                return;
-              }
-              const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin));
-              setTurnTimerSeconds(n);
-            }}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              type="button"
+              aria-label="Decrease turn timer by 10 seconds"
+              style={styles.timerStepBtn}
+              onClick={() => {
+                const current = turnTimerSeconds === null || turnTimerSeconds === "" ? publicConfig.turnTimerMin : parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin;
+                const next = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, current - 10));
+                setTurnTimerSeconds(next);
+              }}
+            >
+              −
+            </button>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="No limit"
+              style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+              value={turnTimerSeconds ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "" || /^\d*$/.test(v)) {
+                  setTurnTimerSeconds(v === "" ? null : v);
+                }
+              }}
+              onBlur={() => {
+                if (turnTimerSeconds === null || turnTimerSeconds === "") {
+                  setTurnTimerSeconds(null);
+                  return;
+                }
+                const n = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin));
+                setTurnTimerSeconds(n);
+              }}
+            />
+            <button
+              type="button"
+              aria-label="Increase turn timer by 10 seconds"
+              style={styles.timerStepBtn}
+              onClick={() => {
+                const current = turnTimerSeconds === null || turnTimerSeconds === "" ? publicConfig.turnTimerMin : parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin;
+                const next = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, current + 10));
+                setTurnTimerSeconds(next);
+              }}
+            >
+              +
+            </button>
+          </div>
         </>
       )}
 

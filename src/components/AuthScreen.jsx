@@ -124,7 +124,7 @@ export default function AuthScreen({ onAuthenticated }) {
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <h1 style={styles.title}>Scotland Yard</h1>
+        <h1 style={styles.title}>Hidden Trail</h1>
         <p style={styles.subtitle}>
           {mode === "landing" && "Sign in or create an account"}
           {mode === "login" && "Sign in to play"}

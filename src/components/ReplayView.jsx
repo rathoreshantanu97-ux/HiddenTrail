@@ -1,7 +1,30 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { buildReplayTimeline } from "../lib/gameEngine.js";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
-import MapBackground from "./MapBackground.jsx";
+import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
+
+// Label-placement helpers, matching GameBoard.jsx exactly, so a station's
+// name lands in the same spot in replay as it did during live play.
+const DIR_VECS = {
+  N: [0, -1],
+  S: [0, 1],
+  E: [1, 0],
+  W: [-1, 0],
+  NE: [0.707, -0.707],
+  NW: [-0.707, -0.707],
+  SE: [0.707, 0.707],
+  SW: [-0.707, 0.707],
+};
+const ANCHOR_FOR_DIR = {
+  E: "start",
+  NE: "start",
+  SE: "start",
+  W: "end",
+  NW: "end",
+  SW: "end",
+  N: "middle",
+  S: "middle",
+};
 
 // ---------------------------------------------------------------------------
 // REPLAY VIEW — full-screen overlay on top of EndedScreen. Lets players
@@ -10,13 +33,14 @@ import MapBackground from "./MapBackground.jsx";
 // in sync at every step -- a genuinely faithful replay, not just token
 // movement with details left for elsewhere.
 //
-// Deliberately a SEPARATE, simpler renderer from the live GameBoard
-// rather than reusing it directly: GameBoard is built entirely around
-// interactive play (click handlers, legal-move computation, route
-// explorer, pending-move state), none of which applies to a read-only
-// historical replay. A dedicated renderer that draws exactly what's
-// needed is more maintainable than threading a "read only" flag through
-// ~1500 lines of interactive logic.
+// Renders the SAME visual map players saw during live play: background
+// art, frame/compass, curved parallel-route fan-out, station name labels,
+// and transport-mode dots all match GameBoard.jsx's rendering. Still a
+// separate component from GameBoard rather than reusing it directly,
+// since GameBoard is built entirely around interactive play (click
+// handlers, legal-move computation, route explorer, pending-move state)
+// that a read-only historical replay has no use for -- but the parts that
+// affect what the map actually LOOKS like are kept in sync with it.
 // ---------------------------------------------------------------------------
 export default function ReplayView({ map, match, mrxName, detectiveName, onClose }) {
   const timeline = useMemo(() => buildReplayTimeline(match), [match]);
@@ -73,16 +97,36 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
         <div style={styles.boardWrap}>
           <svg viewBox={`0 0 ${map.viewW || 100} ${map.viewH || 100}`} style={styles.svg}>
             <MapBackground map={map} />
+            <MapFrameAndCompass map={map} />
             {map.allRenderEdges.map(([a, b, mode], i) => {
               const [ax, ay] = map.stations[a];
               const [bx, by] = map.stations[b];
+              // Same parallel-edge fan-out as the live GameBoard: when two
+              // stations share more than one connection (e.g. a taxi edge
+              // and a bus edge between the same pair), curve them apart
+              // instead of drawing directly on top of each other. Replay
+              // is meant to show the exact map players saw during the
+              // game, not a simplified version, so this needed to match.
+              const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+              const group = map.edgeGroups[key] || [mode];
+              const slot = group.indexOf(mode);
+              const total = group.length;
+              const mx = (ax + bx) / 2;
+              const my = (ay + by) / 2;
+              const dx = bx - ax,
+                dy = by - ay;
+              const len = Math.sqrt(dx * dx + dy * dy) || 1;
+              const nx = -dy / len,
+                ny = dx / len;
+              const spread = 1.6;
+              const offset = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
+              const cx = mx + nx * offset;
+              const cy = my + ny * offset;
               return (
-                <line
+                <path
                   key={i}
-                  x1={ax}
-                  y1={ay}
-                  x2={bx}
-                  y2={by}
+                  d={`M ${ax} ${ay} Q ${cx} ${cy} ${bx} ${by}`}
+                  fill="none"
                   stroke={activeMode[mode]?.color || "#ccc"}
                   strokeWidth={mode === "underground" ? 0.45 : mode === "bus" ? 0.35 : 0.2}
                   opacity={0.5}
@@ -103,16 +147,59 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
                 fill = "#1a1a1a";
                 stroke = "#fff";
               }
+              const nodeR = 1.6;
+              const isMajor = map.majorStations && map.majorStations.has(numId);
+              const labelDir = isMajor ? map.majorLabelDir && map.majorLabelDir[numId] : map.minorLabelDir && map.minorLabelDir[numId];
+              const isTiny = map.tinyLabelStations && map.tinyLabelStations.has(numId);
+              const dvec = DIR_VECS[labelDir];
+              const labelDist = isMajor ? 3.0 : isTiny ? 1.8 : 2.3;
+              const lx = dvec ? x + dvec[0] * labelDist : x;
+              const ly = dvec ? y + dvec[1] * labelDist + (dvec[1] === 0 ? 0.5 : 0) : y;
+
               return (
-                <circle
-                  key={id}
-                  cx={x}
-                  cy={y}
-                  r={1.6}
-                  fill={fill}
-                  stroke={stroke}
-                  strokeWidth={0.35}
-                />
+                <g key={id}>
+                  <circle cx={x} cy={y} r={nodeR} fill={fill} stroke={stroke} strokeWidth={0.35} />
+                  {[...(map.stationModes?.[id] || [])].map((m, mi, arr) => {
+                    const angle = (mi / arr.length) * 2 * Math.PI - Math.PI / 2;
+                    const dotR = nodeR + 0.55;
+                    return (
+                      <circle
+                        key={m}
+                        cx={x + Math.cos(angle) * dotR}
+                        cy={y + Math.sin(angle) * dotR}
+                        r={0.42}
+                        fill={activeMode[m]?.color || "#ccc"}
+                        stroke="#fff"
+                        strokeWidth={0.12}
+                      />
+                    );
+                  })}
+                  <text
+                    x={x}
+                    y={y + 0.55}
+                    fontSize={1.35}
+                    textAnchor="middle"
+                    fill={detHere || mrXHere ? "#ffffff" : map.id === "bengaluru" ? "#3c4043" : "#5c5648"}
+                    fontWeight="700"
+                  >
+                    {id}
+                  </text>
+                  {map.names && labelDir && (
+                    <text
+                      x={lx}
+                      y={ly}
+                      fontSize={isMajor ? 1.6 : isTiny ? 0.75 : 1.1}
+                      textAnchor={ANCHOR_FOR_DIR[labelDir]}
+                      fill={isMajor ? "#1a1a1a" : "#5f6368"}
+                      fontWeight={isMajor ? 700 : 600}
+                      stroke="#ffffff"
+                      strokeWidth={isMajor ? 0.35 : 0.28}
+                      paintOrder="stroke"
+                    >
+                      {map.names[id]}
+                    </text>
+                  )}
+                </g>
               );
             })}
           </svg>

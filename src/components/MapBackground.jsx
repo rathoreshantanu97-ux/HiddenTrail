@@ -64,162 +64,61 @@ export default function MapBackground({ map }) {
   }
 
   if (bg.kind === "citymap" && bg.theme === "bengaluru") {
+    // Bengaluru — the primary city map (90 stations, renumbered 1-90,
+    // as of the "Hidden Trail" rebrand pass). Every icon below is placed
+    // at the ACTUAL current coordinates of its named station -- verified
+    // against the live map data, not carried over from any earlier
+    // station layout. viewBox is 126 x 102 (see bengaluru.js).
     return (
       <>
-        {/* Bengaluru: Google-Maps-style base — cool off-white land, soft
-            green park patches, saturated blue water */}
-        <rect x="0" y="0" width="100" height="100" fill="#eef1ec" />
-        <circle cx="47" cy="47" r="6.5" fill="#d3e6ce" opacity="0.9" />
-        <circle cx="45" cy="59" r="4.5" fill="#d3e6ce" opacity="0.85" />
-        <circle cx="30" cy="30" r="16" fill="#e6e8e2" opacity="0.5" />
-        <circle cx="70" cy="30" r="15" fill="#e6e8e2" opacity="0.5" />
-        <circle cx="25" cy="70" r="16" fill="#e3e5df" opacity="0.5" />
-        <circle cx="60" cy="75" r="17" fill="#e3e5df" opacity="0.5" />
-        <path
-          d="M 50 6 C 75 8, 92 25, 92 48 C 92 68, 78 84, 55 92
-             C 38 96, 18 90, 10 72 C 4 55, 6 32, 20 16 C 30 6, 40 4, 50 6 Z"
-          fill="none"
-          stroke="#f5c065"
-          strokeWidth="1"
-          strokeDasharray="2.2,1.4"
-          opacity="0.75"
-        />
-        <text x="50" y="4" fontSize="1.6" textAnchor="middle" fill="#b8863a" fontWeight="700" opacity="0.8">
-          OUTER RING ROAD
-        </text>
-        <ellipse cx="55" cy="45" rx="5.5" ry="3.4" fill="url(#lakeGrad)" opacity="0.95" transform="rotate(18 55 45)" />
-        <text x="55" y="45" fontSize="1.3" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">Ulsoor Lake</text>
-        <ellipse cx="70" cy="69" rx="7" ry="4.4" fill="url(#lakeGrad)" opacity="0.95" transform="rotate(-12 70 69)" />
-        <text x="70" y="69" fontSize="1.3" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">Bellandur Lake</text>
-      </>
-    );
-  }
+        <rect x="0" y="0" width="126" height="102" fill="#eef1ec" />
 
-  if (bg.kind === "citymap" && bg.theme === "bengaluru-new") {
-    // Bengaluru — New: the 100-station redesign. Same Google-Maps-style
-    // base as the original theme, but with lakes repositioned to match
-    // the NEW map's actual station coordinates (Ulsoor/Devarabeesanahalli/
-    // Bellandur Gate/Bellandur form the real ferry chain here, at
-    // different positions than the old 64-station map), plus genuine
-    // Bengaluru garden/park landmarks and a couple of major buildings,
-    // per explicit design request -- kept as a fully separate theme so
-    // the original "bengaluru" map's visuals are never touched.
-    return (
-      <>
-        <rect x="0" y="0" width="100" height="100" fill="#eef1ec" />
+        {/* Soft neighborhood-tint patches, spread across the board so the
+            base doesn't read as a flat, empty rectangle */}
+        <circle cx="25" cy="20" r="16" fill="#e6e8e2" opacity="0.4" />
+        <circle cx="95" cy="20" r="15" fill="#e6e8e2" opacity="0.4" />
+        <circle cx="20" cy="70" r="16" fill="#e3e5df" opacity="0.4" />
+        <circle cx="90" cy="75" r="17" fill="#e3e5df" opacity="0.4" />
+        <circle cx="60" cy="50" r="15" fill="#e9e6da" opacity="0.35" />
 
-        {/* Soft neighborhood-tint patches, spread evenly since station
-            layout itself is now evenly distributed rather than
-            clustered by real geography */}
-        <circle cx="25" cy="25" r="15" fill="#e6e8e2" opacity="0.45" />
-        <circle cx="75" cy="25" r="15" fill="#e6e8e2" opacity="0.45" />
-        <circle cx="25" cy="75" r="15" fill="#e3e5df" opacity="0.45" />
-        <circle cx="75" cy="75" r="15" fill="#e3e5df" opacity="0.45" />
-        <circle cx="50" cy="50" r="14" fill="#e9e6da" opacity="0.4" />
+        {/* Rural Lake -- station #86 @ (84.4, 8.85) */}
+        <ellipse cx="84.4" cy="8.5" rx="4.5" ry="3" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(10 84.4 8.5)" />
 
-        {/* Cubbon Park -- real Bengaluru landmark, placed near the
-            CENTRAL region cluster (MG Road / Cubbon Park / Vidhana
-            Soudha all sit near map center per our regional naming) */}
-        <ellipse cx="54" cy="44" rx="6.5" ry="5" fill="#cfe3c4" opacity="0.85" />
-        <text x="54" y="44" fontSize="1.4" textAnchor="middle" fill="#4a7a3d" fontWeight="600" opacity="0.85">
-          Cubbon Park
-        </text>
+        {/* Small Lake -- station #87 @ (68.75, 6.25) */}
+        <ellipse cx="68.75" cy="5.8" rx="3.5" ry="2.4" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(-8 68.75 5.8)" />
 
-        {/* Lalbagh -- second real garden landmark, placed toward the
-            SOUTH region cluster */}
-        <ellipse cx="48" cy="12" rx="5.5" ry="4.2" fill="#cfe3c4" opacity="0.85" />
-        <text x="48" y="12" fontSize="1.3" textAnchor="middle" fill="#4a7a3d" fontWeight="600" opacity="0.85">
-          Lalbagh
-        </text>
-
-        {/* Vidhana Soudha -- major real government building landmark,
-            near the CENTRAL cluster. Icon only -- the station's own
-            name label (with verified collision-free positioning) is
-            already rendered by the main station-labeling system; a
-            second text label here would just duplicate it. */}
-        <rect x="56" y="52" width="3.2" height="2.4" fill="#d8cba8" opacity="0.9" rx="0.3" />
-
-        {/* Bangalore Palace -- second major building landmark, placed
-            toward the NORTHWEST cluster. Icon only, same reasoning. */}
-        <rect x="22" y="80" width="3" height="2.2" fill="#d8cba8" opacity="0.9" rx="0.3" />
-
-        {/* Kempegowda Airport -- real Bengaluru landmark, placed at the
-            actual coordinates of the renamed station (station 4, the
-            genuine northernmost station on this map, matching the real
-            airport's real-world position north of the city). Simple
-            runway-stripe glyph rather than a building icon. Icon only --
+        {/* Lalbagh -- garden, station #36 @ (49.06, 61.87). Icon only --
             the station's own name label already handles the text. */}
-        <g opacity="0.85">
-          <rect x="35" y="1.5" width="6" height="1" fill="#8a8f96" rx="0.15" />
-          <rect x="36" y="0.8" width="4" height="0.5" fill="#d8d4c8" />
+        <ellipse cx="49.06" cy="61.87" rx="5.5" ry="4" fill="#cfe3c4" opacity="0.85" />
+
+        {/* Nice Road Park -- station #55 @ (29.73, 92.16) */}
+        <ellipse cx="29.73" cy="92.16" rx="5" ry="3.6" fill="#cfe3c4" opacity="0.85" />
+
+        {/* State Forest -- station #77 @ (42.34, 16.71) -- denser green
+            texture (small clustered dots) to read as "forest" rather
+            than a manicured park/garden. */}
+        <g opacity="0.8">
+          <ellipse cx="42.34" cy="16.71" rx="6" ry="4.5" fill="#b8d6a8" />
+          {[[-3, -1.5], [-1, 1], [1.5, -1], [3, 1.5], [0, -2.5], [-2, 2]].map(([dx, dy], i) => (
+            <circle key={i} cx={42.34 + dx} cy={16.71 + dy} r="0.6" fill="#7fa868" />
+          ))}
         </g>
 
-        {/* Ulsoor Lake / Bellandur Lake -- kept as pure visual scenery
-            (per updated design decision: lakes stay, but no longer
-            gate a special crossing mechanic -- that's now handled by
-            the separate secret-underground-network mechanic instead).
-            Bridges are drawn across the lake shapes so normal
-            taxi/bus/metro routes crossing through this area read as
-            genuinely crossing OVER the water via a bridge, not
-            floating through it. */}
-        <path
-          d="M 84 32 C 88 36, 90 42, 88 47 C 86 51, 84 54, 85 58
-             C 86 61, 84 63, 81 62 L 78 59 C 80 54, 79 49, 80 44
-             C 81 39, 80 34, 82 30 Z"
-          fill="url(#lakeGrad)"
-          opacity="0.9"
-        />
-        <text x="86" y="34" fontSize="1.2" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
-          Bellandur Lake
-        </text>
-        <text x="83" y="58" fontSize="1.2" textAnchor="middle" fill="#3d6b7d" fontWeight="600" opacity="0.85">
-          Ulsoor Lake
-        </text>
-        {/* Bridge markers -- short pale crossbars, drawn wherever a
-            normal route edge happens to pass over the lake shape, so
-            it visually reads as "crossing a bridge" rather than an
-            unexplained gap in the water. Positioned generically across
-            the lake's narrow points. */}
-        <rect x="82" y="43" width="6" height="1.4" fill="#d8d4c8" opacity="0.9" rx="0.3" transform="rotate(20 85 43.7)" />
-        <rect x="80" y="52" width="6" height="1.4" fill="#d8d4c8" opacity="0.9" rx="0.3" transform="rotate(-15 83 52.7)" />
-      </>
-    );
-  }
+        {/* Bamboo Forest -- station #84 @ (78.12, 14.49) -- same forest
+            texture language as State Forest, distinct from garden ellipses. */}
+        <g opacity="0.8">
+          <ellipse cx="78.12" cy="14.49" rx="5.5" ry="4" fill="#b8d6a8" />
+          {[[-2.5, -1], [-0.8, 1.3], [1.5, -1.2], [2.8, 1]].map(([dx, dy], i) => (
+            <circle key={i} cx={78.12 + dx} cy={14.49 + dy} r="0.6" fill="#7fa868" />
+          ))}
+        </g>
 
-  if (bg.kind === "citymap" && bg.theme === "namma-bengaluru") {
-    // Namma Bengaluru: richer visual pass -- real Bengaluru lakes and
-    // landmark buildings, positioned at the ACTUAL coordinates of their
-    // named stations after the v3 redistribution (verified against the
-    // real station data, not guessed).
-    return (
-      <>
-        <rect x="0" y="0" width="126" height="100" fill="#eef1ec" />
-        <circle cx="30" cy="25" r="16" fill="#e6e8e2" opacity="0.35" />
-        <circle cx="95" cy="25" r="16" fill="#e6e8e2" opacity="0.35" />
-        <circle cx="30" cy="75" r="16" fill="#e3e5df" opacity="0.35" />
-        <circle cx="95" cy="75" r="16" fill="#e3e5df" opacity="0.35" />
-        <circle cx="63" cy="50" r="15" fill="#e9e6da" opacity="0.35" />
+        {/* Botanical Garden -- station #83 @ (101.41, 33.19) */}
+        <ellipse cx="101.41" cy="33.19" rx="5.5" ry="4" fill="#cfe3c4" opacity="0.85" />
 
-        {/* Ulsoor Lake -- real station at (81.2, 31.9). Icon only, no
-            text label -- per explicit instruction. */}
-        <ellipse cx="84" cy="30" rx="5.5" ry="3.8" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(15 84 30)" />
-
-        {/* Bellandur Lake -- real station at (108.2, 83.2), the largest
-            water body. Icon only, no text label. */}
-        <ellipse cx="112" cy="86" rx="7" ry="4.5" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(-10 112 86)" />
-
-        {/* Cubbon Park -- real station at (53.6, 42.3). Icon only -- the
-            station's own name label already handles the text. */}
-        <ellipse cx="57" cy="39" rx="5.5" ry="4" fill="#cfe3c4" opacity="0.85" />
-
-        {/* Lalbagh -- real station at (49.2, 64.1). Icon only. */}
-        <ellipse cx="46" cy="68" rx="5" ry="3.8" fill="#cfe3c4" opacity="0.85" />
-
-        {/* Vidhana Soudha -- real Indian legislative building, rendered as
-            a simplified domed-colonnade silhouette rather than a plain
-            box, so it actually reads as "government building" at a
-            glance. Station at (45.0, 24.4). Icon only. */}
-        <g transform="translate(45.0, 22.5)">
+        {/* Vidhana Soudha -- real Indian legislative building, station
+            #24 @ (48.59, 43.02). Domed-colonnade silhouette. Icon only. */}
+        <g transform="translate(48.59, 40.5)">
           <rect x="-3" y="0" width="6" height="1.8" fill="#c9b98a" />
           <rect x="-3.4" y="1.6" width="6.8" height="0.5" fill="#a8926a" />
           {[-2.4, -1.2, 0, 1.2, 2.4].map((dx, i) => (
@@ -230,9 +129,8 @@ export default function MapBackground({ map }) {
         </g>
 
         {/* Bengaluru Palace -- Tudor-style crenellated silhouette,
-            distinct from the legislative dome above. Station at
-            (54.2, 9.2). Icon only. */}
-        <g transform="translate(54.2, 7.3)">
+            station #25 @ (55.26, 34.3). Icon only. */}
+        <g transform="translate(55.26, 32)">
           <rect x="-2.6" y="0" width="5.2" height="1.8" fill="#d8b98a" />
           {[-2.2, -1.1, 0, 1.1, 2.2].map((dx, i) => (
             <rect key={i} x={dx - 0.35} y={-0.7} width="0.7" height="0.9" fill="#d8b98a" />
@@ -241,40 +139,62 @@ export default function MapBackground({ map }) {
           <polygon points="0,-3 -1,-1.8 1,-1.8" fill="#8a6d3a" />
         </g>
 
-        {/* Kempegowda International Airport -- simple airplane
-            silhouette, unmistakably distinct from every building icon.
-            Station at (78.8, 6). Icon only. */}
-        <g transform="translate(78.77, 3.2) rotate(-30)">
+        {/* Kempegowda International Airport -- station #1 @ (65.74, -1.19),
+            genuine northernmost point on the map. Airplane silhouette,
+            icon only. */}
+        <g transform="translate(65.74, -3.6) rotate(-30)">
           <path d="M 0 -2.2 L 0.5 1.5 L 2.8 2.8 L 2.8 3.5 L 0.4 2.8 L 0.55 4.3 L 1.5 5 L 1.5 5.6 L 0 5.1 L -1.5 5.6 L -1.5 5 L -0.55 4.3 L -0.4 2.8 L -2.8 3.5 L -2.8 2.8 L -0.5 1.5 Z"
                 fill="#5c6066" />
         </g>
 
-        {/* Indian Institute of Science (IISc) -- academic institution,
-            rendered as a graduation-cap/mortarboard silhouette. Station
-            at (25.8, 16.5). Icon only. */}
-        <g transform="translate(25.81, 14.2)">
+        {/* IISc -- academic institution, station #69 @ (46.46, 27.8).
+            Graduation-cap/mortarboard silhouette. Icon only. */}
+        <g transform="translate(46.46, 25.5)">
           <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
           <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
           <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
         </g>
 
-        {/* IIM Bangalore -- same academic-institution mortarboard
-            language as IISc (visually groups them as "institutes"),
-            station at (64.0, 94). Icon only. */}
-        <g transform="translate(63.96, 91.7)">
+        {/* IIM Bangalore -- same academic-institution language as IISc,
+            station #41 @ (62.65, 84.29). Icon only. */}
+        <g transform="translate(62.65, 81.9)">
           <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
           <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
           <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
         </g>
 
-        {/* IKEA Nagasandra -- simplified storefront/retail-box icon,
-            deliberately more distinctive than a plain rectangle (a
-            gabled roofline + a shopping-bag-like handle cue). Station
-            at (7.4, 12). Icon only. */}
-        <g transform="translate(7.38, 9.8)">
+        {/* Christ University -- station #70 @ (21.89, 26.53). Same
+            academic mortarboard language, groups all three institutes
+            visually. Icon only. */}
+        <g transform="translate(21.89, 24.2)">
+          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
+          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
+          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
+        </g>
+
+        {/* IKEA Nagasandra -- retail/storefront icon, station #30 @
+            (16.23, 19.84). Icon only. */}
+        <g transform="translate(16.23, 17.6)">
           <rect x="-2.4" y="-0.2" width="4.8" height="2.4" fill="#2a5fa5" />
           <polygon points="-2.7,-0.2 0,-1.8 2.7,-0.2" fill="#1f4a85" />
           <rect x="-0.9" y="0.4" width="1.8" height="1.2" fill="#ffcc33" />
+        </g>
+
+        {/* Phoenix Mall -- station #8 @ (99, 39.21). Same retail-box
+            language as IKEA, distinct color so the two don't read as
+            the same store. Icon only. */}
+        <g transform="translate(99, 36.8)">
+          <rect x="-2.4" y="-0.2" width="4.8" height="2.4" fill="#a5522a" />
+          <polygon points="-2.7,-0.2 0,-1.8 2.7,-0.2" fill="#853f1f" />
+          <rect x="-0.9" y="0.4" width="1.8" height="1.2" fill="#ffcc33" />
+        </g>
+
+        {/* Manyata Tech Park -- office/tech campus, station #81 @
+            (67.05, 19.4). Simplified glass-tower cluster. Icon only. */}
+        <g transform="translate(67.05, 17.1)">
+          <rect x="-2.2" y="-1.5" width="1.4" height="3.5" fill="#6b8caf" />
+          <rect x="-0.6" y="-2.3" width="1.4" height="4.3" fill="#547599" />
+          <rect x="1" y="-1" width="1.4" height="3" fill="#6b8caf" />
         </g>
       </>
     );

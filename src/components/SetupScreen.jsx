@@ -72,7 +72,7 @@ export default function SetupScreen({ onStart, onBack }) {
     return (
       <div style={styles.page}>
         <div style={styles.setupCard}>
-          <h1 style={styles.title}>Scotland Yard</h1>
+          <h1 style={styles.title}>Hidden Trail</h1>
           <p style={styles.subtitle}>
             {MAP_LIST.length === 0 ? "No maps are currently available. Check back later." : "Loading..."}
           </p>
@@ -86,7 +86,7 @@ export default function SetupScreen({ onStart, onBack }) {
       <div style={styles.setupCard}>
         <div style={styles.headerRow}>
           <div>
-            <h1 style={styles.title}>Scotland Yard</h1>
+            <h1 style={styles.title}>Hidden Trail</h1>
             <p style={styles.subtitle}>Pass-and-play · hidden Mr. X · laptop-sized board</p>
           </div>
           {onBack && (

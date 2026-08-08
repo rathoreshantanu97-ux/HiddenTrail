@@ -23,7 +23,7 @@ export default function MapCanvas({ map, highlightStationId, onStationClick }) {
   return (
     <div style={{ position: "relative", width: "100%", maxWidth: 900, margin: "0 auto" }}>
       <svg
-        viewBox={`-1 -5 ${baseW + 2} ${baseH + 6}`}
+        viewBox={`-0.5 -1.5 ${baseW + 1} ${baseH + 2}`}
         style={{ width: "100%", borderRadius: 12, boxShadow: "0 2px 14px rgba(0,0,0,0.1)", background: "#fff" }}
       >
         <defs>

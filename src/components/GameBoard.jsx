@@ -60,24 +60,20 @@ function timerBarColor(fraction) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-// EDGE_MARGIN: a small buffer added around every map's own declared
-// viewW/viewH so stations sitting right at (or slightly past) the
-// nominal edge -- and their labels, which extend further out from the
-// node than the node itself -- have room to render fully on-canvas.
-// ASYMMETRIC, not a uniform margin on all four sides: checked the actual
-// overflow on the real map data (Bengaluru's Airport sits at y=-1.19,
-// the only station anywhere near an edge) and a uniform 6-unit margin
-// was wildly oversized for that -- it left roughly 9-10% of the visible
-// canvas as pure empty space on every side, most of it solving nothing
-// (the left/right/bottom edges had no actual overflow at all, up to
-// 9-11 units of natural clearance already). This targets just enough
-// margin on the TOP (where the real, measured problem is: ~1.2 units of
-// coordinate overflow + a "N"-direction label needs roughly 5 units of
-// clearance above a major station) while keeping the other three sides
-// minimal, so the map fills the available canvas rather than floating
-// in a mostly-empty box.
-const EDGE_MARGIN_TOP = 5;
-const EDGE_MARGIN_OTHER = 1;
+// EDGE_MARGIN: a MINIMAL buffer so a station sitting right at the
+// nominal edge, and its label, still render fully on-canvas -- kept as
+// small as the actual data requires, not a generous guess. Checked
+// every station's worst-case top clearance need if labeled "N": Airport
+// was a genuine outlier needing ~5.6 units (now resolved by giving
+// Airport's label a different direction instead -- see its
+// majorLabelDir entry -- since inflating the margin for one outlier
+// station wastes space on every other station's view), and every other
+// station needs at most ~0.2 units. TOP stays slightly larger than the
+// sides/bottom only because that's where the real (now-resolved)
+// problem was; sides/bottom get virtually nothing since checked
+// overflow there was zero.
+const EDGE_MARGIN_TOP = 1.5;
+const EDGE_MARGIN_OTHER = 0.5;
 
 export default function GameBoard({
   map,
@@ -787,7 +783,22 @@ export default function GameBoard({
             <svg
               ref={svgRef}
               viewBox={`${pan.x} ${pan.y} ${viewSizeW} ${viewSizeH}`}
-              preserveAspectRatio="xMidYMid meet"
+              // "none" instead of "xMidYMid meet": meet PRESERVES the
+              // exact map aspect ratio and letterboxes/pillarboxes
+              // whatever's left over -- that's what was causing the
+              // large empty bands on left/right in practice (the
+              // container's own shape is usually much wider than the
+              // map's own 126x108ish shape, so "meet" was adding
+              // significant pillarbox margin completely independent of
+              // the EDGE_MARGIN constants below, which only affect the
+              // viewBox's own coordinate bounds, not this separate
+              // scaling behavior). "none" stretches the content to fill
+              // the container exactly on both axes -- no letterboxing,
+              // uses all available space, at the cost of not perfectly
+              // preserving the map's literal aspect ratio (a small,
+              // usually unnoticeable stretch, not a real design cost
+              // here).
+              preserveAspectRatio="none"
               style={{
                 ...styles.board,
                 width: "100%",
@@ -1117,7 +1128,7 @@ export default function GameBoard({
                       (() => {
                         const isTiny = map.tinyLabelStations && map.tinyLabelStations.has(numId);
                         const dvec = DIR_VECS[labelDir];
-                        const dist = (isMajor ? 3.0 : isTiny ? 1.8 : 2.3) * sizeScale;
+                        const dist = (isMajor ? 2.2 : isTiny ? 1.3 : 1.7) * sizeScale;
                         const lx = x + dvec[0] * dist;
                         const ly = y + dvec[1] * dist + (dvec[1] === 0 ? 0.5 * sizeScale : 0);
                         return (

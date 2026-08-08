@@ -84,7 +84,7 @@ const styles = {
     borderRadius: 12,
     boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
     overflow: "hidden",
-    height: 260,
+    height: 210,
   },
   tabs: { display: "flex", borderBottom: "1px solid #eee" },
   tab: {

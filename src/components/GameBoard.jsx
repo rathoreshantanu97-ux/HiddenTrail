@@ -75,6 +75,23 @@ function timerBarColor(fraction) {
 const EDGE_MARGIN_TOP = 6;
 const EDGE_MARGIN_OTHER = 0.5;
 
+// TICKET_DISPLAY_ORDER: explicit taxi -> bus -> underground -> black ->
+// double ordering for every place ticket counts get rendered, rather than
+// relying on the underlying object's own key order (which, while it
+// happens to already match this today, is an implicit dependency on
+// insertion order elsewhere in the codebase -- a future refactor to how
+// ticket objects get built could silently reorder these with no error).
+// Any mode not in this list (shouldn't happen for a valid map) sorts
+// after everything named here, rather than being dropped.
+const TICKET_DISPLAY_ORDER = ["taxi", "bus", "underground", "black", "double"];
+function sortTicketEntries(ticketsObj) {
+  return Object.entries(ticketsObj).sort(([a], [b]) => {
+    const ai = TICKET_DISPLAY_ORDER.indexOf(a);
+    const bi = TICKET_DISPLAY_ORDER.indexOf(b);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
+}
+
 export default function GameBoard({
   map,
   match,
@@ -530,10 +547,10 @@ export default function GameBoard({
             </div>
             <div style={styles.ticketsPanel}>
               {isMrXTurn
-                ? Object.entries(match.mrX.tickets)
+                ? sortTicketEntries(match.mrX.tickets)
                     .filter(([mode]) => mode !== "double")
                     .map(([mode, count]) => <TicketChip key={mode} mode={mode} count={count} modeTheme={activeMode} />)
-                : Object.entries(activeDetective.tickets).map(([mode, count]) => (
+                : sortTicketEntries(activeDetective.tickets).map(([mode, count]) => (
                     <TicketChip key={mode} mode={mode} count={count} modeTheme={activeMode} />
                   ))}
             </div>
@@ -719,7 +736,7 @@ export default function GameBoard({
               <div style={styles.detectiveOverviewCard}>
                 <div style={{ ...styles.detectiveOverviewDot, background: "#1a1a1a" }} />
                 <span style={{ fontWeight: 700, marginRight: 4 }}>{mrxName()}</span>
-                {Object.entries(match.mrX.tickets).map(([mode, count]) => (
+                {sortTicketEntries(match.mrX.tickets).map(([mode, count]) => (
                   <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode] ? activeMode[mode].color : "#666" }}>
                     {mode === "double" ? "2x" : activeMode[mode].short}
                     {count}
@@ -750,7 +767,7 @@ export default function GameBoard({
                   <div key={d.id} style={styles.detectiveOverviewCard}>
                     <div style={{ ...styles.detectiveOverviewDot, background: d.color }} />
                     <span style={{ fontWeight: 700, marginRight: 4 }}>{label}</span>
-                    {Object.entries(d.tickets).map(([mode, count]) => (
+                    {sortTicketEntries(d.tickets).map(([mode, count]) => (
                       <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode].color }}>
                         {activeMode[mode].short}
                         {count}
@@ -1682,7 +1699,7 @@ export const styles = {
     maxWidth: 760,
     background: "#fff",
     borderRadius: 12,
-    padding: "10px 14px",
+    padding: "8px 14px",
     marginBottom: 10,
     boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
   },
@@ -1691,11 +1708,11 @@ export const styles = {
     maxWidth: 760,
     background: "#fff",
     borderRadius: 12,
-    padding: "10px 14px",
+    padding: "8px 14px",
     marginBottom: 10,
     boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
   },
-  detectiveOverviewRow: { display: "flex", flexDirection: "column", gap: 6 },
+  detectiveOverviewRow: { display: "flex", flexDirection: "column", gap: 4 },
   detectiveOverviewCard: {
     display: "flex",
     alignItems: "center",
@@ -1719,10 +1736,10 @@ export const styles = {
   logBoardCell: {
     border: "1px solid #ddd7c4",
     borderRadius: 5,
-    padding: "2px 1px",
+    padding: "1px 1px",
     textAlign: "center",
     background: "#fbf9f2",
-    minHeight: 32,
+    minHeight: 24,
   },
   logBoardCellReveal: {
     border: "1.5px solid #c0392b",

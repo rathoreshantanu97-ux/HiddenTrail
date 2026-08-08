@@ -96,12 +96,12 @@ export default function MapBackground({ map }) {
           ))}
         </g>
 
-        {/* Bamboo Forest -- station #84 @ (78.12, 14.49) -- same forest
+        {/* Bamboo Forest -- station #84 @ (78.12, 11.49) -- same forest
             texture language as State Forest, distinct from garden ellipses. */}
         <g opacity="0.8">
-          <ellipse cx="78.12" cy="14.49" rx="5.5" ry="4" fill="#b8d6a8" />
+          <ellipse cx="78.12" cy="11.49" rx="5.5" ry="4" fill="#b8d6a8" />
           {[[-2.5, -1], [-0.8, 1.3], [1.5, -1.2], [2.8, 1]].map(([dx, dy], i) => (
-            <circle key={i} cx={78.12 + dx} cy={14.49 + dy} r="0.6" fill="#7fa868" />
+            <circle key={i} cx={78.12 + dx} cy={11.49 + dy} r="0.6" fill="#7fa868" />
           ))}
         </g>
 
@@ -155,10 +155,12 @@ export default function MapBackground({ map }) {
           <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
         </g>
 
-        {/* Christ University -- station #70 @ (21.89, 26.53). Same
-            academic mortarboard language, groups all three institutes
-            visually. Icon only. */}
-        <g transform="translate(21.89, 24.2)">
+        {/* Christ University -- station #70 @ (18.39, 30.03) [repositioned
+            during layout adjustments -- icon kept in sync with the
+            station's actual current coordinates]. Same academic
+            mortarboard language, groups all three institutes visually.
+            Icon only. */}
+        <g transform="translate(18.39, 27.7)">
           <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
           <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
           <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />

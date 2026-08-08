@@ -72,7 +72,7 @@ function timerBarColor(fraction) {
 // sides/bottom only because that's where the real (now-resolved)
 // problem was; sides/bottom get virtually nothing since checked
 // overflow there was zero.
-const EDGE_MARGIN_TOP = 1.5;
+const EDGE_MARGIN_TOP = 6;
 const EDGE_MARGIN_OTHER = 0.5;
 
 export default function GameBoard({

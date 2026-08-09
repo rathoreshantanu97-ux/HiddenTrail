@@ -333,10 +333,19 @@ const MODE_CITY_OF_SENDHWA = {
 // maximize clearance from every named avoid-station, checked
 // numerically, not eyeballed.
 const MANUAL_CURVE_OFFSETS_CITY_OF_SENDHWA = {
-  "22-45": -4, // bus route 51<->25, curving outside stations 44 & 45
-  "7-22": -4, // bus route 25<->8, curving outside station 26
-  "62-69": -4, // bus route 69<->80, curving outside stations 76, 101, 77
-  "1-82": -4, // bus route 99<->2, curving outside station 97
+  // FIXED: the original -4 offset was a flat value copied from
+  // Bengaluru's tuning, but City of Sendhwa's stations sit much farther
+  // apart (this map's edges run 30-100+ units vs Bengaluru's typical
+  // 10-30), so a flat -4 was only ~6% of the edge's own length here --
+  // visually almost imperceptible, which is exactly why these looked
+  // "still not curved." Recomputed each offset as ~15% of that specific
+  // edge's own length (matching the proportion that reads clearly on
+  // Bengaluru), then verified the resulting curve genuinely clears the
+  // named avoid-station(s) by a wide margin, not just barely.
+  "22-45": -30.49, // bus route Chetan Hanuman<->Balwadi, curving outside English Wine Shop & Jai Bhawani Dhaba
+  "7-22": -26.16, // bus route Balwadi<->Chowdhary Dhaba, curving outside Narayan Das Hospital
+  "62-69": -19.67, // bus route Jogwada Road<->Chhota GhatyaPatya, curving outside Sendhwa Public School, Bagrecha Garden, Govt. Hospital
+  "1-82": -9.35, // bus route Homeopathy College<->Chhoti Bijasan, curving outside Pipaldhar
 };
 
 export const cityOfSendhwaMap = {

@@ -1145,7 +1145,20 @@ export default function GameBoard({
                 // 0.5 keeps taxi visually secondary to bus/metro (still
                 // below their 0.85) while being genuinely legible
                 // against the also-darkened background.
-                const taxiFadeOpacity = zoom < 1.6 ? 0.5 : 0.85;
+                // Raised from 0.5 to 0.85 -- a real, confirmed gap:
+                // checking the RENDERED effective color (taxi's color
+                // blended over the background AT this opacity, not just
+                // the pure swatch color) showed effective contrast was
+                // only 1.73:1 at the old 0.5 opacity, well below the
+                // pure color's own 3.29:1 -- the fade was silently
+                // undoing most of the earlier contrast work. Combined
+                // with the lighter background below, effective contrast
+                // is now ~2.97:1. Taxi now renders at the same opacity
+                // as bus/metro rather than being distinctly faded --
+                // acceptable since the color/contrast work already
+                // keeps it visually the "quietest" of the three tiers
+                // without needing an opacity crutch too.
+                const taxiFadeOpacity = 0.85;
                 const lineOpacity = mode === "taxi" ? taxiFadeOpacity : mode === "ferry" ? 0.4 : 0.85;
                 return (
                   <g key={`${key}-${mode}-${i}`}>

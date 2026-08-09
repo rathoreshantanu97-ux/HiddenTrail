@@ -91,7 +91,27 @@ export default function MapBackground({ map }) {
             reliably lighter than every other element on the map, so it
             never competes for attention regardless of what's drawn on
             top of it. */}
-        <rect x="-10" y="-10" width="146" height="122" fill="#ece3d0" />
+        {/* Final palette redesign from first principles -- background,
+            water, and park colors chosen together as one coherent set,
+            alongside the route colors in mapSchema.js (see that file's
+            comment for the full reasoning: contrast math, hue-distance
+            checks between taxi/bus/metro, colorblind-safe luminance
+            separation, and saturation pushed as high as each contrast
+            budget allowed). Lightened further to #f6f1e5 (from #ece3d0)
+            after finding a REAL gap in the earlier verification: taxi's
+            route lines render at reduced opacity when zoomed out (a
+            separate fade mechanism, see taxiFadeOpacity in
+            GameBoard.jsx), and checking the actual RENDERED/blended
+            color (not just the pure swatch) showed effective contrast
+            was only ~1.73:1 at the old background + old 0.5 opacity --
+            well below what the swatch-only check suggested. Lightening
+            the background genuinely helps here (confirmed by testing,
+            unlike darkening it, which was tried earlier and made things
+            WORSE by converging toward taxi's own mid-brightness color)
+            since it pushes the background further from taxi's dark
+            luminance in the correct direction. Combined with raising
+            taxi's opacity to 0.85, effective contrast is now ~2.97:1. */}
+        <rect x="-10" y="-10" width="146" height="122" fill="#f6f1e5" />
 
         {/* Rural Lake -- station #86 @ (84.4, 8.85) */}
         <ellipse cx="84.4" cy="8.5" rx="4.5" ry="3" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(10 84.4 8.5)" />

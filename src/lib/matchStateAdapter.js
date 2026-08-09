@@ -35,6 +35,13 @@ export function rowToMatch(gsRow, myMrxPosition) {
       tickets: gsRow.mrx_tickets,
       revealedPos: gsRow.mrx_revealed_pos,
       lastRevealRound: gsRow.mrx_last_reveal_round,
+      // Was missing entirely -- GameBoard.jsx gates the reveal marker
+      // and "Last confirmed sighting" text on
+      // lastRevealMove === travelLog.length (see comments there), so
+      // without this the reveal never actually rendered on any
+      // multiplayer client, even when revealedPos/lastRevealRound were
+      // set correctly server-side.
+      lastRevealMove: gsRow.mrx_last_reveal_move,
       travelLog: gsRow.mrx_travel_log,
       positionLog: myMrxPosition?.positionLog ?? extractRevealedPositionLog(gsRow.log),
       doubleMoveActive: gsRow.mrx_double_move_active,

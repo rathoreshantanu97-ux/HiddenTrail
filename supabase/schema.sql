@@ -177,6 +177,14 @@ create table if not exists game_state_public (
   mrx_tickets jsonb not null default '{}',    -- {taxi,bus,underground,black,double}
   mrx_revealed_pos int,                       -- null except on reveal rounds
   mrx_last_reveal_round int not null default 0,
+  -- Fixed move-number (logbook slot) of the most recent reveal, separate
+  -- from mrx_last_reveal_round -- needed because the round number alone
+  -- can't distinguish which leg of a double-move actually revealed (both
+  -- legs share a round). The client (GameBoard.jsx / gameEngine.js) gates
+  -- "is this reveal still showing right now" on
+  -- lastRevealMove === travelLog.length, so without this column that
+  -- check is always false and the reveal marker/text never renders.
+  mrx_last_reveal_move int not null default 0,
   mrx_travel_log jsonb not null default '[]', -- [{round,move,mode}] -- MODE ONLY, no pos
   mrx_double_move_active boolean not null default false,
   mrx_double_move_legs_remaining int not null default 0,

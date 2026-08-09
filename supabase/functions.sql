@@ -701,13 +701,13 @@ begin
 
   insert into game_state_public (
     room_id, phase, round, turn_order, turn_idx,
-    detectives, mrx_tickets, mrx_revealed_pos, mrx_last_reveal_round,
+    detectives, mrx_tickets, mrx_revealed_pos, mrx_last_reveal_round, mrx_last_reveal_move,
     mrx_travel_log, mrx_double_move_active, mrx_double_move_legs_remaining,
     winner, log, starting_mrx_tickets, starting_detective_tickets,
     max_rounds, reveal_rounds, turn_started_at
   ) values (
     p_room_id, 'playing', 1, v_turn_order, 0,
-    v_detectives, p_mrx_starting_tickets, null, 0,
+    v_detectives, p_mrx_starting_tickets, null, 0, 0,
     '[]'::jsonb, false, 0,
     null,
     jsonb_build_array(jsonb_build_object('kind', 'game_started', 'payload', jsonb_build_object('numDetectives', v_room.num_detectives))),
@@ -718,7 +718,8 @@ begin
     phase = excluded.phase, round = excluded.round, turn_order = excluded.turn_order,
     turn_idx = excluded.turn_idx, detectives = excluded.detectives,
     mrx_tickets = excluded.mrx_tickets, mrx_revealed_pos = excluded.mrx_revealed_pos,
-    mrx_last_reveal_round = excluded.mrx_last_reveal_round, mrx_travel_log = excluded.mrx_travel_log,
+    mrx_last_reveal_round = excluded.mrx_last_reveal_round,
+    mrx_last_reveal_move = excluded.mrx_last_reveal_move, mrx_travel_log = excluded.mrx_travel_log,
     mrx_double_move_active = excluded.mrx_double_move_active,
     mrx_double_move_legs_remaining = excluded.mrx_double_move_legs_remaining,
     winner = excluded.winner, log = excluded.log,
@@ -962,6 +963,7 @@ declare
   v_spent text;
   v_ticket_count int;
   v_is_reveal boolean;
+  v_move_number int;
   v_continuing_double boolean;
   v_new_travel_log jsonb;
   v_new_position_log jsonb;
@@ -989,7 +991,21 @@ begin
   -- per-map computed schedule entirely; fixed to use the real value,
   -- falling back to the standard schedule only for a legacy row that
   -- somehow predates this column.
-  v_is_reveal := v_gs.round = any(coalesce(v_gs.reveal_rounds, array[3,8,13,18,22]));
+  --
+  -- ACTUAL BUG (Mr. X's position never revealing on schedule): this was
+  -- comparing v_gs.round (the ROUND number) against reveal_rounds, but
+  -- reveal_rounds is populated with MOVE-number (logbook slot) values by
+  -- computeRoundsAndRevealSchedule -- e.g. [3,8,13,18,24] for a 22-round
+  -- game (24 = 22 rounds + 2 double-move legs; see the long comment on
+  -- REVEAL_ROUND_FRACTIONS in mapSchema.js). Since match.round can never
+  -- reach 24, the 5th/final reveal could NEVER fire server-side, and any
+  -- reveal landing on a double-move's second leg misfired because both
+  -- legs of a double move share the same round number. The client engine
+  -- (gameEngine.js applyMrXMove) already keys reveals off the MOVE
+  -- number for exactly this reason -- mirror that here so the server
+  -- (the actual source of truth for multiplayer games) agrees with it.
+  v_move_number := jsonb_array_length(v_gs.mrx_travel_log) + 1;
+  v_is_reveal := v_move_number = any(coalesce(v_gs.reveal_rounds, array[3,8,13,18,22]));
   v_continuing_double := v_gs.mrx_double_move_active and v_gs.mrx_double_move_legs_remaining > 1;
 
   select * into v_secret from game_state_secret where room_id = p_room_id for update;
@@ -1011,6 +1027,7 @@ begin
   set mrx_tickets = jsonb_set(mrx_tickets, array[v_spent], to_jsonb(v_ticket_count - 1)),
       mrx_revealed_pos = case when v_is_reveal then p_to_station else mrx_revealed_pos end,
       mrx_last_reveal_round = case when v_is_reveal then v_gs.round else mrx_last_reveal_round end,
+      mrx_last_reveal_move = case when v_is_reveal then v_move_number else mrx_last_reveal_move end,
       mrx_travel_log = v_new_travel_log,
       mrx_double_move_active = v_continuing_double,
       mrx_double_move_legs_remaining = case when v_continuing_double then v_gs.mrx_double_move_legs_remaining - 1 else 0 end,

@@ -234,56 +234,86 @@ export default function MapBackground({ map }) {
     );
   }
 
-  if (bg.kind === "citymap" && bg.theme === "sendhwa") {
-    // Sendhwa Corridor: a regional town map (portrait orientation, 95x126)
-    // with real icons for schools, the fort, civic buildings, and (per
-    // explicit privacy instruction) unlabeled generic home markers for
-    // the private residence nodes -- no addresses, only the alias
-    // already given in the spec (Shantanu's Home, Aayush's Mansion,
-    // Tanu's Villa, Mayur's Mahal, Shubham's Den).
+  if (bg.kind === "citymap" && bg.theme === "city-of-sendhwa") {
+    // City of Sendhwa: 86-station town map. NO river/water graphic (per
+    // explicit request -- unlike the generic "plain" fallback, which
+    // always includes one) -- just the base fill plus a small set of
+    // real landmark icons and a fort boundary, all positioned using this
+    // map's ACTUAL station coordinates (checked directly, not guessed).
     return (
       <>
-        <rect x="0" y="0" width="95" height="126" fill="#f1ede3" />
-        <circle cx="30" cy="30" r="14" fill="#ece5d3" opacity="0.35" />
-        <circle cx="60" cy="30" r="14" fill="#ece5d3" opacity="0.35" />
-        <circle cx="20" cy="55" r="16" fill="#e8e0c8" opacity="0.4" />
-        <circle cx="90" cy="60" r="14" fill="#e3dcc4" opacity="0.35" />
-        <circle cx="60" cy="80" r="14" fill="#e3dcc4" opacity="0.35" />
+        <rect x="-2" y="-2" width={w + 4} height={h + 4} fill="#ece3d0" />
 
-        {/* Ghat/hill shading near Bijasan Ghat (the map's far LEFT end,
-            per the real local layout), brown/olive contour strokes
-            suggesting a mountain pass */}
-        <g opacity="0.5">
-          {[0, 1, 2, 3].map((i) => (
-            <path
-              key={i}
-              d={`M ${10 + i * 2.5} ${48 + i * 3} Q ${6 + i * 2.5} ${55 + i * 3} ${11 + i * 2.5} ${62 + i * 3}`}
-              stroke="#8a7550"
-              strokeWidth="0.8"
-              fill="none"
-            />
-          ))}
-        </g>
-        <text x="14" y="45" fontSize="1.4" textAnchor="middle" fill="#6b5636" fontWeight="600" opacity="0.7">
-          Bijasan Ghat descent
-        </text>
+        {/* Lake near Chhota GhatyaPatya -- station #80 @ (42.65, 11.6) */}
+        <ellipse cx="42.65" cy="11.6" rx="5.5" ry="3.8" fill="url(#lakeGrad)" opacity="0.9" />
 
-        {/* Fort Pond -- small internal water feature inside the fort
-            compound, per the spec's explicit instruction. Repositioned
-            to the new Fort location (74.2, 25.7). */}
-        <ellipse cx="74.5" cy="29" rx="2.2" ry="1.5" fill="url(#lakeGrad)" opacity="0.85" />
-
-        {/* Goi-side seasonal drainage -- pale blue broken line, NOT a
-            large river (per explicit spec instruction not to invent
-            one). Repositioned near the rural Chachariya/Semliya/
-            Pisanawal cluster in its new location. */}
-        <path d="M 92 85 Q 87 90 82 92" stroke="#8fb8cc" strokeWidth="0.5" strokeDasharray="1,1" fill="none" opacity="0.6" />
-
-        {/* Sendhwa Fort -- the board's central heritage anchor, a
-            crenellated fort silhouette, distinct from every school/
-            civic icon. Icon only -- the station's own name label
+        {/* School icon (mortarboard) near New Lions -- station #3 @
+            (20.16, 69.47). Icon only -- the station's own name label
             already handles the text. */}
-        <g transform="translate(74.17, 22.7)">
+        <g transform="translate(20.16, 66.8)">
+          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
+          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
+          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
+        </g>
+
+        {/* School icon near Sendhwa Public School -- station #76 @
+            (61.07, 15.51) */}
+        <g transform="translate(61.07, 12.84)">
+          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
+          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
+          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
+        </g>
+
+        {/* School icon near Raghuwansh Public School -- station #35 @
+            (77.04, 93.31) */}
+        <g transform="translate(77.04, 90.64)">
+          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
+          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
+          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
+        </g>
+
+        {/* Bus icon near New Bus Stand -- station #10 @ (135.94, 58.4).
+            A simple bus silhouette (body + windows + wheels), distinct
+            from the school/civic icon language used elsewhere. */}
+        <g transform="translate(135.94, 55.0)">
+          <rect x="-2.6" y="-1.2" width="5.2" height="2.4" rx="0.4" fill="#3a6b8a" />
+          <rect x="-2.1" y="-0.8" width="1.1" height="1" fill="#bcd6e6" />
+          <rect x="-0.55" y="-0.8" width="1.1" height="1" fill="#bcd6e6" />
+          <rect x="1" y="-0.8" width="1.1" height="1" fill="#bcd6e6" />
+          <circle cx="-1.6" cy="1.3" r="0.5" fill="#2a2a2a" />
+          <circle cx="1.6" cy="1.3" r="0.5" fill="#2a2a2a" />
+        </g>
+
+        {/* Police icon near Police Thana -- station #34 @ (109.4,
+            68.41). A simple shield shape, standard civic/police
+            language. */}
+        <g transform="translate(109.4, 65.6)">
+          <path d="M 0,-2 L 2,-1.2 L 2,0.8 Q 2,2.2 0,3 Q -2,2.2 -2,0.8 L -2,-1.2 Z" fill="#2f4a7a" />
+          <path d="M 0,-1.3 L 1.3,-0.75 L 1.3,0.7 Q 1.3,1.6 0,2.2 Q -1.3,1.6 -1.3,0.7 L -1.3,-0.75 Z" fill="#4a6fa8" />
+        </g>
+
+        {/* Fort boundary -- a rectangle enclosing the cluster of stations
+            that together represent the fort area (23, 58, 59, 57, 41,
+            54, 13, 52). Bounding box of those stations' real
+            coordinates is x:[98.36,130.94] y:[32.16,58.92] -- padded out
+            further so the rectangle clearly contains all 8 nodes with
+            genuine margin, not just barely touching the outermost ones. */}
+        <rect
+          x="93"
+          y="26"
+          width="43"
+          height="38"
+          rx="1.5"
+          fill="none"
+          stroke="#8a6a3a"
+          strokeWidth="0.6"
+          strokeDasharray="2,1.2"
+          opacity="0.7"
+        />
+        {/* Fort icon -- crenellated tower silhouette, placed just above
+            the boundary rectangle's top edge so it doesn't overlap any
+            station inside it. */}
+        <g transform="translate(114.5, 23)">
           <rect x="-3" y="0" width="6" height="2.2" fill="#a8926a" />
           {[-2.4, -1, 0.4, 1.8].map((dx, i) => (
             <rect key={i} x={dx} y={-0.8} width="0.9" height="1" fill="#a8926a" />
@@ -291,51 +321,10 @@ export default function MapBackground({ map }) {
           <rect x="-4" y="1.8" width="8" height="0.6" fill="#8a7550" />
           <polygon points="0,-2.2 -1.2,-0.8 1.2,-0.8" fill="#6b5636" />
         </g>
-
-        {/* School icon (shared silhouette language: a simple gabled
-            schoolhouse) for all 3 school landmarks. Icon only -- each
-            station's own name label already handles the text. */}
-        {[
-          { x: 66.77, y: 33.0 },
-          { x: 64.31, y: 71.6 },
-          { x: 53.25, y: 41.6 },
-        ].map((school, i) => (
-          <g key={i} transform={`translate(${school.x}, ${school.y})`}>
-            <rect x="-1.8" y="-0.3" width="3.6" height="1.8" fill="#c26b4a" />
-            <polygon points="-2.1,-0.3 0,-1.5 2.1,-0.3" fill="#8a4a30" />
-            <rect x="-0.4" y="0.5" width="0.8" height="1" fill="#f1ede3" />
-          </g>
-        ))}
-
-        {/* Private home markers -- deliberately GENERIC (a plain small
-            house silhouette, no distinguishing detail beyond the
-            existing alias already in the spec), per explicit privacy
-            instruction: no addresses, no additional identifying
-            details. Icon only -- each station's own name label already
-            handles the text. */}
-        {[
-          { x: 64.7, y: 65.1 },
-          { x: 56.27, y: 53.3 },
-          { x: 31.22, y: 21.8 },
-          { x: 94.62, y: 31.9 },
-          { x: 83.63, y: 58.9 },
-        ].map((home, i) => (
-          <g key={i} transform={`translate(${home.x}, ${home.y - 2})`}>
-            <rect x="-1.2" y="0" width="2.4" height="1.4" fill="#7a8a99" opacity="0.8" />
-            <polygon points="-1.5,0 0,-1.1 1.5,0" fill="#5c6d7a" opacity="0.8" />
-          </g>
-        ))}
-
-        {/* Omprakash Talkies -- cinema icon (film-reel/screen glyph).
-            Icon only. */}
-        <g transform="translate(44.0, 49.5)">
-          <rect x="-1.6" y="-0.9" width="3.2" height="1.8" fill="#4a3a5c" />
-          <circle cx="-0.6" cy="0" r="0.4" fill="#7a6a9c" />
-          <circle cx="0.6" cy="0" r="0.4" fill="#7a6a9c" />
-        </g>
       </>
     );
   }
+
 
   // Default / "plain" — parchment base with soft district blobs and a river.
   // Used by city.js, and a reasonable fallback for any new map that hasn't

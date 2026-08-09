@@ -141,8 +141,12 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
               // visually swallow a thinner parallel line at the old spread).
               const spread = 2.8;
               const offset = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
-              const cx = mx + nx * offset;
-              const cy = my + ny * offset;
+              // Same manualCurveOffsets support as GameBoard.jsx -- see
+              // that file for the full reasoning.
+              const manualOffset = map.manualCurveOffsets && map.manualCurveOffsets[key];
+              const finalOffset = manualOffset != null ? manualOffset : offset;
+              const cx = mx + nx * finalOffset;
+              const cy = my + ny * finalOffset;
               return (
                 <path
                   key={i}

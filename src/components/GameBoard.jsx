@@ -72,7 +72,18 @@ function timerBarColor(fraction) {
 // sides/bottom only because that's where the real (now-resolved)
 // problem was; sides/bottom get virtually nothing since checked
 // overflow there was zero.
-const EDGE_MARGIN_TOP = 6;
+//
+// This top margin is a BENGALURU-SPECIFIC fix (Airport's negative
+// y-coordinate is unique to that map's data) -- applying it globally to
+// every map wastes space on maps that don't have this problem. City of
+// Sendhwa's coordinates were shifted into a clean 0-based viewBox from
+// the start (verified: no station sits near the edge), so it doesn't
+// need this margin at all. EDGE_MARGIN_TOP_BY_MAP looks up the correct
+// value per map id, falling back to the original 6 for any map not
+// explicitly listed (safe default, matches the original global
+// behavior for Bengaluru/Westeros).
+const EDGE_MARGIN_TOP_BY_MAP = { "city-of-sendhwa": 0.5 };
+const EDGE_MARGIN_TOP_DEFAULT = 6;
 const EDGE_MARGIN_OTHER = 0.5;
 
 // TICKET_DISPLAY_ORDER: explicit taxi -> bus -> underground -> black ->
@@ -146,6 +157,7 @@ export default function GameBoard({
       : null;
   const collisionColor = capturingDetective ? capturingDetective.color : "#c0392b";
   const [zoom, setZoom] = useState(1);
+  const EDGE_MARGIN_TOP = EDGE_MARGIN_TOP_BY_MAP[map?.id] ?? EDGE_MARGIN_TOP_DEFAULT;
   const [pan, setPan] = useState({ x: -EDGE_MARGIN_OTHER, y: -EDGE_MARGIN_TOP });
   const [pendingMove, setPendingMove] = useState(null);
   const [exploreMode, setExploreMode] = useState(null); // null | "taxi" | "bus" | "underground" -- which mode's reachable stations to highlight
@@ -1131,8 +1143,21 @@ export default function GameBoard({
                 // tiers.
                 const spread = 2.8;
                 const offset = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
-                const cx = mx + nx * offset;
-                const cy = my + ny * offset;
+                // manualCurveOffsets: an optional per-map lookup for
+                // edges that need a deliberate stylistic curve (bowing
+                // away from a specific named third-party station, not
+                // just separating multiple parallel edges between the
+                // SAME two stations, which is what `offset` above
+                // already handles automatically). Keyed the same way as
+                // edgeGroups ("lowerId-higherId"). When present, this
+                // REPLACES the automatic offset for that edge rather
+                // than adding to it, since these are single edges (no
+                // parallel sibling to separate from) that just want a
+                // specific bow shape.
+                const manualOffset = map.manualCurveOffsets && map.manualCurveOffsets[key];
+                const finalOffset = manualOffset != null ? manualOffset : offset;
+                const cx = mx + nx * finalOffset;
+                const cy = my + ny * finalOffset;
                 // Underground/metro gets a small additional weight boost
                 // (0.5 vs the earlier 0.45) so it reads clearly even amid
                 // a dense taxi mesh, since it's the rarest/most important

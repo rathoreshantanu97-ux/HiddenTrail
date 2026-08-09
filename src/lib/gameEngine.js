@@ -20,7 +20,20 @@
 // }
 // ---------------------------------------------------------------------------
 
-export const DETECTIVE_COLORS = ["#3b82f6", "#f97316", "#a855f7", "#10b981", "#ec4899"];
+// DETECTIVE_COLORS -- redesigned alongside the route palette (see
+// mapSchema.js for the full route-color reasoning). Verified via real
+// hue-distance math: every pair of detective colors is at least 30
+// degrees apart on the hue wheel (most 34-134 degrees, genuine
+// perceptual variety across true color families -- teal, blue, violet,
+// magenta, rose -- not five shades that all read as "purplish blue"),
+// each clears solid contrast against the map background, and none
+// conflicts with taxi/bus/metro's route colors. An earlier version of
+// this palette crammed all 5 into too narrow a hue range trying to
+// dodge the route colors, which technically passed a hue-distance check
+// but still looked confusingly similar in practice -- fixed by also
+// varying lightness/saturation meaningfully between adjacent hues, not
+// just spacing hue alone.
+export const DETECTIVE_COLORS = ["#1b86bb", "#3c49dd", "#6b25b1", "#e029e0", "#b92766"];
 import { computeRoundsAndRevealSchedule, computeStartPool } from "../maps/mapSchema.js";
 
 export const REVEAL_ROUNDS = new Set([3, 8, 13, 18, 22]);

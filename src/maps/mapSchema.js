@@ -35,9 +35,27 @@
 // ---------------------------------------------------------------------------
 
 export const MODE_DEFAULT = {
-  taxi: { color: "#8a6412", label: "Taxi", short: "T" },
-  bus: { color: "#4e9c6d", label: "Bus", short: "B" },
-  underground: { color: "#c1443c", label: "Metro", short: "M" },
+  // Full palette redesign from first principles: background, water,
+  // parks, and all four route colors chosen together as one coherent
+  // set (not tuned independently over many sessions, which is what led
+  // here) -- verified via real contrast-ratio and hue-distance math,
+  // not eyeballed. Key properties confirmed: (1) every route color
+  // clears solid contrast against the new warm-parchment background
+  // (taxi 3.29:1, bus 3.11:1, metro 4.71:1); (2) taxi and metro sit
+  // ~38 degrees apart on the hue wheel (was only 22 degrees when taxi
+  // was a straight orange, genuinely risking confusion with metro's
+  // red) -- taxi was deliberately moved to a gold/amber family instead
+  // of orange for this reason, while still reading as clearly distinct
+  // from a plain "brown"; (3) taxi/bus/metro have distinct LUMINANCE
+  // values (0.20 / 0.214 / 0.125) as a colorblind-safe fallback, so
+  // they stay distinguishable even without reliable hue perception;
+  // (4) saturation was pushed as high as each hue's contrast budget
+  // allowed (85%/80%/80%) for a richer, more elegant look rather than
+  // muted/washed tones, while compensating with slightly lower
+  // lightness so contrast against the background didn't suffer.
+  taxi: { color: "#a0740d", label: "Taxi", short: "T" },
+  bus: { color: "#109347", label: "Bus", short: "B" },
+  underground: { color: "#c12115", label: "Metro", short: "M" },
   ferry: { color: "#1a1a1a", label: "Ferry", short: "F" },
   black: { color: "#2b2b2b", label: "Black", short: "X" },
 };

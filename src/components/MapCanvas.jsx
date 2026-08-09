@@ -32,8 +32,8 @@ export default function MapCanvas({ map, highlightStationId, onStationClick }) {
             <stop offset="100%" stopColor="#a7cede" />
           </linearGradient>
           <radialGradient id="lakeGrad" cx="50%" cy="40%" r="65%">
-            <stop offset="0%" stopColor="#bfe0ec" />
-            <stop offset="100%" stopColor="#9ccbdb" />
+            <stop offset="0%" stopColor="#7aa8c7" />
+            <stop offset="100%" stopColor="#5f93b8" />
           </radialGradient>
           <linearGradient id="seaGrad" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stopColor="#a8cbdb" />

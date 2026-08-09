@@ -81,18 +81,17 @@ export default function MapBackground({ map }) {
             drawn area. 10 units of overshoot is comfortably more than
             the current margin values (6 top, 0.5 other sides) need, so
             this stays correct even if those constants change later. */}
-        {/* Darkened further to #d6dad2 (from an earlier, too-subtle
-            #e2e6de) per explicit feedback that it still read as too
-            light. Paired with taxi's color ALSO being darkened further
-            (see MODE_DEFAULT in mapSchema.js) rather than darkening the
-            background alone -- computed the actual contrast ratio and
-            confirmed simply darkening the background alone would have
-            REDUCED contrast against taxi's mid-brightness color (the two
-            were converging toward each other); darkening both while
-            keeping them apart on the brightness scale actually improves
-            contrast (1.78 -> 2.0) while genuinely darkening the overall
-            background as asked. */}
-        <rect x="-10" y="-10" width="146" height="122" fill="#d6dad2" />
+        {/* Final palette redesign from first principles -- background,
+            water, and park colors chosen together as one coherent set,
+            alongside the route colors in mapSchema.js (see that file's
+            comment for the full reasoning: contrast math, hue-distance
+            checks between taxi/bus/metro, colorblind-safe luminance
+            separation, and saturation pushed as high as each contrast
+            budget allowed). Warm parchment background (#ece3d0) sits
+            reliably lighter than every other element on the map, so it
+            never competes for attention regardless of what's drawn on
+            top of it. */}
+        <rect x="-10" y="-10" width="146" height="122" fill="#ece3d0" />
 
         {/* Rural Lake -- station #86 @ (84.4, 8.85) */}
         <ellipse cx="84.4" cy="8.5" rx="4.5" ry="3" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(10 84.4 8.5)" />
@@ -102,32 +101,32 @@ export default function MapBackground({ map }) {
 
         {/* Lalbagh -- garden, station #36 @ (49.06, 61.87). Icon only --
             the station's own name label already handles the text. */}
-        <ellipse cx="49.06" cy="61.87" rx="5.5" ry="4" fill="#cfe3c4" opacity="0.85" />
+        <ellipse cx="49.06" cy="61.87" rx="5.5" ry="4" fill="#9dc48a" opacity="0.85" />
 
         {/* Nice Road Park -- station #55 @ (29.73, 92.16) */}
-        <ellipse cx="29.73" cy="92.16" rx="5" ry="3.6" fill="#cfe3c4" opacity="0.85" />
+        <ellipse cx="29.73" cy="92.16" rx="5" ry="3.6" fill="#9dc48a" opacity="0.85" />
 
         {/* State Forest -- station #77 @ (42.34, 16.71) -- denser green
             texture (small clustered dots) to read as "forest" rather
             than a manicured park/garden. */}
         <g opacity="0.8">
-          <ellipse cx="42.34" cy="16.71" rx="6" ry="4.5" fill="#b8d6a8" />
+          <ellipse cx="42.34" cy="16.71" rx="6" ry="4.5" fill="#8ab577" />
           {[[-3, -1.5], [-1, 1], [1.5, -1], [3, 1.5], [0, -2.5], [-2, 2]].map(([dx, dy], i) => (
-            <circle key={i} cx={42.34 + dx} cy={16.71 + dy} r="0.6" fill="#7fa868" />
+            <circle key={i} cx={42.34 + dx} cy={16.71 + dy} r="0.6" fill="#5c8a4a" />
           ))}
         </g>
 
         {/* Bamboo Forest -- station #84 @ (78.12, 11.49) -- same forest
             texture language as State Forest, distinct from garden ellipses. */}
         <g opacity="0.8">
-          <ellipse cx="78.12" cy="11.49" rx="5.5" ry="4" fill="#b8d6a8" />
+          <ellipse cx="78.12" cy="11.49" rx="5.5" ry="4" fill="#8ab577" />
           {[[-2.5, -1], [-0.8, 1.3], [1.5, -1.2], [2.8, 1]].map(([dx, dy], i) => (
-            <circle key={i} cx={78.12 + dx} cy={11.49 + dy} r="0.6" fill="#7fa868" />
+            <circle key={i} cx={78.12 + dx} cy={11.49 + dy} r="0.6" fill="#5c8a4a" />
           ))}
         </g>
 
         {/* Botanical Garden -- station #83 @ (101.41, 33.19) */}
-        <ellipse cx="101.41" cy="33.19" rx="5.5" ry="4" fill="#cfe3c4" opacity="0.85" />
+        <ellipse cx="101.41" cy="33.19" rx="5.5" ry="4" fill="#9dc48a" opacity="0.85" />
 
         {/* Vidhana Soudha -- real Indian legislative building, station
             #24 @ (48.59, 43.02). Domed-colonnade silhouette. Icon only. */}

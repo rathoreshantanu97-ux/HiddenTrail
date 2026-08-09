@@ -959,7 +959,7 @@ export default function GameBoard({
                 // ceiling even on extreme ultrawide monitors, where
                 // eliminating the gap entirely would need far more
                 // stretch than is visually acceptable.
-                const MAX_STRETCH_RATIO = 1.15; // effective ratio can widen up to 15% beyond the map's true ratio
+                const MAX_STRETCH_RATIO = 1.10; // effective ratio can widen up to 10% beyond the map's true ratio
                 const widthIfFullHeightTrueRatio = colH * trueRatio;
                 const stretchNeededToFillWidth = colW / widthIfFullHeightTrueRatio;
                 const appliedStretch = Math.min(stretchNeededToFillWidth, MAX_STRETCH_RATIO);

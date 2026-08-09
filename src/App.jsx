@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { MAPS } from "./maps/index.js";
+import { applyMapOverride } from "./lib/useMapWithOverrides.js";
 import { useLocalGameStore } from "./lib/localGameStore.js";
 import { useSupabaseGameStore } from "./lib/supabaseGameStore.js";
 import * as api from "./lib/supabaseApi.js";
@@ -112,6 +113,27 @@ export default function App({ account, onLogout }) {
     }
   }, [account]);
 
+  // Admin-set per-map overrides (ticket counts, detective density ratio,
+  // round scaling), fetched once here at the App level -- this is the
+  // actual fix for a real bug: overrides were correctly saved and
+  // correctly PREVIEWED in Landing/Setup screens (via useMapWithOverrides
+  // there), but every game-start code path below reads MAPS[id] directly,
+  // which is the raw un-overridden map from the static registry, so the
+  // override never reached real gameplay. getEffectiveMap(id) is what
+  // every gameplay-relevant MAPS[id] read gets replaced with.
+  const [mapOverrides, setMapOverrides] = useState({});
+  useEffect(() => {
+    auth
+      .getMapOverrides()
+      .then(setMapOverrides)
+      .catch((e) => console.error("Failed to fetch map overrides:", e));
+  }, []);
+  function getEffectiveMap(mapId) {
+    const raw = MAPS[mapId];
+    if (!raw) return raw;
+    return applyMapOverride(raw, mapOverrides[mapId]) || raw;
+  }
+
   // ---- Pass-and-play specific state ----
   const localStore = useLocalGameStore();
   const { showEndedScreen: ppShowEndedScreen } = useDelayedEndedTransition(localStore.match);
@@ -177,10 +199,10 @@ export default function App({ account, onLogout }) {
   const { showEndedScreen: mpShowEndedScreen } = useDelayedEndedTransition(supabaseStore.match);
   const { secondsRemaining: mpSecondsRemaining, turnTimerSeconds: mpTurnTimerSeconds } = useTurnTimer({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
-    map: MAPS[liveMapId],
+    map: getEffectiveMap(liveMapId),
     match: supabaseStore.match,
-    onDetectiveMove: (detId, to, mode) => supabaseStore.submitDetectiveMove(MAPS[liveMapId], detId, to, mode),
-    onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(MAPS[liveMapId], to, edgeMode, ticketUsed),
+    onDetectiveMove: (detId, to, mode) => supabaseStore.submitDetectiveMove(getEffectiveMap(liveMapId), detId, to, mode),
+    onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(getEffectiveMap(liveMapId), to, edgeMode, ticketUsed),
   });
 
   const [mpExploreMode, setMpExploreMode] = useState(null); // this client's own current route-explorer selection, reported up from GameBoard so it can be broadcast via Presence
@@ -492,7 +514,7 @@ export default function App({ account, onLogout }) {
   }
 
   async function handleStartMultiplayerGame() {
-    const map = MAPS[liveMapId];
+    const map = getEffectiveMap(liveMapId);
     await supabaseStore.startGame(map);
     // no need to persist a "stage" here anymore -- the next load of this
     // room will correctly show "playing" because useRoomStatus reads it
@@ -525,14 +547,14 @@ export default function App({ account, onLogout }) {
   // ---- Pass-and-play game flow ----
   function handleStartPassAndPlay({ mapId, numDetectives, roundScalingRatio }) {
     setPassAndPlayMapId(mapId);
-    const map = MAPS[mapId];
+    const map = getEffectiveMap(mapId);
     localStore.startGame(map, { mapId, numDetectives, roundScalingRatio });
   }
 
   useEffect(() => {
     if (appMode !== "passandplay" || !localStore.match) return;
     if (localStore.match.phase === "handoff") {
-      const map = MAPS[passAndPlayMapId];
+      const map = getEffectiveMap(passAndPlayMapId);
       const actor = currentActor(localStore.match);
       const label =
         actor === "mrx"
@@ -576,7 +598,7 @@ export default function App({ account, onLogout }) {
 
   if (appMode === "passandplay") {
     const match = localStore.match;
-    const map = MAPS[passAndPlayMapId];
+    const map = getEffectiveMap(passAndPlayMapId);
     const mrxName = () => map.mrxName || "Mr. X";
     const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
 
@@ -632,7 +654,7 @@ export default function App({ account, onLogout }) {
   }
 
   if (appMode === "multiplayer") {
-    const map = MAPS[mpMapId];
+    const map = getEffectiveMap(mpMapId);
     const mrxName = () => map.mrxName || "Mr. X";
     const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
 

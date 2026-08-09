@@ -891,7 +891,7 @@ export default function GameBoard({
                   );
                 })}
               </div>
-              {match.mrX.revealedPos && match.mrX.lastRevealRound === match.round && (
+              {match.mrX.revealedPos && match.mrX.lastRevealMove === match.mrX.travelLog.length && (
                 <div style={styles.travelLogReveal}>
                   Last confirmed sighting: {stationLabel(match.mrX.revealedPos)} (round {match.mrX.lastRevealRound})
                 </div>
@@ -1138,7 +1138,14 @@ export default function GameBoard({
                 // a dense taxi mesh, since it's the rarest/most important
                 // tier on the map.
                 const strokeW = mode === "underground" ? 0.5 : mode === "bus" ? 0.35 : mode === "ferry" ? 0.22 : 0.32;
-                const taxiFadeOpacity = zoom < 1.6 ? 0.35 : 0.85;
+                // Raised from 0.35 to 0.5 for the zoomed-out case --
+                // darkening the taxi line color alone (see MODE_DEFAULT
+                // in mapSchema.js) wouldn't meaningfully fix contrast if
+                // the line is still faded to a third of its opacity;
+                // 0.5 keeps taxi visually secondary to bus/metro (still
+                // below their 0.85) while being genuinely legible
+                // against the also-darkened background.
+                const taxiFadeOpacity = zoom < 1.6 ? 0.5 : 0.85;
                 const lineOpacity = mode === "taxi" ? taxiFadeOpacity : mode === "ferry" ? 0.4 : 0.85;
                 return (
                   <g key={`${key}-${mode}-${i}`}>
@@ -1180,7 +1187,13 @@ export default function GameBoard({
                 // remain visible on the map after the reveal round
                 // passes -- not even a subtle outline. Only the exact
                 // reveal round itself shows anything.
-                const isCurrentReveal = isLastKnown && match.mrX.lastRevealRound === match.round;
+                // Fixed to compare MOVE numbers, not round numbers -- see
+                // the long comment in gameEngine.js's mrX state (near
+                // lastRevealMove) for why: round number doesn't change
+                // between the two legs of a double-move, so this was
+                // incorrectly staying "currently revealed" through a
+                // second leg that did NOT actually reveal.
+                const isCurrentReveal = isLastKnown && match.mrX.lastRevealMove === match.mrX.travelLog.length;
                 const isExploreReachable = exploreReachable.has(numId);
                 const isPeekedReachable = peekedReachable.has(numId);
                 // Turn indicator: for a detective's turn, this is visible
@@ -1957,6 +1970,7 @@ export const styles = {
   allTicketsPanel: {
     width: "100%",
     maxWidth: 760,
+    boxSizing: "border-box",
     background: "#fff",
     borderRadius: 12,
     padding: "8px 14px",
@@ -2041,6 +2055,7 @@ export const styles = {
   travelLogPanel: {
     width: "100%",
     maxWidth: 760,
+    boxSizing: "border-box",
     background: "#fff",
     borderRadius: 12,
     padding: "10px 14px",

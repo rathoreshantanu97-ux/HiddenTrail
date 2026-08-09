@@ -35,7 +35,7 @@
 // ---------------------------------------------------------------------------
 
 export const MODE_DEFAULT = {
-  taxi: { color: "#c9971f", label: "Taxi", short: "T" },
+  taxi: { color: "#8a6412", label: "Taxi", short: "T" },
   bus: { color: "#4e9c6d", label: "Bus", short: "B" },
   underground: { color: "#c1443c", label: "Metro", short: "M" },
   ferry: { color: "#1a1a1a", label: "Ferry", short: "F" },
@@ -336,9 +336,25 @@ function enforceRealBoardProportions(detective, mrx) {
 // when total=22 (verified), and scales proportionally for any other
 // total.
 // ---------------------------------------------------------------------------
+// REVEAL_ROUND_FRACTIONS are expressed as fractions of the REAL BOARD'S
+// OWN TOTAL LOGBOOK SLOT COUNT (24 = 22 rounds + 2 double-move legs),
+// not its round count -- confirmed against the real board's actual
+// reveal moves (3, 8, 13, 18, 24) via multiple independent sources: the
+// 5th reveal genuinely lands on the very last possible logbook entry
+// (24 out of 24 total slots), not merely "the last round" (22). Scaling
+// against round count alone (the previous version of this constant) was
+// a subtle mismatch -- for a map like Bengaluru (24 rounds + 2 legs = 26
+// total slots), it put the last reveal at round 24 (the round count)
+// rather than move 26 (the actual last possible logbook entry), leaving
+// the final 2 moves -- exactly the double-move-leg buffer where a savvy
+// Mr.X is most likely to be making his last, most consequential
+// moves -- with no reveal coverage at all. Scaling against total slots
+// instead reproduces the real board's fidelity: reveals span the WHOLE
+// logbook, ending on its actual last entry, for any map's move count.
 const ROUNDS_CALIBRATION_BASELINE_AVG_DISTANCE = 3.483; // average of taxi/bus/underground averages across our 3 known-good maps
 const ROUNDS_CALIBRATION_ROUND_COUNT = 22;
-const REVEAL_ROUND_FRACTIONS = [3 / 22, 8 / 22, 13 / 22, 18 / 22, 22 / 22];
+const REAL_BOARD_TOTAL_LOGBOOK_SLOTS = 24; // 22 rounds + 2 double-move legs
+const REVEAL_ROUND_FRACTIONS = [3, 8, 13, 18, 24].map((m) => m / REAL_BOARD_TOTAL_LOGBOOK_SLOTS);
 
 export function computeRoundsAndRevealSchedule(graph, stationIds, roundScalingRatio = 1.0) {
   const overallAvg =
@@ -348,7 +364,11 @@ export function computeRoundsAndRevealSchedule(graph, stationIds, roundScalingRa
     3;
   const scale = (overallAvg / ROUNDS_CALIBRATION_BASELINE_AVG_DISTANCE) * roundScalingRatio;
   const totalRounds = Math.max(10, Math.round(ROUNDS_CALIBRATION_ROUND_COUNT * scale));
-  const revealRounds = REVEAL_ROUND_FRACTIONS.map((f) => Math.max(1, Math.round(f * totalRounds)));
+  // Total logbook slots (what reveal fractions actually scale against)
+  // is rounds + 2 double-move legs, mirroring the real board's own 22
+  // rounds + 2 legs = 24 slots relationship, for any map's round count.
+  const totalLogbookSlots = totalRounds + 2;
+  const revealRounds = REVEAL_ROUND_FRACTIONS.map((f) => Math.max(1, Math.round(f * totalLogbookSlots)));
   return { totalRounds, revealRounds };
 }
 

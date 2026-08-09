@@ -138,6 +138,19 @@ export function initMatch({ map, mapId, numDetectives, roundScalingRatio }) {
     tickets: { ...ticketCounts.mrx },
     revealedPos: null,
     lastRevealRound: 0,
+    // lastRevealMove: the MOVE NUMBER (fixed logbook slot, 1-26) the
+    // most recent reveal happened at -- added alongside lastRevealRound
+    // (kept for display text like "round 3") to fix a real desync bug:
+    // the UI's "is this currently showing as revealed" check compared
+    // lastRevealRound against the CURRENT ROUND, but round number
+    // doesn't change between the two legs of a double-move (both legs
+    // happen in the same round) -- so after a reveal on leg 1 of a
+    // double-move, the UI kept showing "currently revealed" through leg
+    // 2 as well, even though leg 2 genuinely did NOT reveal (confirmed
+    // by reproducing this exact scenario). Comparing move numbers
+    // instead of round numbers fixes it, since each leg has its own
+    // distinct move number even when they share a round.
+    lastRevealMove: 0,
     travelLog: [],
     positionLog: [{ round: 0, pos: mrxStart, mode: null }],
     doubleMoveActive: false,
@@ -297,6 +310,7 @@ export function applyMrXMove(map, match, to, edgeMode, ticketUsed) {
     tickets: { ...prevMrX.tickets, [spent]: prevMrX.tickets[spent] - 1 },
     revealedPos: isReveal ? to : prevMrX.revealedPos,
     lastRevealRound: isReveal ? match.round : prevMrX.lastRevealRound,
+    lastRevealMove: isReveal ? thisMoveNumber : prevMrX.lastRevealMove,
     travelLog: [...prevMrX.travelLog, { round: match.round, move: prevMrX.travelLog.length + 1, mode: loggedMode }],
     positionLog: [...prevMrX.positionLog, { round: match.round, pos: to, mode: loggedMode }],
     doubleMoveActive: continuingDouble,

@@ -197,6 +197,19 @@ export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName })
 const styles = {
   panel: {
     width: "100%",
+    // boxSizing:"border-box" (both here and added to travelLogPanel in
+    // GameBoard.jsx) is the real fix for a genuine width mismatch: with
+    // no global box-sizing reset in this project, "width:100%" on
+    // content-box (the default) sets only the CONTENT box to 100%, then
+    // any padding is added OUTWARD on top of that -- so two sibling
+    // panels both saying "width:100%" render at different actual outer
+    // widths whenever their padding differs (travelLogPanel has 10px
+    // 14px padding, this panel had none, so travelLogPanel was
+    // literally rendering 28px wider despite both claiming 100%).
+    // border-box makes "100%" mean the FULL outer box including
+    // padding, so both panels genuinely match now regardless of
+    // padding differences.
+    boxSizing: "border-box",
     display: "flex",
     flexDirection: "column",
     background: "#fff",

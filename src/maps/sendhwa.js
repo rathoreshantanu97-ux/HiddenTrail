@@ -406,7 +406,7 @@ const MINOR_LABEL_DIR_SENDHWA = {
 const TINY_LABEL_STATIONS_SENDHWA = new Set([13,20,23,38,8,12,15,17,19,21,22,25,28,30,31,33,34,36,44,46,47,48,64,65,68,69,72,76,82,92,94,96,100]);
 
 const MODE_SENDHWA = {
-  taxi: { color: "#c9971f", label: "Foot", short: "F" },
+  taxi: { color: "#8a6412", label: "Foot", short: "F" },
   bus: { color: "#4e9c6d", label: "Auto", short: "A" },
   underground: { color: "#c1443c", label: "Bike", short: "Bk" },
   ferry: { color: "#1a1a1a", label: "Secret Tunnel", short: "S" },

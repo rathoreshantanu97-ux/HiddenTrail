@@ -421,7 +421,7 @@ const MINOR_LABEL_DIR_BENGALURU = {
 };
 
 const MODE_BENGALURU = {
-  taxi: { color: "#c9971f", label: "Taxi", short: "T" },
+  taxi: { color: "#8a6412", label: "Taxi", short: "T" },
   bus: { color: "#4e9c6d", label: "Bus", short: "B" },
   underground: { color: "#c1443c", label: "Metro", short: "M" },
   ferry: { color: "#1a1a1a", label: "Secret Tunnel", short: "S" },

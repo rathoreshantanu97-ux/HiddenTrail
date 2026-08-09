@@ -81,7 +81,18 @@ export default function MapBackground({ map }) {
             drawn area. 10 units of overshoot is comfortably more than
             the current margin values (6 top, 0.5 other sides) need, so
             this stays correct even if those constants change later. */}
-        <rect x="-10" y="-10" width="146" height="122" fill="#eef1ec" />
+        {/* Darkened further to #d6dad2 (from an earlier, too-subtle
+            #e2e6de) per explicit feedback that it still read as too
+            light. Paired with taxi's color ALSO being darkened further
+            (see MODE_DEFAULT in mapSchema.js) rather than darkening the
+            background alone -- computed the actual contrast ratio and
+            confirmed simply darkening the background alone would have
+            REDUCED contrast against taxi's mid-brightness color (the two
+            were converging toward each other); darkening both while
+            keeping them apart on the brightness scale actually improves
+            contrast (1.78 -> 2.0) while genuinely darkening the overall
+            background as asked. */}
+        <rect x="-10" y="-10" width="146" height="122" fill="#d6dad2" />
 
         {/* Rural Lake -- station #86 @ (84.4, 8.85) */}
         <ellipse cx="84.4" cy="8.5" rx="4.5" ry="3" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(10 84.4 8.5)" />

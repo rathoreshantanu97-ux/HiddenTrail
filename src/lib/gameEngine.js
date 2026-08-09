@@ -34,7 +34,27 @@
 // blue while D3 is a deep, dark, more desaturated indigo-purple, so
 // they read as genuinely different KINDS of color, not just two points
 // on a hue wheel that happen to be far enough apart on paper.
-export const DETECTIVE_COLORS = ["#1d99a5", "#2b72ee", "#40257e", "#e230e8", "#b1256b"];
+// DETECTIVE_COLORS -- expanded to 6 and rebuilt around specific requests
+// (blue, orange, indigo, a dark rose-red, a magenta-pink, emerald),
+// verified against a key finding: earlier attempts had been treating
+// detective colors as needing 30+ degree hue separation from taxi/bus/
+// metro's ROUTE colors, the same constraint route colors need from each
+// other -- but that's not actually the right comparison. A detective
+// token renders as a large filled circle with a white ring and drop
+// shadow (see the circle rendering in GameBoard.jsx), not a thin line,
+// so it doesn't visually compete with route lines the way two route
+// lines would compete with each other -- confirmed this let genuinely
+// good colors like real orange and dark red back into consideration,
+// which had been wrongly excluded earlier for conflicting with taxi/
+// metro's hues despite that conflict not actually mattering in
+// practice. The real constraint that DOES matter is detective-vs-
+// detective distinction (all 6 pairs stay at least ~22 degrees apart,
+// and the one closest pair -- rose-red vs magenta-pink, deliberately a
+// dark/light pairing in the same family per request -- has a large
+// lightness gap as a second, independent distinguishing signal) and
+// solid contrast against the map background (every color here clears
+// 3.6:1 or better).
+export const DETECTIVE_COLORS = ["#196ee6", "#c76005", "#402593", "#881121", "#e2368c", "#1d8763"];
 import { computeRoundsAndRevealSchedule, computeStartPool } from "../maps/mapSchema.js";
 
 export const REVEAL_ROUNDS = new Set([3, 8, 13, 18, 22]);

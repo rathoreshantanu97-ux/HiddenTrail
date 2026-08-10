@@ -12,7 +12,7 @@ import {
   occupiedByDetective,
   formatLogEntry,
 } from "../lib/gameEngine.js";
-import { curvePathD } from "../lib/curveGeometry.js";
+import { curvePathD, autoParallelOffset } from "../lib/curveGeometry.js";
 import DecorationsLayer from "./DecorationsLayer.jsx";
 
 // ---------------------------------------------------------------------------
@@ -1107,49 +1107,16 @@ export default function GameBoard({
                 const [ax, ay] = map.stations[a];
                 const [bx, by] = map.stations[b];
                 const key = a < b ? `${a}-${b}` : `${b}-${a}`;
-                const group = map.edgeGroups[key] || [mode];
-                const slot = group.indexOf(mode);
-                const total = group.length;
-                const mx = (ax + bx) / 2;
-                const my = (ay + by) / 2;
-                // IMPORTANT: compute the perpendicular normal from a FIXED
-                // reference direction (lower station id -> higher station
-                // id), not from (a,b) as listed in this specific edge
-                // tuple. Two parallel edges between the same pair of
-                // stations don't always list their endpoints in the same
-                // order in the raw data (e.g. [32,40,"underground"] but
-                // [40,32,"bus"] -- this happened organically since edges
-                // were added across many separate visual-editor sessions,
-                // sometimes clicking the two stations in a different
-                // order). If direction were taken from each edge's own
-                // (a,b), the normal flips sign between the two edges, and
-                // an opposite-signed offset lands at the exact SAME
-                // physical point instead of the intended mirror-image
-                // point -- so two "parallel" curves collapse onto each
-                // other and one completely hides the other. Confirmed:
-                // this was happening for real between Majestic and JP
-                // Nagar's underground+bus pair, not just a theoretical
-                // edge case.
-                const [refX0, refY0] = a < b ? [ax, ay] : [bx, by];
-                const [refX1, refY1] = a < b ? [bx, by] : [ax, ay];
-                const dx = refX1 - refX0,
-                  dy = refY1 - refY0;
-                const len = Math.sqrt(dx * dx + dy * dy) || 1;
-                const nx = -dy / len,
-                  ny = dx / len;
-                // Spread widened from 1.6 to 2.8: with the wider casing on
-                // underground (strokeW 0.5+0.35=0.85) added to another
-                // tier's own casing, a 1.6 total spread wasn't enough
-                // separation at the midpoint of a typical edge -- the
-                // thicker line's white casing could still visually swallow
-                // a thinner parallel line sitting only ~0.8 units away
-                // (confirmed: this was actually happening for the
-                // Majestic<->JP Nagar bus+underground pair, not just a
-                // theoretical risk). 2.8 keeps enough clearance even
-                // between the widest (underground) and thinnest (ferry)
-                // tiers.
-                const spread = 2.8;
-                const offset = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
+                // autoParallelOffset (curveGeometry.js) is the single
+                // source of truth for this -- it also corrects for the
+                // real bug the old inline nx/ny "reference direction"
+                // computation here was meant to fix but never actually
+                // applied (see that function's comment): parallel edges
+                // whose (a,b) order differs between tuples were landing on
+                // the SAME side instead of opposite sides and completely
+                // hiding one another, confirmed for real for Majestic<->JP
+                // Nagar and other pairs.
+                const offset = autoParallelOffset(a, b, mode, map.edgeGroups);
                 // manualCurveOffsets: an optional per-map lookup for
                 // edges that need a deliberate stylistic curve (bowing
                 // away from a specific named third-party station, not

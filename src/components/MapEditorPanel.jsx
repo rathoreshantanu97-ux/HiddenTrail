@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { MAP_LIST } from "../maps/index.js";
 import * as auth from "../lib/accessControlApi.js";
 import { applyMapOverride } from "../lib/useMapWithOverrides.js";
-import { curvePathD, curveControlPoints, sampleCurvePoints, normalizeCurveOffsets } from "../lib/curveGeometry.js";
+import { curvePathD, curveControlPoints, sampleCurvePoints, normalizeCurveOffsets, autoParallelOffset } from "../lib/curveGeometry.js";
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
 import DecorationsLayer, { DecorationItem } from "./DecorationsLayer.jsx";
@@ -698,7 +698,21 @@ export default function MapEditorPanel({ accountId, onBack }) {
                 </g>
               )}
 
-              {displayMap.edges.map(([a, b, mode], i) => {
+              {displayMap.edges
+                // Same draw-order fix as GameBoard.jsx/ReplayView.jsx: taxi
+                // first, then bus, underground, ferry -- otherwise a rarer,
+                // more important line (e.g. underground/metro) that happens
+                // to be listed early in the raw edge data gets visually
+                // buried under a later-drawn taxi/bus line's white casing,
+                // even though it's technically still rendering. Without
+                // this the editor's canvas doesn't match what players
+                // actually see.
+                .map((edge, i) => [edge, i])
+                .sort(([[, , modeA]], [[, , modeB]]) => {
+                  const order = { taxi: 0, bus: 1, underground: 2, ferry: 3 };
+                  return (order[modeA] ?? 0) - (order[modeB] ?? 0);
+                })
+                .map(([[a, b, mode], i]) => {
                 const key = `${a}-${b}-${mode}-${i}`;
                 const gKey = edgeKey(a, b);
                 const group = displayMap.edgeGroups?.[gKey] || [mode];
@@ -707,7 +721,18 @@ export default function MapEditorPanel({ accountId, onBack }) {
                 const offsets = normalizeCurveOffsets(manualOffset) || [0];
                 const [ax, ay] = displayMap.stations[a];
                 const [bx, by] = displayMap.stations[b];
-                const pathD = curvePathD(ax, ay, bx, by, manualOffset != null ? manualOffset : 0);
+                // autoParallelOffset (curveGeometry.js) is the single
+                // source of truth for automatic parallel-edge separation,
+                // shared with GameBoard.jsx/ReplayView.jsx, so the editor
+                // preview matches what players actually see instead of
+                // drawing every parallel edge directly on top of the
+                // others -- which is what was making routes like
+                // Majestic<->Yeshwanthpur's metro line invisible (it
+                // wasn't missing, just completely covered by another
+                // mode's line drawn at the exact same path).
+                const autoOffset = autoParallelOffset(a, b, mode, displayMap.edgeGroups);
+                const finalOffset = manualOffset != null ? manualOffset : autoOffset;
+                const pathD = curvePathD(ax, ay, bx, by, finalOffset);
                 const modeInfo = activeMode[mode] || MODE_DEFAULT.taxi;
                 const isEdgeSelected = selectedEdge === gKey;
                 const isEdgeHovered = hoveredEdge === gKey && !isEdgeSelected;

@@ -55,6 +55,47 @@ export function curveControlPoints(ax, ay, bx, by, rawOffsets) {
   });
 }
 
+// Automatic perpendicular separation for a multi-mode "parallel edge"
+// group (e.g. an underground line and a bus line both connecting the same
+// two stations) -- spreads each mode evenly onto its own side of the
+// straight baseline, purely from edgeGroups, with NO manual data needed.
+//
+// This is the single source of truth for that offset, used identically by
+// GameBoard.jsx, ReplayView.jsx, and MapEditorPanel.jsx -- previously each
+// of the first two had its own inline copy of this math (and MapEditorPanel
+// had none at all), and BOTH inline copies had a real, live bug: they
+// computed a "reference direction" normal (nx/ny, from the canonical
+// lower-id -> higher-id direction) specifically to guard against this
+// exact problem, but never actually applied it to the returned offset --
+// dead code that looked like a fix but wasn't wired through.
+//
+// The actual bug it was meant to prevent: curvePathD/curveControlPoints
+// compute their perpendicular from THIS edge's own (a, b) order as passed
+// in, but `slot` (this mode's position within the group) is assigned from
+// a canonical "lower-higher" key that's independent of that order. Two
+// parallel edges between the same station pair don't always list their
+// endpoints in the same order in the raw map data (this happens
+// organically -- edges get added across many separate editing sessions,
+// sometimes clicking the two stations in a different order each time).
+// When their orders differ, their perpendiculars point in OPPOSITE
+// directions, so applying the same signed offset to both lands them on
+// the SAME side instead of opposite sides -- they collapse onto the exact
+// same path, and whichever is drawn later completely covers the other.
+// Confirmed for real in bengaluru.js/cityOfSendhwa.js: Majestic<->JP Nagar
+// (underground+bus), Majestic<->Yeshwanthpur (underground's line vanishing
+// under the later-drawn bus line), and 4 other pairs -- see the direction
+// flip below, which is the actual fix.
+export function autoParallelOffset(a, b, mode, edgeGroups) {
+  const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+  const group = (edgeGroups && edgeGroups[key]) || [mode];
+  const slot = group.indexOf(mode);
+  const total = group.length;
+  const spread = 2.8;
+  const raw = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
+  const directionSign = a < b ? 1 : -1;
+  return raw * directionSign;
+}
+
 // The actual SVG path `d` attribute for this edge.
 export function curvePathD(ax, ay, bx, by, rawOffsets) {
   const offsets = normalizeCurveOffsets(rawOffsets);

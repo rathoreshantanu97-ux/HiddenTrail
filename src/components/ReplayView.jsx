@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { buildReplayTimeline } from "../lib/gameEngine.js";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
-import { curvePathD } from "../lib/curveGeometry.js";
+import { curvePathD, autoParallelOffset } from "../lib/curveGeometry.js";
 import DecorationsLayer from "./DecorationsLayer.jsx";
 
 // Label-placement helpers, matching GameBoard.jsx exactly, so a station's
@@ -121,29 +121,14 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
               // is meant to show the exact map players saw during the
               // game, not a simplified version, so this needed to match.
               const key = a < b ? `${a}-${b}` : `${b}-${a}`;
-              const group = map.edgeGroups[key] || [mode];
-              const slot = group.indexOf(mode);
-              const total = group.length;
-              const mx = (ax + bx) / 2;
-              const my = (ay + by) / 2;
-              // Compute the perpendicular normal from a FIXED reference
-              // direction (lower station id -> higher station id), matching
-              // GameBoard.jsx's fix -- see that file for why this matters
-              // (using each edge's own (a,b) order let two parallel edges'
-              // offsets cancel out and land on the exact same point instead
-              // of mirroring apart, when their raw endpoint order differed).
-              const [refX0, refY0] = a < b ? [ax, ay] : [bx, by];
-              const [refX1, refY1] = a < b ? [bx, by] : [ax, ay];
-              const dx = refX1 - refX0,
-                dy = refY1 - refY0;
-              const len = Math.sqrt(dx * dx + dy * dy) || 1;
-              const nx = -dy / len,
-                ny = dx / len;
-              // Widened from 1.6 to 2.8, matching GameBoard.jsx's fix --
-              // see that file for why (a thicker tier's casing could
-              // visually swallow a thinner parallel line at the old spread).
-              const spread = 2.8;
-              const offset = total > 1 ? (slot - (total - 1) / 2) * spread : 0;
+              // autoParallelOffset (curveGeometry.js) is the single source
+              // of truth for this, shared with GameBoard.jsx -- it also
+              // fixes a real bug the old inline nx/ny "reference direction"
+              // computation here was meant to prevent but never actually
+              // applied: parallel edges whose (a,b) order differs between
+              // tuples were landing on the SAME side instead of mirroring
+              // apart, so one completely hid the other.
+              const offset = autoParallelOffset(a, b, mode, map.edgeGroups);
               // Same manualCurveOffsets support as GameBoard.jsx -- see
               // that file for the full reasoning.
               const manualOffset = map.manualCurveOffsets && map.manualCurveOffsets[key];

@@ -381,6 +381,30 @@ const MANUAL_CURVE_OFFSETS_CITY_OF_SENDHWA = {
   "1-69": -13.4,
 };
 
+// DECORATIONS_CITY_OF_SENDHWA — converted from the hand-coded landmark art
+// that used to be baked directly into MapBackground.jsx's
+// "city-of-sendhwa" branch (lake, 3 school icons, bus icon, police icon,
+// fort icon). Same x/y coordinates as the original inline SVG. The fort's
+// dashed boundary rectangle is DELIBERATELY left as fixed hardcoded art in
+// MapBackground.jsx rather than converted -- see the comment left in that
+// file for why (the "shape" decoration type has no dashed-stroke option).
+const DECORATIONS_CITY_OF_SENDHWA = [
+  // Lake near Chhota GhatyaPatya -- station #80.
+  { id: "sendhwa_lake", type: "icon", icon: "water", x: 42.65, y: 11.6, size: 11, color: "#6a9dc0", opacity: 0.9 },
+  // School icon near New Lions -- station #3.
+  { id: "sendhwa_school_new_lions", type: "icon", icon: "school", x: 20.16, y: 66.8, size: 6, color: "#4a5a7a" },
+  // School icon near Sendhwa Public School -- station #76.
+  { id: "sendhwa_school_public", type: "icon", icon: "school", x: 61.07, y: 12.84, size: 6, color: "#4a5a7a" },
+  // School icon near Raghuwansh Public School -- station #35.
+  { id: "sendhwa_school_raghuwansh", type: "icon", icon: "school", x: 77.04, y: 90.64, size: 6, color: "#4a5a7a" },
+  // Bus icon near New Bus Stand -- station #10.
+  { id: "sendhwa_bus_stand", type: "icon", icon: "bus", x: 135.94, y: 55.0, size: 8, color: "#3a6b8a" },
+  // Police icon near Police Thana -- station #34.
+  { id: "sendhwa_police_thana", type: "icon", icon: "police", x: 109.4, y: 65.6, size: 7, color: "#2f4a7a" },
+  // Fort icon -- crenellated tower silhouette above the fort boundary.
+  { id: "sendhwa_fort", type: "icon", icon: "fort", x: 114.5, y: 23, size: 8, color: "#a8926a" },
+];
+
 export const cityOfSendhwaMap = {
   id: "city-of-sendhwa",
   label: "City of Sendhwa",
@@ -397,6 +421,7 @@ export const cityOfSendhwaMap = {
   viewW: 172,
   viewH: 116,
   background: { kind: "citymap", theme: "city-of-sendhwa" },
+  decorations: DECORATIONS_CITY_OF_SENDHWA,
   characterNames: null,
   mrxName: null,
 };

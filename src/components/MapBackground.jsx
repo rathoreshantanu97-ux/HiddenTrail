@@ -121,123 +121,22 @@ export default function MapBackground({ map }) {
             taxi's opacity to 0.85, effective contrast is now ~2.97:1. */}
         <rect x="-10" y="-10" width="146" height="122" fill={overrideFill || "#f6f1e5"} />
 
-        {/* Rural Lake -- station #86 @ (84.4, 8.85) */}
-        <ellipse cx="84.4" cy="8.5" rx="4.5" ry="3" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(10 84.4 8.5)" />
-
-        {/* Small Lake -- station #87 @ (68.75, 6.25) */}
-        <ellipse cx="68.75" cy="5.8" rx="3.5" ry="2.4" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(-8 68.75 5.8)" />
-
-        {/* Lalbagh -- garden, station #36 @ (49.06, 61.87). Icon only --
-            the station's own name label already handles the text. */}
-        <ellipse cx="49.06" cy="61.87" rx="5.5" ry="4" fill="#9dc48a" opacity="0.85" />
-
-        {/* Nice Road Park -- station #55 @ (29.73, 92.16) */}
-        <ellipse cx="29.73" cy="92.16" rx="5" ry="3.6" fill="#9dc48a" opacity="0.85" />
-
-        {/* State Forest -- station #77 @ (42.34, 16.71) -- denser green
-            texture (small clustered dots) to read as "forest" rather
-            than a manicured park/garden. */}
-        <g opacity="0.8">
-          <ellipse cx="42.34" cy="16.71" rx="6" ry="4.5" fill="#8ab577" />
-          {[[-3, -1.5], [-1, 1], [1.5, -1], [3, 1.5], [0, -2.5], [-2, 2]].map(([dx, dy], i) => (
-            <circle key={i} cx={42.34 + dx} cy={16.71 + dy} r="0.6" fill="#5c8a4a" />
-          ))}
-        </g>
-
-        {/* Bamboo Forest -- station #84 @ (78.12, 11.49) -- same forest
-            texture language as State Forest, distinct from garden ellipses. */}
-        <g opacity="0.8">
-          <ellipse cx="78.12" cy="11.49" rx="5.5" ry="4" fill="#8ab577" />
-          {[[-2.5, -1], [-0.8, 1.3], [1.5, -1.2], [2.8, 1]].map(([dx, dy], i) => (
-            <circle key={i} cx={78.12 + dx} cy={11.49 + dy} r="0.6" fill="#5c8a4a" />
-          ))}
-        </g>
-
-        {/* Botanical Garden -- station #83 @ (101.41, 33.19) */}
-        <ellipse cx="101.41" cy="33.19" rx="5.5" ry="4" fill="#9dc48a" opacity="0.85" />
-
-        {/* Vidhana Soudha -- real Indian legislative building, station
-            #24 @ (48.59, 43.02). Domed-colonnade silhouette. Icon only. */}
-        <g transform="translate(48.59, 40.5)">
-          <rect x="-3" y="0" width="6" height="1.8" fill="#c9b98a" />
-          <rect x="-3.4" y="1.6" width="6.8" height="0.5" fill="#a8926a" />
-          {[-2.4, -1.2, 0, 1.2, 2.4].map((dx, i) => (
-            <rect key={i} x={dx - 0.15} y={-0.4} width="0.3" height="1.4" fill="#8a7550" />
-          ))}
-          <circle cx="0" cy="-1.1" r="1.1" fill="#c9b98a" />
-          <circle cx="0" cy="-2.0" r="0.25" fill="#8a7550" />
-        </g>
-
-        {/* Bengaluru Palace -- Tudor-style crenellated silhouette,
-            station #25 @ (55.26, 34.3). Icon only. */}
-        <g transform="translate(55.26, 32)">
-          <rect x="-2.6" y="0" width="5.2" height="1.8" fill="#d8b98a" />
-          {[-2.2, -1.1, 0, 1.1, 2.2].map((dx, i) => (
-            <rect key={i} x={dx - 0.35} y={-0.7} width="0.7" height="0.9" fill="#d8b98a" />
-          ))}
-          <rect x="-0.9" y="-1.8" width="1.8" height="2.7" fill="#c2a476" />
-          <polygon points="0,-3 -1,-1.8 1,-1.8" fill="#8a6d3a" />
-        </g>
-
-        {/* Kempegowda International Airport -- station #1 @ (65.74, -1.19),
-            genuine northernmost point on the map. Airplane silhouette,
-            icon only. */}
-        <g transform="translate(65.74, -3.6) rotate(-30)">
-          <path d="M 0 -2.2 L 0.5 1.5 L 2.8 2.8 L 2.8 3.5 L 0.4 2.8 L 0.55 4.3 L 1.5 5 L 1.5 5.6 L 0 5.1 L -1.5 5.6 L -1.5 5 L -0.55 4.3 L -0.4 2.8 L -2.8 3.5 L -2.8 2.8 L -0.5 1.5 Z"
-                fill="#5c6066" />
-        </g>
-
-        {/* IISc -- academic institution, station #69 @ (46.46, 27.8).
-            Graduation-cap/mortarboard silhouette. Icon only. */}
-        <g transform="translate(46.46, 25.5)">
-          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
-          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
-          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
-        </g>
-
-        {/* IIM Bangalore -- same academic-institution language as IISc,
-            station #41 @ (62.65, 84.29). Icon only. */}
-        <g transform="translate(62.65, 81.9)">
-          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
-          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
-          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
-        </g>
-
-        {/* Christ University -- station #70 @ (18.39, 30.03) [repositioned
-            during layout adjustments -- icon kept in sync with the
-            station's actual current coordinates]. Same academic
-            mortarboard language, groups all three institutes visually.
-            Icon only. */}
-        <g transform="translate(18.39, 27.7)">
-          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
-          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
-          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
-        </g>
-
-        {/* IKEA Nagasandra -- retail/storefront icon, station #30 @
-            (16.23, 19.84). Icon only. */}
-        <g transform="translate(16.23, 17.6)">
-          <rect x="-2.4" y="-0.2" width="4.8" height="2.4" fill="#2a5fa5" />
-          <polygon points="-2.7,-0.2 0,-1.8 2.7,-0.2" fill="#1f4a85" />
-          <rect x="-0.9" y="0.4" width="1.8" height="1.2" fill="#ffcc33" />
-        </g>
-
-        {/* Phoenix Mall -- station #8 @ (99, 39.21). Same retail-box
-            language as IKEA, distinct color so the two don't read as
-            the same store. Icon only. */}
-        <g transform="translate(99, 36.8)">
-          <rect x="-2.4" y="-0.2" width="4.8" height="2.4" fill="#a5522a" />
-          <polygon points="-2.7,-0.2 0,-1.8 2.7,-0.2" fill="#853f1f" />
-          <rect x="-0.9" y="0.4" width="1.8" height="1.2" fill="#ffcc33" />
-        </g>
-
-        {/* Manyata Tech Park -- office/tech campus, station #81 @
-            (67.05, 19.4). Simplified glass-tower cluster. Icon only. */}
-        <g transform="translate(67.05, 17.1)">
-          <rect x="-2.2" y="-1.5" width="1.4" height="3.5" fill="#6b8caf" />
-          <rect x="-0.6" y="-2.3" width="1.4" height="4.3" fill="#547599" />
-          <rect x="1" y="-1" width="1.4" height="3" fill="#6b8caf" />
-        </g>
+        {/* Rural Lake, Small Lake, Lalbagh, Nice Road Park, State Forest,
+            Bamboo Forest, Botanical Garden, Vidhana Soudha, Bengaluru
+            Palace, Kempegowda International Airport, IISc, IIM
+            Bangalore, Christ University, IKEA Nagasandra, Phoenix Mall,
+            and Manyata Tech Park all used to be hand-coded inline SVG
+            here. Converted to ordinary entries in this map's
+            `decorations` array (see bengaluru.js's DECORATIONS_BENGALURU
+            and DecorationsLayer.jsx) so an admin can select/move/resize/
+            recolor/delete each one via the Map Editor, instead of them
+            being permanently fixed, non-editable art -- this was the
+            actual reported complaint ("the overlay and images that are
+            already there on map... are not editable right now"). They
+            still render here exactly as before, just via the shared
+            DecorationsLayer component (see GameBoard.jsx/ReplayView.jsx/
+            MapEditorPanel.jsx, all of which paint decorations directly
+            after this background). */}
       </>
     );
   }
@@ -259,55 +158,23 @@ export default function MapBackground({ map }) {
       <>
         <rect x="-2" y="-2" width={w + 4} height={h + 4} fill={overrideFill || "#f6f1e5"} />
 
-        {/* Lake near Chhota GhatyaPatya -- station #80 @ (42.65, 11.6) */}
-        <ellipse cx="42.65" cy="11.6" rx="5.5" ry="3.8" fill="url(#lakeGrad)" opacity="0.9" />
+        {/* Lake, the 3 school icons, the bus icon, the police icon, and
+            the fort tower icon all used to be hand-coded inline SVG
+            here. Converted to ordinary entries in this map's
+            `decorations` array (see cityOfSendhwa.js's
+            DECORATIONS_CITY_OF_SENDHWA and DecorationsLayer.jsx) so an
+            admin can select/move/resize/recolor/delete each one via the
+            Map Editor, instead of them being permanently fixed,
+            non-editable art. They still render exactly as before, just
+            via the shared DecorationsLayer component. */}
 
-        {/* School icon (mortarboard) near New Lions -- station #3 @
-            (20.16, 69.47). Icon only -- the station's own name label
-            already handles the text. */}
-        <g transform="translate(20.16, 66.8)">
-          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
-          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
-          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
-        </g>
-
-        {/* School icon near Sendhwa Public School -- station #76 @
-            (61.07, 15.51) */}
-        <g transform="translate(61.07, 12.84)">
-          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
-          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
-          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
-        </g>
-
-        {/* School icon near Raghuwansh Public School -- station #35 @
-            (77.04, 93.31) */}
-        <g transform="translate(77.04, 90.64)">
-          <polygon points="0,-1.3 3,0 0,1.3 -3,0" fill="#4a5a7a" />
-          <rect x="-0.25" y="0" width="0.5" height="2.2" fill="#4a5a7a" />
-          <circle cx="0" cy="2.3" r="0.35" fill="#4a5a7a" />
-        </g>
-
-        {/* Bus icon near New Bus Stand -- station #10 @ (135.94, 58.4).
-            A simple bus silhouette (body + windows + wheels), distinct
-            from the school/civic icon language used elsewhere. */}
-        <g transform="translate(135.94, 55.0)">
-          <rect x="-2.6" y="-1.2" width="5.2" height="2.4" rx="0.4" fill="#3a6b8a" />
-          <rect x="-2.1" y="-0.8" width="1.1" height="1" fill="#bcd6e6" />
-          <rect x="-0.55" y="-0.8" width="1.1" height="1" fill="#bcd6e6" />
-          <rect x="1" y="-0.8" width="1.1" height="1" fill="#bcd6e6" />
-          <circle cx="-1.6" cy="1.3" r="0.5" fill="#2a2a2a" />
-          <circle cx="1.6" cy="1.3" r="0.5" fill="#2a2a2a" />
-        </g>
-
-        {/* Police icon near Police Thana -- station #34 @ (109.4,
-            68.41). A simple shield shape, standard civic/police
-            language. */}
-        <g transform="translate(109.4, 65.6)">
-          <path d="M 0,-2 L 2,-1.2 L 2,0.8 Q 2,2.2 0,3 Q -2,2.2 -2,0.8 L -2,-1.2 Z" fill="#2f4a7a" />
-          <path d="M 0,-1.3 L 1.3,-0.75 L 1.3,0.7 Q 1.3,1.6 0,2.2 Q -1.3,1.6 -1.3,0.7 L -1.3,-0.75 Z" fill="#4a6fa8" />
-        </g>
-
-        {/* Fort boundary -- a rectangle enclosing the cluster of stations
+        {/* Fort boundary -- DELIBERATELY left as fixed, non-editable art
+            (not converted to a decoration) because DecorationsLayer's
+            "shape" rect type has no dashed-stroke option (no
+            strokeDasharray field -- see DecorationItem in
+            DecorationsLayer.jsx), so converting it would lose its
+            dashed appearance, the one thing that visually distinguishes
+            it as a boundary rather than a solid box. A rectangle enclosing the cluster of stations
             that together represent the fort area (23, 58, 59, 57, 41,
             54, 13, 52). Bounding box of those stations' real
             coordinates is x:[98.36,130.94] y:[32.16,58.92] -- padded out
@@ -325,17 +192,10 @@ export default function MapBackground({ map }) {
           strokeDasharray="2,1.2"
           opacity="0.7"
         />
-        {/* Fort icon -- crenellated tower silhouette, placed just above
-            the boundary rectangle's top edge so it doesn't overlap any
-            station inside it. */}
-        <g transform="translate(114.5, 23)">
-          <rect x="-3" y="0" width="6" height="2.2" fill="#a8926a" />
-          {[-2.4, -1, 0.4, 1.8].map((dx, i) => (
-            <rect key={i} x={dx} y={-0.8} width="0.9" height="1" fill="#a8926a" />
-          ))}
-          <rect x="-4" y="1.8" width="8" height="0.6" fill="#8a7550" />
-          <polygon points="0,-2.2 -1.2,-0.8 1.2,-0.8" fill="#6b5636" />
-        </g>
+        {/* Fort icon (crenellated tower silhouette, previously hand-coded
+            just above the boundary rectangle's top edge) is now
+            "sendhwa_fort" in DECORATIONS_CITY_OF_SENDHWA -- see the
+            conversion note above. */}
       </>
     );
   }

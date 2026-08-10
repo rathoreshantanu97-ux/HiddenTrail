@@ -118,7 +118,15 @@ export default function MapEditorPanel({ accountId, onBack }) {
       setSavedOverride(existing);
       setCurveDraft(existing?.curveOffsetOverrides || {});
       setStationDraft(existing?.stationOverrides || {});
-      setDecorationDraft(existing?.decorations || []);
+      // Seed the draft with whatever's ACTUALLY in effect right now: the
+      // admin's saved override if one exists, otherwise the map's own
+      // built-in default decorations (rawMap.decorations -- landmarks like
+      // the lake/airport/parks are ordinary defaults now, not separate
+      // fixed art). Without this fallback the editor's canvas would show
+      // ZERO decorations on first load even though players see the full
+      // set, and hitting Save for an unrelated reason (e.g. nudging a
+      // curve) would wipe every default landmark for all players.
+      setDecorationDraft(existing?.decorations ?? rawMap?.decorations ?? []);
       setBackgroundDraft(existing?.backgroundOverrideColor || null);
     } catch (e) {
       setErr(e.message);
@@ -404,7 +412,14 @@ export default function MapEditorPanel({ accountId, onBack }) {
     try {
       const curvesToSave = Object.keys(curveDraft).length > 0 ? curveDraft : null;
       const stationsToSave = Object.keys(stationDraft).length > 0 ? stationDraft : null;
-      const decorationsToSave = decorationDraft.length > 0 ? decorationDraft : null;
+      // Only send decorations as an explicit override if the admin actually
+      // changed something this session. If untouched, keep sending whatever
+      // was already saved (null if there was no prior override) -- NOT the
+      // draft, which is seeded from the map's own defaults purely for
+      // preview purposes. Otherwise every save (even one that only moved a
+      // curve) would freeze the current defaults into the DB forever,
+      // silently ignoring any future code changes to the map's landmarks.
+      const decorationsToSave = decorationsChanged ? decorationDraft : (savedOverride?.decorations ?? null);
       await auth.setMapVisualOverrides({
         callerAccountId: accountId,
         mapId,
@@ -437,7 +452,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
       });
       setCurveDraft({});
       setStationDraft({});
-      setDecorationDraft([]);
+      setDecorationDraft(rawMap?.decorations ?? []); // reset means "back to the map's own defaults", not "zero decorations"
       setBackgroundDraft(null);
       setSelectedEdge(null);
       setSelectedDecorationId(null);
@@ -462,9 +477,13 @@ export default function MapEditorPanel({ accountId, onBack }) {
 
   const curveEditCount = Object.keys(curveDraft).length;
   const stationEditCount = Object.keys(stationDraft).length;
-  const savedDecorationsJSON = JSON.stringify(savedOverride?.decorations || []);
+  // Baseline = whatever's actually in effect right now (saved override if
+  // one exists, else the map's own built-in defaults) -- NOT just "[]" --
+  // so simply loading the editor (draft seeded from defaults) doesn't
+  // read as an unsaved change.
+  const baselineDecorationsJSON = JSON.stringify(savedOverride?.decorations ?? rawMap?.decorations ?? []);
   const draftDecorationsJSON = JSON.stringify(decorationDraft);
-  const decorationsChanged = savedDecorationsJSON !== draftDecorationsJSON;
+  const decorationsChanged = baselineDecorationsJSON !== draftDecorationsJSON;
   const backgroundChanged = (savedOverride?.backgroundOverrideColor || null) !== backgroundDraft;
   const hasUnsavedChanges = curveEditCount > 0 || stationEditCount > 0 || decorationsChanged || backgroundChanged;
   const selectedDecoration = decorationDraft.find((d) => d.id === selectedDecorationId) || null;
@@ -955,11 +974,16 @@ export default function MapEditorPanel({ accountId, onBack }) {
                         }}
                         onClick={() => setPlacementTool({ type: "icon", icon })}
                       >
-                        <svg viewBox="-6 -6 12 12" width="20" height="20">
+                        <svg viewBox="-6 -6 12 12" width="18" height="18">
                           <g fill="#5c5648" style={{ color: "#5c5648" }}>
                             {renderIconPaths(icon)}
                           </g>
                         </svg>
+                        {/* Visible label, not just a hover tooltip -- with
+                            100 icons in the library, "hover to find out
+                            what this is" isn't good enough, especially on
+                            touch devices where hover doesn't exist at all. */}
+                        <span style={styles.iconBtnLabel}>{ICON_LABELS[icon]}</span>
                       </button>
                     ))}
                   </div>
@@ -976,11 +1000,12 @@ export default function MapEditorPanel({ accountId, onBack }) {
                         }}
                         onClick={() => setPlacementTool({ type: "shape", shape })}
                       >
-                        <svg viewBox="-6 -6 12 12" width="20" height="20">
+                        <svg viewBox="-6 -6 12 12" width="18" height="18">
                           {shape === "circle" && <circle cx="0" cy="0" r="5" fill="#9dc48a" />}
                           {shape === "rect" && <rect x="-5" y="-3.5" width="10" height="7" fill="#9dc48a" />}
                           {shape === "line" && <line x1="-5" y1="0" x2="5" y2="0" stroke="#9dc48a" strokeWidth="1.4" />}
                         </svg>
+                        <span style={styles.iconBtnLabel}>{SHAPE_LABELS[shape]}</span>
                       </button>
                     ))}
                     <button
@@ -989,6 +1014,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
                       onClick={() => setPlacementTool({ type: "text" })}
                     >
                       <span style={{ fontSize: 13, fontWeight: 700, color: "#5c5648" }}>Aa</span>
+                      <span style={styles.iconBtnLabel}>Text</span>
                     </button>
                   </div>
                   {placementTool && (
@@ -1280,8 +1306,20 @@ const styles = {
   iconCategoryPicker: { display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 },
   categoryPill: { border: "1px solid #ddd", background: "#fafafa", borderRadius: 12, padding: "3px 9px", fontSize: 10.5, fontWeight: 600, color: "#8a8375", cursor: "pointer" },
   categoryPillActive: { background: "#2937c9", color: "#fff", borderColor: "#2937c9" },
-  iconGrid: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 14 },
-  iconBtn: { width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #ddd", background: "#fafafa", borderRadius: 7, cursor: "pointer" },
+  iconGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginBottom: 14, maxHeight: 260, overflowY: "auto" },
+  iconBtn: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    padding: "5px 2px",
+    border: "1px solid #ddd",
+    background: "#fafafa",
+    borderRadius: 7,
+    cursor: "pointer",
+  },
+  iconBtnLabel: { fontSize: 9, fontWeight: 600, color: "#8a8375", textAlign: "center", lineHeight: 1.1, wordBreak: "break-word" },
   iconBtnActive: { background: "#eef1fb", borderColor: "#2937c9" },
   bgSwatchGrid: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12, alignItems: "center" },
   bgSwatch: { width: 26, height: 26, borderRadius: "50%", border: "2px solid #ddd", cursor: "pointer", padding: 0 },

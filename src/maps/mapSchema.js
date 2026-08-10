@@ -564,6 +564,7 @@ export function deriveMap(config) {
     minorLabelDir: config.minorLabelDir || null,
     tinyLabelStations: config.tinyLabelStations || null, // optional Set of station IDs using an even smaller label font than "minor" -- used by maps with especially dense clusters (e.g. Sendhwa's town core) where the standard 2-tier system alone can't avoid every label collision
     manualCurveOffsets: config.manualCurveOffsets || null, // optional {"lowerId-higherId": offsetNumber} lookup for edges that need a deliberate stylistic curve away from a specific named third-party station, overriding the automatic parallel-edge-separation offset for that one edge
+    decorations: config.decorations || null, // optional default decorations array (icon/shape/text/image objects, same shape as admin-editable Map Editor decorations -- see DecorationsLayer.jsx) baked into this map's own static data, e.g. converted hand-coded landmark art from MapBackground.jsx. Admin overrides (map_settings.decorations_override) take precedence over this at read time -- see useMapWithOverrides.js's applyMapOverride.
     modeTheme: config.modeTheme || null,
     viewW: config.viewW || 100,
     viewH: config.viewH || 100,

@@ -428,6 +428,50 @@ const MODE_BENGALURU = {
   black: { color: "#2b2b2b", label: "Black", short: "X" },
 };
 
+// DECORATIONS_BENGALURU — converted from the hand-coded landmark art that
+// used to be baked directly into MapBackground.jsx's "bengaluru" branch
+// (lake ellipses, Vidhana Soudha, Bengaluru Palace, the airport icon,
+// IISc/IIM/Christ University, IKEA/Phoenix Mall, Manyata Tech Park, and
+// the park/forest ellipses). Same x/y coordinates as the original inline
+// SVG (same viewBox, no conversion needed), now expressed as ordinary
+// decorations-array entries so an admin can select/move/resize/recolor/
+// delete them via the Map Editor, same as any decoration they add
+// themselves. See DecorationsLayer.jsx for the object shape.
+const DECORATIONS_BENGALURU = [
+  // Rural Lake -- was a <ellipse fill="url(#lakeGrad)"> near station #86.
+  { id: "bg_bengaluru_rural_lake", type: "icon", icon: "water", x: 84.4, y: 8.5, rotation: 10, size: 9, color: "#6a9dc0", opacity: 0.9 },
+  // Small Lake -- near station #87.
+  { id: "bg_bengaluru_small_lake", type: "icon", icon: "water", x: 68.75, y: 5.8, rotation: -8, size: 7, color: "#6a9dc0", opacity: 0.9 },
+  // Lalbagh -- garden ellipse near station #36.
+  { id: "bg_bengaluru_lalbagh", type: "icon", icon: "garden", x: 49.06, y: 61.87, size: 11, color: "#9dc48a", opacity: 0.85 },
+  // Nice Road Park -- garden ellipse near station #55.
+  { id: "bg_bengaluru_nice_road_park", type: "icon", icon: "garden", x: 29.73, y: 92.16, size: 10, color: "#9dc48a", opacity: 0.85 },
+  // State Forest -- forest icon near station #77.
+  { id: "bg_bengaluru_state_forest", type: "icon", icon: "forest", x: 42.34, y: 16.71, size: 11, color: "#6b9556", opacity: 0.8 },
+  // Bamboo Forest -- forest icon near station #84.
+  { id: "bg_bengaluru_bamboo_forest", type: "icon", icon: "forest", x: 78.12, y: 11.49, size: 10, color: "#6b9556", opacity: 0.8 },
+  // Botanical Garden -- garden ellipse near station #83.
+  { id: "bg_bengaluru_botanical_garden", type: "icon", icon: "garden", x: 101.41, y: 33.19, size: 11, color: "#9dc48a", opacity: 0.85 },
+  // Vidhana Soudha -- domed legislative building near station #24.
+  { id: "bg_bengaluru_vidhana_soudha", type: "icon", icon: "cityhall", x: 48.59, y: 40.5, size: 8, color: "#c9b98a" },
+  // Bengaluru Palace -- Tudor-style crenellated building near station #25.
+  { id: "bg_bengaluru_palace", type: "icon", icon: "fort", x: 55.26, y: 32, size: 5, color: "#d8b98a" },
+  // Kempegowda International Airport -- station #1, northernmost point.
+  { id: "bg_bengaluru_airport", type: "icon", icon: "airport", x: 65.74, y: -3.6, rotation: -30, size: 10, color: "#5c6066" },
+  // IISc -- academic institution near station #69.
+  { id: "bg_bengaluru_iisc", type: "icon", icon: "college", x: 46.46, y: 25.5, size: 6, color: "#4a5a7a" },
+  // IIM Bangalore -- academic institution near station #41.
+  { id: "bg_bengaluru_iim", type: "icon", icon: "college", x: 62.65, y: 81.9, size: 6, color: "#4a5a7a" },
+  // Christ University -- academic institution near station #70.
+  { id: "bg_bengaluru_christ_university", type: "icon", icon: "college", x: 18.39, y: 27.7, size: 6, color: "#4a5a7a" },
+  // IKEA Nagasandra -- retail icon near station #30.
+  { id: "bg_bengaluru_ikea", type: "icon", icon: "mall", x: 16.23, y: 17.6, size: 6, color: "#2a5fa5" },
+  // Phoenix Mall -- retail icon near station #8.
+  { id: "bg_bengaluru_phoenix_mall", type: "icon", icon: "mall", x: 99, y: 36.8, size: 6, color: "#a5522a" },
+  // Manyata Tech Park -- office/tech campus icon near station #81.
+  { id: "bg_bengaluru_manyata_tech_park", type: "icon", icon: "office", x: 67.05, y: 17.1, size: 7, color: "#6b8caf" },
+];
+
 export const bengaluruMap = {
   id: "bengaluru",
   label: "Bengaluru",
@@ -443,6 +487,7 @@ export const bengaluruMap = {
   viewW: 126,
   viewH: 102,
   background: { kind: "citymap", theme: "bengaluru" },
+  decorations: DECORATIONS_BENGALURU,
   characterNames: null,
   mrxName: null,
 };

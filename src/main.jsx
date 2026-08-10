@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import MapPreviewPage from './components/MapPreviewPage.jsx'
 import AuthGate from './components/AuthGate.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 
 // Minimal path check -- no router library needed for just one extra page.
 // Visit /preview (e.g. http://localhost:5173/preview or
@@ -13,10 +14,12 @@ const isPreviewRoute = window.location.pathname.startsWith('/preview')
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {isPreviewRoute ? (
-      <MapPreviewPage />
-    ) : (
-      <AuthGate>{(account, onLogout) => <App account={account} onLogout={onLogout} />}</AuthGate>
-    )}
+    <ErrorBoundary>
+      {isPreviewRoute ? (
+        <MapPreviewPage />
+      ) : (
+        <AuthGate>{(account, onLogout) => <App account={account} onLogout={onLogout} />}</AuthGate>
+      )}
+    </ErrorBoundary>
   </React.StrictMode>,
 )

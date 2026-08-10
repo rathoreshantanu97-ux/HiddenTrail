@@ -168,30 +168,13 @@ export default function MapBackground({ map }) {
             non-editable art. They still render exactly as before, just
             via the shared DecorationsLayer component. */}
 
-        {/* Fort boundary -- DELIBERATELY left as fixed, non-editable art
-            (not converted to a decoration) because DecorationsLayer's
-            "shape" rect type has no dashed-stroke option (no
-            strokeDasharray field -- see DecorationItem in
-            DecorationsLayer.jsx), so converting it would lose its
-            dashed appearance, the one thing that visually distinguishes
-            it as a boundary rather than a solid box. A rectangle enclosing the cluster of stations
-            that together represent the fort area (23, 58, 59, 57, 41,
-            54, 13, 52). Bounding box of those stations' real
-            coordinates is x:[98.36,130.94] y:[32.16,58.92] -- padded out
-            further so the rectangle clearly contains all 8 nodes with
-            genuine margin, not just barely touching the outermost ones. */}
-        <rect
-          x="93"
-          y="26"
-          width="43"
-          height="38"
-          rx="1.5"
-          fill="none"
-          stroke="#8a6a3a"
-          strokeWidth="0.6"
-          strokeDasharray="2,1.2"
-          opacity="0.7"
-        />
+        {/* Fort boundary dashed rectangle -- removed per explicit request
+            (user doesn't want it). Used to enclose the fort-area station
+            cluster (23, 58, 59, 57, 41, 54, 13, 52) with a dashed
+            outline; DecorationsLayer's "shape" rect type has no
+            dashed-stroke option so this was left as fixed art rather
+            than converted to an editable decoration -- now just deleted
+            outright instead. */}
         {/* Fort icon (crenellated tower silhouette, previously hand-coded
             just above the boundary rectangle's top edge) is now
             "sendhwa_fort" in DECORATIONS_CITY_OF_SENDHWA -- see the

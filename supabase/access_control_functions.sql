@@ -1155,7 +1155,19 @@ begin
 
       if v_dec_type = 'icon' then
         v_dec_icon := v_dec->>'icon';
-        if v_dec_icon not in ('landmark','water','park','tree','school','bus','police','fort','airport','building','star','flag') then
+        -- Kept in sync with ICON_CATEGORIES in src/lib/decorationIcons.jsx
+        -- (48 icons across Nature/Civic/Transport/Commerce/Recreation/
+        -- Symbols) -- expanded specifically because custom image
+        -- uploads aren't available, so a wide built-in variety is the
+        -- actual mitigation for that gap, not a nice-to-have.
+        if v_dec_icon not in (
+          'water','lake','river','mountain','hill','forest','tree','palm',
+          'landmark','school','hospital','police','firestation','church','temple','courthouse','library','prison',
+          'bus','train','airport','port','parking','bridge','subway','road',
+          'shop','mall','market','restaurant','hotel','bank','factory','office',
+          'stadium','museum','theater','zoo','playground','pool','monument','campsite',
+          'star','flag','pin','cross','crown','anchor','compass','heart'
+        ) then
           raise exception 'Invalid decoration icon';
         end if;
         v_dec_size := greatest(1, least(40, coalesce((v_dec->>'size')::numeric, 6)));

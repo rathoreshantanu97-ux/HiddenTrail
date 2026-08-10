@@ -42,7 +42,18 @@ export function DecorationItem({ d }) {
   if (d.type === "icon") {
     const size = d.size || 6;
     return (
-      <g transform={`translate(${d.x}, ${d.y}) rotate(${rotation}) scale(${size / 10})`} fill={color} opacity={opacity}>
+      // style={{color}} matters here, not just fill: a few icons (river,
+      // port, bridge, playground, anchor, compass) draw parts as strokes
+      // using stroke="currentColor" rather than fill, since a filled
+      // shape doesn't read as "a line" (a river, a rope, a pole) --
+      // currentColor resolves from the CSS `color` property, which fill
+      // alone does not set.
+      <g
+        transform={`translate(${d.x}, ${d.y}) rotate(${rotation}) scale(${size / 10})`}
+        fill={color}
+        opacity={opacity}
+        style={{ color }}
+      >
         {renderIconPaths(d.icon)}
       </g>
     );

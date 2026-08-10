@@ -6,7 +6,7 @@ import { curvePathD, curveControlPoints, sampleCurvePoints, normalizeCurveOffset
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
 import DecorationsLayer, { DecorationItem } from "./DecorationsLayer.jsx";
-import { ICON_LIBRARY, ICON_LABELS, renderIconPaths } from "../lib/decorationIcons.jsx";
+import { ICON_LIBRARY, ICON_LABELS, ICON_CATEGORIES, renderIconPaths } from "../lib/decorationIcons.jsx";
 
 // ---------------------------------------------------------------------------
 // MAP EDITOR PANEL — lets an admin visually drag a route's curve (like
@@ -100,6 +100,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
   const [backgroundDraft, setBackgroundDraft] = useState(null);
   const [selectedDecorationId, setSelectedDecorationId] = useState(null);
   const [placementTool, setPlacementTool] = useState(null); // {type:"icon",icon} | {type:"shape",shape} | {type:"text"} -- armed, next canvas click places it
+  const [iconCategory, setIconCategory] = useState(Object.keys(ICON_CATEGORIES)[0]); // which icon category tab is showing in the palette -- 48 icons is too many for one flat grid
   const [dragState, setDragState] = useState(null); // { type: "curve"|"station"|"decoration", key/id, pointIndex }
   const [warning, setWarning] = useState("");
   const [busy, setBusy] = useState(false);
@@ -916,9 +917,22 @@ export default function MapEditorPanel({ accountId, onBack }) {
                   <div style={styles.sideTitle}>Add to map</div>
                   <div style={styles.smallNote}>Pick an item, then click anywhere on the map to place it.</div>
 
-                  <div style={styles.configLabelPlain}>Icons</div>
+                  <div style={styles.configLabelPlain}>
+                    Icons ({ICON_LIBRARY.length})
+                  </div>
+                  <div style={styles.iconCategoryPicker}>
+                    {Object.keys(ICON_CATEGORIES).map((cat) => (
+                      <button
+                        key={cat}
+                        style={{ ...styles.categoryPill, ...(iconCategory === cat ? styles.categoryPillActive : {}) }}
+                        onClick={() => setIconCategory(cat)}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
                   <div style={styles.iconGrid}>
-                    {ICON_LIBRARY.map((icon) => (
+                    {ICON_CATEGORIES[iconCategory].map((icon) => (
                       <button
                         key={icon}
                         title={ICON_LABELS[icon]}
@@ -929,7 +943,9 @@ export default function MapEditorPanel({ accountId, onBack }) {
                         onClick={() => setPlacementTool({ type: "icon", icon })}
                       >
                         <svg viewBox="-6 -6 12 12" width="20" height="20">
-                          <g fill="#5c5648">{renderIconPaths(icon)}</g>
+                          <g fill="#5c5648" style={{ color: "#5c5648" }}>
+                            {renderIconPaths(icon)}
+                          </g>
                         </svg>
                       </button>
                     ))}
@@ -1248,6 +1264,9 @@ const styles = {
   stepperVal: { fontSize: 12.5, fontWeight: 700, color: "#5c5648", minWidth: 34, textAlign: "center" },
   rangeInput: { width: "100%", marginBottom: 12 },
   layerBtnRow: { display: "flex", gap: 6, marginBottom: 8 },
+  iconCategoryPicker: { display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 },
+  categoryPill: { border: "1px solid #ddd", background: "#fafafa", borderRadius: 12, padding: "3px 9px", fontSize: 10.5, fontWeight: 600, color: "#8a8375", cursor: "pointer" },
+  categoryPillActive: { background: "#2937c9", color: "#fff", borderColor: "#2937c9" },
   iconGrid: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 14 },
   iconBtn: { width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #ddd", background: "#fafafa", borderRadius: 7, cursor: "pointer" },
   iconBtnActive: { background: "#eef1fb", borderColor: "#2937c9" },

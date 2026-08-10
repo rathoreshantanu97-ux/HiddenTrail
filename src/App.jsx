@@ -21,6 +21,8 @@ import PausedScreen from "./components/PausedScreen.jsx";
 import AdminPanel from "./components/AdminPanel.jsx";
 import TakeoverPanel from "./components/TakeoverPanel.jsx";
 import SpectatorScreen from "./components/SpectatorScreen.jsx";
+import RulebookView from "./components/RulebookView.jsx";
+import RulebookButton from "./components/RulebookButton.jsx";
 import { useRoomStatus } from "./lib/useRoomStatus.js";
 import { usePresence } from "./lib/usePresence.js";
 import { useDelayedEndedTransition } from "./lib/useDelayedEndedTransition.js";
@@ -100,6 +102,12 @@ function LoadingOrDeadRoom({ onGiveUp, immediate }) {
 export default function App({ account, onLogout }) {
   const [appMode, setAppMode] = useState("landing"); // "landing" | "passandplay" | "multiplayer" | "adminPanel"
   const [isAdmin, setIsAdmin] = useState(false);
+  // Rulebook overlay: one shared piece of state for the whole app (rather
+  // than each screen owning its own copy), since it's opened from several
+  // different screens (Landing/Setup/Lobby/GameBoard) but should always
+  // behave identically -- same content, same close behavior -- regardless
+  // of where it was opened from.
+  const [showRulebook, setShowRulebook] = useState(false);
 
   useEffect(() => {
     if (account?.accountId) {
@@ -203,6 +211,11 @@ export default function App({ account, onLogout }) {
     match: supabaseStore.match,
     onDetectiveMove: (detId, to, mode) => supabaseStore.submitDetectiveMove(getEffectiveMap(liveMapId), detId, to, mode),
     onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(getEffectiveMap(liveMapId), to, edgeMode, ticketUsed),
+    // BUG FIX: without this, a player whose timer expired with genuinely
+    // zero legal moves left the game stalled forever (see useTurnTimer.js
+    // for the full reasoning) -- wired to the same passTurn the manual
+    // "Pass Turn" button already uses.
+    onPassTurn: (actor) => supabaseStore.passTurn(actor),
   });
 
   const [mpExploreMode, setMpExploreMode] = useState(null); // this client's own current route-explorer selection, reported up from GameBoard so it can be broadcast via Presence
@@ -578,12 +591,33 @@ export default function App({ account, onLogout }) {
   // RENDER
   // ---------------------------------------------------------------------------
 
+  // withRulebook — wraps a screen's JSX with the RulebookView overlay,
+  // rendered as a sibling (so it always sits on top, regardless of which
+  // screen is currently active) rather than inside any single screen
+  // component. This app renders each mode via an early `return`, so this
+  // wrapper is called individually at each return site rather than once
+  // around the whole component -- but it's a single, consistent source of
+  // truth for HOW the overlay is attached, not copy-pasted logic. mrxNameFn/
+  // detectiveNameFn are optional -- screens without a map loaded yet
+  // (LandingScreen, admin panel) just get the overlay's own generic
+  // "Mr. X" / "Detective N" defaults.
+  function withRulebook(el, mrxNameFn, detectiveNameFn) {
+    return (
+      <>
+        {el}
+        {showRulebook && (
+          <RulebookView onClose={() => setShowRulebook(false)} mrxName={mrxNameFn} detectiveName={detectiveNameFn} />
+        )}
+      </>
+    );
+  }
+
   if (appMode === "adminPanel") {
     return <AdminPanel accountId={account.accountId} onBack={() => setAppMode("landing")} />;
   }
 
   if (appMode === "landing") {
-    return (
+    return withRulebook(
       <LandingScreen
         onChoosePassAndPlay={handleChoosePassAndPlay}
         onChooseCreateRoom={handleCreateRoom}
@@ -592,6 +626,7 @@ export default function App({ account, onLogout }) {
         onOpenAdminPanel={() => setAppMode("adminPanel")}
         accountDisplayName={account?.displayName || ""}
         onLogout={account ? onLogout : null}
+        onOpenRulebook={() => setShowRulebook(true)}
       />
     );
   }
@@ -603,17 +638,21 @@ export default function App({ account, onLogout }) {
     const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
 
     if (!match) {
-      return <SetupScreen onStart={handleStartPassAndPlay} onBack={() => setAppMode("landing")} />;
+      return withRulebook(
+        <SetupScreen onStart={handleStartPassAndPlay} onBack={() => setAppMode("landing")} onOpenRulebook={() => setShowRulebook(true)} />
+      );
     }
     if (match.phase === "handoff") {
-      return <HandoffScreen handoffFor={handoffFor} round={match.round} maxRounds={match.maxRounds} onReady={handleReadyForTurn} />;
+      return withRulebook(
+        <HandoffScreen handoffFor={handoffFor} round={match.round} maxRounds={match.maxRounds} onReady={handleReadyForTurn} />
+      );
     }
     if (match.phase === "ended") {
       if (!ppShowEndedScreen) {
         // Deliberate pause: keep showing the board (with its collision
         // effect) for a moment after a capture, rather than jumping
         // straight to results -- see useDelayedEndedTransition.
-        return (
+        return withRulebook(
           <GameBoard
             map={map}
             match={match}
@@ -623,21 +662,25 @@ export default function App({ account, onLogout }) {
             onDetectiveMove={() => {}}
             onMrXMove={() => {}}
             onActivateDoubleMove={() => {}}
-          />
+          />,
+          mrxName,
+          detectiveName
         );
       }
-      return (
+      return withRulebook(
         <EndedScreen
           map={map}
           match={match}
           mrxName={mrxName}
           detectiveName={detectiveName}
           onNewGame={handleResetPassAndPlay}
-        />
+        />,
+        mrxName,
+        detectiveName
       );
     }
     // phase === "playing"
-    return (
+    return withRulebook(
       <GameBoard
         map={map}
         match={match}
@@ -648,8 +691,15 @@ export default function App({ account, onLogout }) {
         onMrXMove={(to, edgeMode, ticketUsed) => localStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => localStore.activateDoubleMove()}
         onPassTurn={(actor) => localStore.passTurn(actor)}
-        extraHeaderContent={<EndGameEarlyButton onEndGame={() => localStore.endGameEarly()} />}
-      />
+        extraHeaderContent={
+          <>
+            <RulebookButton compact onClick={() => setShowRulebook(true)} />
+            <EndGameEarlyButton onEndGame={() => localStore.endGameEarly()} />
+          </>
+        }
+      />,
+      mrxName,
+      detectiveName
     );
   }
 
@@ -721,7 +771,7 @@ export default function App({ account, onLogout }) {
     }
 
     if (mpStage === "lobby") {
-      return (
+      return withRulebook(
         <LobbyScreen
           roomId={mpRoomId}
           roomCode={mpRoomCode}
@@ -735,6 +785,7 @@ export default function App({ account, onLogout }) {
           mapId={liveMapId}
           onStart={handleStartMultiplayerGame}
           onLeave={handleLeaveMultiplayer}
+          onOpenRulebook={() => setShowRulebook(true)}
         />
       );
     }
@@ -763,7 +814,7 @@ export default function App({ account, onLogout }) {
 
     if (match.phase === "ended") {
       if (!mpShowEndedScreen) {
-        return (
+        return withRulebook(
           <GameBoard
             map={map}
             match={match}
@@ -775,22 +826,26 @@ export default function App({ account, onLogout }) {
             onDetectiveMove={() => {}}
             onMrXMove={() => {}}
             onActivateDoubleMove={() => {}}
-          />
+          />,
+          mrxName,
+          detectiveName
         );
       }
-      return (
+      return withRulebook(
         <EndedScreen
           map={map}
           match={match}
           mrxName={mrxName}
           detectiveName={detectiveName}
           onNewGame={handleLeaveMultiplayer}
-        />
+        />,
+        mrxName,
+        detectiveName
       );
     }
 
     if (match.phase === "paused") {
-      return <PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} />;
+      return withRulebook(<PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} />);
     }
 
     // Derive the huddle-panel data from Presence: every OTHER detective
@@ -844,6 +899,7 @@ export default function App({ account, onLogout }) {
         onPassTurn={(actor) => supabaseStore.passTurn(actor)}
         extraHeaderContent={
           <>
+            <RulebookButton compact onClick={() => setShowRulebook(true)} />
             <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
             <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
           </>
@@ -880,14 +936,16 @@ export default function App({ account, onLogout }) {
     );
 
     if (mpSpectatorInfo) {
-      return (
+      return withRulebook(
         <SpectatorScreen replacedRole={mpSpectatorInfo.replacedRole} onLeave={handleLeaveMultiplayer}>
           {gameBoardEl}
-        </SpectatorScreen>
+        </SpectatorScreen>,
+        mrxName,
+        detectiveName
       );
     }
 
-    return gameBoardEl;
+    return withRulebook(gameBoardEl, mrxName, detectiveName);
   }
 
   return null;

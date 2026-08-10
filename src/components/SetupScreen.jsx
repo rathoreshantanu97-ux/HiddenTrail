@@ -4,6 +4,7 @@ import { DETECTIVE_COLORS } from "../lib/gameEngine.js";
 import { styles } from "./GameBoard.jsx";
 import * as auth from "../lib/accessControlApi.js";
 import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
+import RulebookButton from "./RulebookButton.jsx";
 
 // ---------------------------------------------------------------------------
 // SETUP SCREEN — map + detective-count picker, used by same-device
@@ -11,7 +12,7 @@ import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
 // LandingScreen's CreateRoomForm instead, since the host picks these once
 // for everyone rather than each device picking independently.)
 // ---------------------------------------------------------------------------
-export default function SetupScreen({ onStart, onBack }) {
+export default function SetupScreen({ onStart, onBack, onOpenRulebook }) {
   const MAP_LIST = useActiveMaps();
   // IMPORTANT: mapId must never default to a hardcoded string like "city"
   // -- if an owner deactivates that specific map, MAP_LIST.find() would
@@ -89,11 +90,14 @@ export default function SetupScreen({ onStart, onBack }) {
             <h1 style={styles.title}>Hidden Trail</h1>
             <p style={styles.subtitle}>Pass-and-play · hidden Mr. X · laptop-sized board</p>
           </div>
-          {onBack && (
-            <button style={styles.backBtn} onClick={onBack}>
-              ← Back
-            </button>
-          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            {onOpenRulebook && <RulebookButton compact onClick={onOpenRulebook} />}
+            {onBack && (
+              <button style={styles.backBtn} onClick={onBack}>
+                ← Back
+              </button>
+            )}
+          </div>
         </div>
 
         <label style={styles.label}>Map</label>
@@ -185,6 +189,24 @@ export default function SetupScreen({ onStart, onBack }) {
             <li>Detectives win by landing on Mr. X's station. Mr. X wins by surviving {effectiveRoundsAndReveal?.totalRounds || 22} rounds.</li>
             <li>Screen will say "pass to [player]" between turns — hand the device over then.</li>
           </ul>
+          {onOpenRulebook && (
+            <button
+              style={{
+                marginTop: 12,
+                border: "none",
+                background: "transparent",
+                color: "#2937c9",
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+                padding: 0,
+                textDecoration: "underline",
+              }}
+              onClick={onOpenRulebook}
+            >
+              📖 Read the full rulebook (with diagrams)
+            </button>
+          )}
         </div>
         <button
           style={styles.primaryBtn}

@@ -1,0 +1,501 @@
+import React, { useState } from "react";
+import { MODE_DEFAULT } from "../maps/mapSchema.js";
+import { DETECTIVE_COLORS } from "../lib/gameEngine.js";
+
+// ---------------------------------------------------------------------------
+// RULEBOOK — a single, shared, full-screen overlay explaining how to play,
+// opened the same way from every screen that needs it (LandingScreen,
+// SetupScreen, LobbyScreen, and a help icon on GameBoard). One component,
+// one source of truth, instead of the rules text getting copy-pasted and
+// drifting between screens (which is what SetupScreen's old inline
+// `rulesBox` was already starting to become).
+//
+// Diagrams here are small custom SVGs built directly from the game's own
+// MODE_DEFAULT palette and DETECTIVE_COLORS (not static screenshots) --
+// so if the route colors or detective palette are ever retuned, this
+// rulebook updates automatically instead of quietly going stale like a
+// screenshot would. mrxName/detectiveName let it reskin correctly for
+// character-named maps (e.g. City of Sendhwa), same pattern GameBoard
+// itself uses.
+// ---------------------------------------------------------------------------
+
+const SECTIONS = [
+  { id: "objective", label: "Objective" },
+  { id: "board", label: "The board & transport" },
+  { id: "tickets", label: "Tickets" },
+  { id: "turns", label: "Turn order & rounds" },
+  { id: "reveals", label: "Reveal rounds" },
+  { id: "winning", label: "Winning the game" },
+  { id: "controls", label: "On-screen controls" },
+  { id: "multiplayer", label: "Multiplayer extras" },
+];
+
+export default function RulebookView({ onClose, mrxName, detectiveName, startOnSection }) {
+  const [activeSection, setActiveSection] = useState(startOnSection || "objective");
+  const activeMode = MODE_DEFAULT;
+  const mrxLabel = mrxName ? mrxName() : "Mr. X";
+  const detLabel = (n) => (detectiveName ? detectiveName(n) : `Detective ${n + 1}`);
+
+  return (
+    <div style={styles.overlay}>
+      <div style={styles.header}>
+        <div style={styles.title}>How to Play</div>
+        <button style={styles.closeBtn} onClick={onClose}>
+          ✕ Close
+        </button>
+      </div>
+
+      <div style={styles.body}>
+        <nav style={styles.nav}>
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setActiveSection(s.id)}
+              style={{ ...styles.navBtn, ...(activeSection === s.id ? styles.navBtnActive : {}) }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </nav>
+
+        <div style={styles.content}>
+          {activeSection === "objective" && <ObjectiveSection mrxLabel={mrxLabel} detLabel={detLabel} />}
+          {activeSection === "board" && <BoardSection activeMode={activeMode} mrxLabel={mrxLabel} />}
+          {activeSection === "tickets" && <TicketsSection activeMode={activeMode} mrxLabel={mrxLabel} />}
+          {activeSection === "turns" && <TurnsSection mrxLabel={mrxLabel} detLabel={detLabel} />}
+          {activeSection === "reveals" && <RevealsSection mrxLabel={mrxLabel} />}
+          {activeSection === "winning" && <WinningSection mrxLabel={mrxLabel} detLabel={detLabel} />}
+          {activeSection === "controls" && <ControlsSection activeMode={activeMode} mrxLabel={mrxLabel} />}
+          {activeSection === "multiplayer" && <MultiplayerSection mrxLabel={mrxLabel} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small reusable pieces
+// ---------------------------------------------------------------------------
+function SectionTitle({ children }) {
+  return <h2 style={styles.sectionTitle}>{children}</h2>;
+}
+function P({ children }) {
+  return <p style={styles.p}>{children}</p>;
+}
+function DiagramCard({ children, caption }) {
+  return (
+    <div style={styles.diagramCard}>
+      <div style={styles.diagramBox}>{children}</div>
+      {caption && <div style={styles.diagramCaption}>{caption}</div>}
+    </div>
+  );
+}
+
+// A tiny 5-station example board, built purely from MODE_DEFAULT colors so
+// it's always visually consistent with whatever palette the live game uses.
+function ExampleBoardSVG({ activeMode, highlightMode }) {
+  const stations = [
+    { id: "A", x: 20, y: 60 },
+    { id: "B", x: 60, y: 30 },
+    { id: "C", x: 100, y: 60 },
+    { id: "D", x: 60, y: 90 },
+    { id: "E", x: 140, y: 35 },
+  ];
+  const edges = [
+    { a: "A", b: "B", mode: "taxi" },
+    { a: "B", b: "C", mode: "taxi" },
+    { a: "A", b: "D", mode: "bus" },
+    { a: "D", b: "C", mode: "bus" },
+    { a: "C", b: "E", mode: "underground" },
+    { a: "B", b: "E", mode: "underground" },
+  ];
+  const pos = Object.fromEntries(stations.map((s) => [s.id, s]));
+  const dim = (mode) => (highlightMode && highlightMode !== mode ? 0.22 : 1);
+  return (
+    <svg viewBox="0 0 160 110" style={{ width: "100%", maxWidth: 360, height: "auto" }}>
+      {edges.map((e, i) => {
+        const p1 = pos[e.a];
+        const p2 = pos[e.b];
+        return (
+          <line
+            key={i}
+            x1={p1.x}
+            y1={p1.y}
+            x2={p2.x}
+            y2={p2.y}
+            stroke={activeMode[e.mode].color}
+            strokeWidth={e.mode === "underground" ? 4 : 3}
+            opacity={dim(e.mode)}
+            strokeLinecap="round"
+          />
+        );
+      })}
+      {stations.map((s) => (
+        <g key={s.id}>
+          <circle cx={s.x} cy={s.y} r="7" fill="#fff" stroke="#8a8375" strokeWidth="1.5" />
+          <text x={s.x} y={s.y + 3} fontSize="7" textAnchor="middle" fontWeight="700" fill="#3a3a3a">
+            {s.id}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function ModeLegendRow({ activeMode, mode, description }) {
+  return (
+    <div style={styles.legendRow}>
+      <span style={{ ...styles.legendSwatch, background: activeMode[mode].color }} />
+      <div>
+        <b>{activeMode[mode].label}</b>
+        <div style={styles.legendDesc}>{description}</div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sections
+// ---------------------------------------------------------------------------
+function ObjectiveSection({ mrxLabel, detLabel }) {
+  return (
+    <>
+      <SectionTitle>Objective</SectionTitle>
+      <P>
+        One player is <b>{mrxLabel}</b>, moving in secret across the map. Everyone else is a detective, working together to
+        figure out where {mrxLabel} is and catch them before time runs out.
+      </P>
+      <div style={styles.roleGrid}>
+        <div style={styles.roleCard}>
+          <div style={{ ...styles.roleDot, background: "#1a1a1a" }} />
+          <b>{mrxLabel}</b>
+          <P>
+            Moves secretly every round. Detectives never see where {mrxLabel} is directly — only the type of ticket used
+            for each move, and their exact position on scheduled reveal rounds.
+          </P>
+        </div>
+        <div style={styles.roleCard}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {DETECTIVE_COLORS.slice(0, 3).map((c, i) => (
+              <div key={i} style={{ ...styles.roleDot, background: c }} />
+            ))}
+          </div>
+          <b>Detectives (2–5 players)</b>
+          <P>
+            Move openly — every detective's position is visible to everyone at all times. Win by moving onto {mrxLabel}'s
+            exact station.
+          </P>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function BoardSection({ activeMode, mrxLabel }) {
+  return (
+    <>
+      <SectionTitle>The board & transport</SectionTitle>
+      <P>
+        Stations are connected by colored routes. Each route only supports certain transport modes — moving between two
+        stations means using a ticket that matches one of the routes actually connecting them.
+      </P>
+      <DiagramCard caption="A small example board — taxi (short hops), bus (longer jumps), and underground (hub-to-hub) routes.">
+        <ExampleBoardSVG activeMode={activeMode} />
+      </DiagramCard>
+      <ModeLegendRow activeMode={activeMode} mode="taxi" description="Short, frequent hops between neighboring stations." />
+      <ModeLegendRow activeMode={activeMode} mode="bus" description="Covers more ground per ticket, but only along bus routes." />
+      <ModeLegendRow
+        activeMode={activeMode}
+        mode="underground"
+        description="Jumps between major interchange hubs — fast, but only a few stations connect this way."
+      />
+      <P>
+        On real-city maps (like Bengaluru or City of Sendhwa), the board is dense — pinch, scroll, or use the +/− buttons
+        to zoom in and reveal every local street and neighborhood name.
+      </P>
+      <P>
+        Some maps also have <b>ferry routes</b> (dashed lines, over rivers or lakes) — these are {mrxLabel}-only, and
+        always cost a black ticket to use.
+      </P>
+    </>
+  );
+}
+
+function TicketsSection({ activeMode, mrxLabel }) {
+  return (
+    <>
+      <SectionTitle>Tickets</SectionTitle>
+      <P>Every move spends one ticket of the matching type. Detectives start with a limited supply of each.</P>
+      <ModeLegendRow activeMode={activeMode} mode="taxi" description="Used for taxi routes." />
+      <ModeLegendRow activeMode={activeMode} mode="bus" description="Used for bus routes." />
+      <ModeLegendRow activeMode={activeMode} mode="underground" description="Used for underground routes." />
+      <div style={styles.legendRow}>
+        <span style={{ ...styles.legendSwatch, background: "#2b2b2b" }} />
+        <div>
+          <b>Black ticket ({mrxLabel} only)</b>
+          <div style={styles.legendDesc}>
+            Works on ANY route type, and hides which transport mode was actually used on the shared travel log —
+            camouflage. Also the only ticket that can be used on a ferry. {mrxLabel} has a limited number for the whole
+            game.
+          </div>
+        </div>
+      </div>
+      <div style={styles.legendRow}>
+        <span style={{ ...styles.legendSwatch, background: "#a0740d" }} />
+        <div>
+          <b>2x / Double-move card ({mrxLabel} only)</b>
+          <div style={styles.legendDesc}>
+            Lets {mrxLabel} make two moves back-to-back in a single turn before detectives respond. {mrxLabel} holds a
+            couple of these for the whole game.
+          </div>
+        </div>
+      </div>
+      <P>
+        <b>Recycling rule:</b> whenever a detective spends a ticket, that exact ticket doesn't disappear — it's handed to{" "}
+        {mrxLabel}'s own pool. This is why {mrxLabel} usually ends a game holding plenty of tickets even without
+        collecting any directly.
+      </P>
+    </>
+  );
+}
+
+function TurnsSection({ mrxLabel, detLabel }) {
+  const order = [mrxLabel, detLabel(0), detLabel(1), "…"];
+  return (
+    <>
+      <SectionTitle>Turn order & rounds</SectionTitle>
+      <P>
+        {mrxLabel} always moves first each round, then every detective takes one move in turn. Once everyone has moved,
+        the round number advances.
+      </P>
+      <DiagramCard caption="One full round, repeated until the game ends.">
+        <div style={styles.turnFlow}>
+          {order.map((name, i) => (
+            <React.Fragment key={i}>
+              <div style={{ ...styles.turnChip, ...(i === 0 ? styles.turnChipMrx : {}) }}>{name}</div>
+              {i < order.length - 1 && <span style={styles.turnArrow}>→</span>}
+            </React.Fragment>
+          ))}
+          <span style={styles.turnArrow}>↻</span>
+        </div>
+      </DiagramCard>
+      <P>The game has a fixed number of rounds (shown at setup, and always visible during play) — if {mrxLabel} survives to the end, they win by evasion.</P>
+    </>
+  );
+}
+
+function RevealsSection({ mrxLabel }) {
+  const rounds = [3, 8, 13, 18, 22];
+  const total = 22;
+  return (
+    <>
+      <SectionTitle>Reveal rounds</SectionTitle>
+      <P>
+        {mrxLabel}'s exact station is hidden almost every round — except on a handful of scheduled reveal rounds, fixed
+        for the whole game and known to every player in advance (shown on the travel log throughout play).
+      </P>
+      <DiagramCard caption={`Example: a ${total}-round game with reveal rounds at ${rounds.join(", ")}.`}>
+        <div style={styles.timelineWrap}>
+          {Array.from({ length: total }, (_, i) => i + 1).map((n) => (
+            <div key={n} style={{ ...styles.timelineDot, ...(rounds.includes(n) ? styles.timelineDotReveal : {}) }} title={`Round ${n}`} />
+          ))}
+        </div>
+        <div style={styles.timelineLegendRow}>
+          <span style={{ ...styles.timelineDot, ...styles.timelineDotReveal, position: "static" }} />
+          <span>Reveal round — {mrxLabel}'s station is shown on the map for that move only</span>
+        </div>
+      </DiagramCard>
+      <P>
+        Outside of reveal rounds, detectives still see the TYPE of ticket {mrxLabel} used each turn on the shared travel
+        log (unless it was camouflaged with a black ticket) — enough to narrow down possibilities, even without knowing
+        the exact station.
+      </P>
+      <P>
+        Longer or shorter maps automatically scale their own reveal schedule proportionally — the exact round numbers
+        shown in your game may differ from this example.
+      </P>
+    </>
+  );
+}
+
+function WinningSection({ mrxLabel, detLabel }) {
+  return (
+    <>
+      <SectionTitle>Winning the game</SectionTitle>
+      <div style={styles.roleGrid}>
+        <div style={styles.roleCard}>
+          <b>Detectives win if...</b>
+          <P>Any detective ever moves onto the exact station {mrxLabel} is currently occupying.</P>
+        </div>
+        <div style={styles.roleCard}>
+          <b>{mrxLabel} wins if...</b>
+          <P>
+            {mrxLabel} survives every round of the game without being caught, or if {mrxLabel} ever moves onto a
+            station a detective is standing on (walking into a detective is treated the same as being caught).
+          </P>
+        </div>
+      </div>
+      <P>
+        After the game ends, {mrxLabel}'s entire hidden route is revealed to everyone, and can be stepped through move
+        by move using the <b>Replay</b> feature on the results screen.
+      </P>
+    </>
+  );
+}
+
+function ControlsSection({ activeMode, mrxLabel }) {
+  return (
+    <>
+      <SectionTitle>On-screen controls</SectionTitle>
+      <P>Quick reference for what you'll see and use during a live game:</P>
+      <ul style={styles.controlList}>
+        <li>
+          <b>Tapping a station</b> proposes a move there (if it's currently reachable with a ticket you have) — confirm
+          in the popup that appears.
+        </li>
+        <li>
+          <b>Zoom controls (+/−, or pinch/scroll)</b> reveal more detail on dense real-city maps.
+        </li>
+        <li>
+          <b>Explore mode</b> lets you preview reachable stations 1–2 moves ahead without committing to anything.
+        </li>
+        <li>
+          <b>Travel log</b> (sidebar) shows every move {mrxLabel} has made so far by ticket type, and marks upcoming and
+          past reveal rounds.
+        </li>
+        <li>
+          <b>Pass Turn</b> appears only when you genuinely have no legal moves left — take it, don't just wait.
+        </li>
+        <li>
+          <b>2x button</b> ({mrxLabel} only) activates a double-move card for the current turn.
+        </li>
+      </ul>
+    </>
+  );
+}
+
+function MultiplayerSection({ mrxLabel }) {
+  return (
+    <>
+      <SectionTitle>Multiplayer extras</SectionTitle>
+      <P>Online rooms have a few coordination features beyond the core rules:</P>
+      <ul style={styles.controlList}>
+        <li>
+          <b>Pause / Resume</b> — any player can propose a pause; resuming needs everyone still active to agree (or it
+          resolves automatically after a set time).
+        </li>
+        <li>
+          <b>End game early</b> — ends the match by unanimous vote among active players, without waiting for a normal
+          win condition.
+        </li>
+        <li>
+          <b>Takeover</b> — if a player disconnects, another player can take over their seat (including {mrxLabel}'s)
+          so the game isn't stuck waiting on someone who's gone.
+        </li>
+        <li>
+          <b>Chat</b> — detectives share one channel; {mrxLabel} is deliberately left out of it, matching the game's own
+          information asymmetry.
+        </li>
+      </ul>
+    </>
+  );
+}
+
+const styles = {
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    background: "#f7f6f3",
+    zIndex: 2500,
+    display: "flex",
+    flexDirection: "column",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "12px 16px",
+    borderBottom: "1px solid #e5e2d8",
+    background: "#fff",
+    flexShrink: 0,
+  },
+  title: { fontSize: 18, fontWeight: 700 },
+  closeBtn: {
+    border: "1px solid #ddd",
+    background: "#fff",
+    borderRadius: 8,
+    padding: "8px 14px",
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  body: {
+    flex: 1,
+    display: "flex",
+    overflow: "hidden",
+  },
+  nav: {
+    width: 220,
+    flexShrink: 0,
+    borderRight: "1px solid #e5e2d8",
+    background: "#fff",
+    display: "flex",
+    flexDirection: "column",
+    padding: 10,
+    gap: 4,
+    overflowY: "auto",
+  },
+  navBtn: {
+    textAlign: "left",
+    border: "none",
+    background: "transparent",
+    borderRadius: 8,
+    padding: "9px 12px",
+    fontSize: 13.5,
+    fontWeight: 600,
+    color: "#555",
+    cursor: "pointer",
+  },
+  navBtnActive: {
+    background: "#eef0ff",
+    color: "#2937c9",
+  },
+  content: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "24px 32px",
+    maxWidth: 720,
+  },
+  sectionTitle: { fontSize: 20, fontWeight: 800, marginBottom: 10 },
+  p: { fontSize: 14.5, lineHeight: 1.6, color: "#333", marginBottom: 12 },
+  diagramCard: {
+    border: "1px solid #e5e2d8",
+    borderRadius: 12,
+    background: "#fff",
+    padding: 16,
+    marginBottom: 16,
+  },
+  diagramBox: { display: "flex", justifyContent: "center" },
+  diagramCaption: { fontSize: 12.5, color: "#888", textAlign: "center", marginTop: 8 },
+  legendRow: { display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12 },
+  legendSwatch: { width: 16, height: 16, borderRadius: 4, flexShrink: 0, marginTop: 2 },
+  legendDesc: { fontSize: 13, color: "#666", marginTop: 2, lineHeight: 1.5 },
+  roleGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 },
+  roleCard: { border: "1px solid #e5e2d8", borderRadius: 12, padding: 14, background: "#fff" },
+  roleDot: { width: 18, height: 18, borderRadius: "50%", marginBottom: 8 },
+  turnFlow: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, justifyContent: "center" },
+  turnChip: {
+    border: "1px solid #ddd",
+    borderRadius: 20,
+    padding: "6px 14px",
+    fontSize: 13,
+    fontWeight: 600,
+    background: "#f5f5f5",
+  },
+  turnChipMrx: { background: "#1a1a1a", color: "#fff", borderColor: "#1a1a1a" },
+  turnArrow: { color: "#999", fontSize: 15 },
+  timelineWrap: { display: "flex", flexWrap: "wrap", gap: 4, justifyContent: "center" },
+  timelineDot: { width: 14, height: 14, borderRadius: "50%", background: "#e2ddce", border: "1px solid #d3cdb8" },
+  timelineDotReveal: { background: "#c12115", border: "1px solid #8f1710" },
+  timelineLegendRow: { display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5, color: "#666" },
+  controlList: { margin: "0 0 12px 18px", padding: 0, lineHeight: 1.7, fontSize: 14 },
+};

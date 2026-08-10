@@ -240,9 +240,16 @@ export default function MapBackground({ map }) {
     // always includes one) -- just the base fill plus a small set of
     // real landmark icons and a fort boundary, all positioned using this
     // map's ACTUAL station coordinates (checked directly, not guessed).
+    // Fill matched to Bengaluru's already-verified #f6f1e5 (was #ece3d0,
+    // the original un-lightened value) -- this map is the densest of the
+    // three (86 stations, heavy edge overlap in the Fort/Sadar Bazaar
+    // cluster), so the same contrast gains that helped Bengaluru's
+    // route-line legibility apply here too, and using the identical
+    // value keeps all citymap-style boards visually consistent instead
+    // of introducing a third, slightly-different parchment tone.
     return (
       <>
-        <rect x="-2" y="-2" width={w + 4} height={h + 4} fill="#ece3d0" />
+        <rect x="-2" y="-2" width={w + 4} height={h + 4} fill="#f6f1e5" />
 
         {/* Lake near Chhota GhatyaPatya -- station #80 @ (42.65, 11.6) */}
         <ellipse cx="42.65" cy="11.6" rx="5.5" ry="3.8" fill="url(#lakeGrad)" opacity="0.9" />
@@ -328,10 +335,13 @@ export default function MapBackground({ map }) {
 
   // Default / "plain" — parchment base with soft district blobs and a river.
   // Used by city.js, and a reasonable fallback for any new map that hasn't
-  // authored custom background art yet.
+  // authored custom background art yet. Matched to the same #f6f1e5 used
+  // by Bengaluru and City of Sendhwa (was #f3ecd9, a close but not
+  // identical shade) so every map shares one consistent, already-verified
+  // background tone rather than three near-duplicates.
   return (
     <>
-      <rect x="0" y="0" width={w} height={h} fill="#f3ecd9" />
+      <rect x="0" y="0" width={w} height={h} fill="#f6f1e5" />
       <circle cx="20" cy="25" r="17" fill="#ece2ca" opacity="0.6" />
       <circle cx="75" cy="20" r="15" fill="#ece2ca" opacity="0.6" />
       <circle cx="18" cy="70" r="16" fill="#e7e0c9" opacity="0.6" />

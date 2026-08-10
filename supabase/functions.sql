@@ -1085,6 +1085,18 @@ begin
 
   select * into v_gs from game_state_public where room_id = p_room_id for update;
   if v_gs.room_id is null then raise exception 'Game not started'; end if;
+  -- BUG FIX: this function was missing the phase/turn-order checks every
+  -- other mutating RPC has (make_mrx_move, make_detective_move, pass_turn
+  -- all check phase = 'playing' and that it's actually the caller's
+  -- turn). Without them, an out-of-turn or post-game call could still
+  -- silently consume a double-move ticket and set
+  -- mrx_double_move_active/legs_remaining, desyncing the double-move
+  -- state from actual play (make_mrx_move's "continuing double" logic is
+  -- driven purely by these two flags, not by whose turn it is).
+  if v_gs.phase <> 'playing' then raise exception 'Game is not in progress'; end if;
+  if v_gs.turn_order[v_gs.turn_idx + 1] <> 'mrx' then
+    raise exception 'It is not your turn';
+  end if;
   if v_gs.mrx_double_move_active then raise exception 'Double move already active'; end if;
 
   v_double_count := (v_gs.mrx_tickets->>'double')::int;
@@ -1288,9 +1300,25 @@ begin
     v_passed := auto_resolve_nonresponders(p_room_id, 'end_game_votes', v_proposal.id);
     if v_passed then
       update end_game_proposals set status = 'accepted' where id = v_proposal.id;
-      update game_state_public set phase = 'ended', winner = null,
-        log = log || jsonb_build_array(jsonb_build_object('kind', 'ended_by_vote'))
-      where room_id = p_room_id;
+      -- BUG FIX: this ended the game without appending reveal_full_route,
+      -- unlike every other end-game path (round limit, capture, walked-
+      -- into-detective all append it). Since reveal_full_route is the
+      -- ONLY channel detective clients ever get Mr. X's true position
+      -- log through (see matchStateAdapter.js's extractRevealedPositionLog),
+      -- any game ended via an auto-resolved end-game vote left every
+      -- detective's post-game Replay showing Mr. X's position as blank
+      -- on every step, even though their own moves/tickets showed up
+      -- fine. Mirrors the same reveal used in the round_limit_reached
+      -- path just above.
+      update game_state_public gp
+      set phase = 'ended', winner = null,
+          log = gp.log || jsonb_build_array(jsonb_build_object('kind', 'ended_by_vote'))
+                        || jsonb_build_array(jsonb_build_object(
+                             'kind', 'reveal_full_route',
+                             'payload', jsonb_build_object('positionLog', gs2.mrx_position_log)
+                           ))
+      from game_state_secret gs2
+      where gp.room_id = p_room_id and gs2.room_id = p_room_id;
     else
       update end_game_proposals set status = 'rejected' where id = v_proposal.id;
     end if;
@@ -1361,10 +1389,19 @@ begin
 
   if v_yes_votes >= v_total_players then
     update end_game_proposals set status = 'accepted' where id = p_proposal_id;
-    update game_state_public
+    -- BUG FIX: same missing reveal_full_route issue as
+    -- resolve_expired_end_game_vote above -- this is the real-time
+    -- (unanimous-vote-completes-immediately) path, so it needed the
+    -- identical fix.
+    update game_state_public gp
     set phase = 'ended', winner = null,
-        log = log || jsonb_build_array(jsonb_build_object('kind', 'ended_by_vote'))
-    where room_id = p_room_id;
+        log = gp.log || jsonb_build_array(jsonb_build_object('kind', 'ended_by_vote'))
+                      || jsonb_build_array(jsonb_build_object(
+                           'kind', 'reveal_full_route',
+                           'payload', jsonb_build_object('positionLog', gs2.mrx_position_log)
+                         ))
+    from game_state_secret gs2
+    where gp.room_id = p_room_id and gs2.room_id = p_room_id;
   end if;
 end;
 $$;
@@ -1744,9 +1781,19 @@ begin
 
     if v_nominee_count = 0 then
       if v_event.target_role = 'mrx' then
-        update game_state_public set phase = 'ended', winner = null,
-          log = log || jsonb_build_array(jsonb_build_object('kind', 'ended_no_takeover'))
-        where room_id = v_event.room_id;
+        -- BUG FIX: same missing reveal_full_route issue -- this path ends
+        -- the game when Mr. X disconnects and nobody takes over the role,
+        -- so it needs the same reveal so detectives' Replay isn't left
+        -- blank for Mr. X's position on every step.
+        update game_state_public gp
+        set phase = 'ended', winner = null,
+            log = gp.log || jsonb_build_array(jsonb_build_object('kind', 'ended_no_takeover'))
+                          || jsonb_build_array(jsonb_build_object(
+                               'kind', 'reveal_full_route',
+                               'payload', jsonb_build_object('positionLog', gs2.mrx_position_log)
+                             ))
+        from game_state_secret gs2
+        where gp.room_id = v_event.room_id and gs2.room_id = v_event.room_id;
       end if;
       update takeover_events set status = 'expired', updated_at = now() where id = p_event_id;
       return;
@@ -2359,8 +2406,19 @@ begin
   -- it (or has it stripped out of their merged detective role string),
   -- and the original player's row (still present -- they're spectating,
   -- not deleted) gets it reassigned.
+  -- BUG FIX: was `role like '%' || original_role || '%'`, a substring
+  -- match against comma-joined multi-detective role strings (e.g.
+  -- "d0,d1,d10"). Since roles are stored as plain digit-suffixed tokens
+  -- ("d1", "d10", ...), LIKE '%d1%' also matches "d10" -- a false
+  -- positive that could strip/transfer the wrong player's seat whenever
+  -- a room had both a single- and double-digit detective id sharing a
+  -- prefix. Every other membership check in this file (make_detective_
+  -- move, switch_seat) correctly splits on ',' and checks array
+  -- membership instead of substring matching -- this is the one place
+  -- that had drifted from that pattern. Fixed to match the same way.
   select * into v_current_holder from players where room_id = p_room_id and (
-    role = v_proposal.original_role or role like '%' || v_proposal.original_role || '%'
+    role = v_proposal.original_role
+    or v_proposal.original_role = any(string_to_array(role, ','))
   ) limit 1;
 
   if v_current_holder.id is not null then
@@ -3344,8 +3402,19 @@ begin
     v_passed := auto_resolve_nonresponders(p_room_id, 'resume_votes', v_proposal.id);
     if v_passed then
       update resume_proposals set status = 'accepted' where id = v_proposal.id;
+      -- BUG FIX: this never reset turn_started_at, unlike every other
+      -- place that hands control to a specific player's turn
+      -- (start_game, advance_turn_internal both set it to now()).
+      -- useTurnTimer.js computes elapsed = Date.now() - turnStartedAt and
+      -- auto-submits a random move once elapsed >= the timer limit --
+      -- since a pause can last up to pause_resume_deadline_hours (up to
+      -- 36h by default), elapsed was already enormous the instant the
+      -- game resumed, so the very next timer tick (within ~1s) would
+      -- auto-random-move on behalf of whoever's turn it was, before they
+      -- could react. Resetting it here gives the resuming player their
+      -- full turn timer, same as any other turn handoff.
       update game_state_public
-      set phase = 'playing',
+      set phase = 'playing', turn_started_at = now(),
           log = log || jsonb_build_array(jsonb_build_object('kind', 'game_resumed', 'payload', jsonb_build_object('by', v_proposal.proposed_by_name)))
       where room_id = p_room_id;
       delete from room_pauses where room_id = p_room_id;
@@ -3411,8 +3480,11 @@ begin
   if v_yes_votes >= v_total_players then
     update resume_proposals set status = 'accepted' where id = p_proposal_id;
 
+    -- BUG FIX: same missing turn_started_at reset as the auto-resolve
+    -- path above -- this is the real-time (unanimous-vote-completes-
+    -- immediately) path, needed the identical fix.
     update game_state_public
-    set phase = 'playing',
+    set phase = 'playing', turn_started_at = now(),
         log = log || jsonb_build_array(jsonb_build_object('kind', 'game_resumed', 'payload', jsonb_build_object('by', v_caller.display_name)))
     where room_id = p_room_id;
 

@@ -27,7 +27,7 @@ import { currentActor, validMovesFor, occupiedByDetective } from "./gameEngine.j
 // arriving moments later will simply fail their turn-order check
 // harmlessly, since it's no longer that player's turn by then.
 // ---------------------------------------------------------------------------
-export function useTurnTimer({ roomId, map, match, onDetectiveMove, onMrXMove }) {
+export function useTurnTimer({ roomId, map, match, onDetectiveMove, onMrXMove, onPassTurn }) {
   const [turnTimerSeconds, setTurnTimerSeconds] = useState(null);
   const [secondsRemaining, setSecondsRemaining] = useState(null);
   const attemptedForRef = useRef(null); // guards against submitting more than once for the same turn
@@ -83,7 +83,20 @@ export function useTurnTimer({ roomId, map, match, onDetectiveMove, onMrXMove })
     const actor = currentActor(match);
     if (actor === "mrx") {
       const moves = validMovesFor(map, match.mrX.pos, match.mrX.tickets, true);
-      if (moves.length === 0) return; // no legal move at all -- let the existing "no moves" handling (if any) take over rather than force something invalid
+      // BUG FIX: this used to just `return` here, leaving the turn
+      // stuck forever -- the guard above (attemptedForRef) marks this
+      // turn as "already attempted" BEFORE this check runs, so it would
+      // never retry, and no other mechanism advances the turn on this
+      // player's behalf. The engine already has a dedicated pass_turn
+      // RPC/applyPassTurn for exactly this "genuinely zero legal moves"
+      // case (see the passTurnNote UI in GameBoard.jsx, which offers the
+      // same action manually) -- calling it here means a player who's
+      // stuck AND has walked away no longer stalls the game for
+      // everyone else until a human notices and passes for them.
+      if (moves.length === 0) {
+        if (onPassTurn) onPassTurn(actor);
+        return;
+      }
       const pick = moves[Math.floor(Math.random() * moves.length)];
       // Prefer the pick's own mode; only fall back to black if that
       // specific ticket type is actually out (mirrors how a real player
@@ -98,7 +111,12 @@ export function useTurnTimer({ roomId, map, match, onDetectiveMove, onMrXMove })
       const moves = validMovesFor(map, detective.pos, detective.tickets, false).filter(
         (m) => !occupiedByDetective(match.detectives, m.to)
       );
-      if (moves.length === 0) return;
+      // Same fix as the Mr. X branch above -- fall back to passing the
+      // turn instead of silently stalling.
+      if (moves.length === 0) {
+        if (onPassTurn) onPassTurn(actor);
+        return;
+      }
       const pick = moves[Math.floor(Math.random() * moves.length)];
       onDetectiveMove(detId, pick.to, pick.mode);
     }

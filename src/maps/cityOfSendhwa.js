@@ -191,11 +191,19 @@ const EDGES_CITY_OF_SENDHWA = [
   [25,31,"bus"],
   [10,21,"bus"],
   [21,63,"bus"],
-  [63,9,"bus"],
+  // Rerouted from 63-9 to 63-7 (was passing close to 64/17 with almost no
+  // clearance) -- see MANUAL_CURVE_OFFSETS_CITY_OF_SENDHWA["63-7"] for the
+  // matching curve tuned to clear 64, 17, 57, 19, and 6.
+  [63,7,"bus"],
   [9,35,"bus"],
   [35,22,"bus"],
   [21,69,"bus"],
   [82,1,"bus"],
+  // New bus route connecting Chhoti Bijasan (1) and Chhota GhatyaPatya
+  // (69) -- straight line would run almost exactly through station 77
+  // (0.01 units clearance) and very close to 61, so this needs the
+  // matching curve in MANUAL_CURVE_OFFSETS_CITY_OF_SENDHWA["1-69"].
+  [1,69,"bus"],
   [22,45,"bus"],
   [22,7,"bus"],
   [7,9,"bus"],
@@ -342,10 +350,35 @@ const MANUAL_CURVE_OFFSETS_CITY_OF_SENDHWA = {
   // edge's own length (matching the proportion that reads clearly on
   // Bengaluru), then verified the resulting curve genuinely clears the
   // named avoid-station(s) by a wide margin, not just barely.
-  "22-45": -30.49, // bus route Chetan Hanuman<->Balwadi, curving outside English Wine Shop & Jai Bhawani Dhaba
+  // "22-45": recomputed from -30.49 to -42.4. The old value was verified
+  // wrong by direct numeric check: it put the curve only 0.21 units from
+  // station 41 (Ramdev Dhaba) -- a near-collision, not a clean "outside"
+  // curve, because 41 sits almost exactly on the straight line between 22
+  // and 45, so any moderate bow sweeps the curve right across it before
+  // diverging. A single quadratic curve genuinely can't clear all of 39/
+  // 40/41 to their south without pushing the control point off-canvas
+  // (would need roughly -90 to -110, putting it at y=165-190 against a
+  // map whose stations only span up to y=109) -- -42.4 is the offset that
+  // maximizes the worst-case clearance from all three while keeping the
+  // curve's visible apex on-canvas (~y=111): clearances come out to
+  // 4.17 / 4.33 / 4.14 units from 39 / 40 / 41 respectively (was 8.58 /
+  // 1.61 / 0.21 -- station 41 was the real problem).
+  "22-45": -42.4, // bus route Chetan Hanuman<->Balwadi
   "7-22": -26.16, // bus route Balwadi<->Chowdhary Dhaba, curving outside Narayan Das Hospital
-  "62-69": -19.67, // bus route Jogwada Road<->Chhota GhatyaPatya, curving outside Sendhwa Public School, Bagrecha Garden, Govt. Hospital
+  "62-69": -19.67, // bus route Jogwada Road<->Chhota GhatyaPatya, curving outside Sendhwa Public School, Bagrecha Garden, Govt. Hospital -- verified clearances 8.29/12.42/13.07, already fine, unchanged
   "1-82": -9.35, // bus route Homeopathy College<->Chhoti Bijasan, curving outside Pipaldhar
+  // "63-7": new curve for the rerouted 63<->7 edge (was 63-9). Straight
+  // line clears station 64 by only 2.15 units and station 17 by only
+  // 1.17 -- -11.6 is the offset that maximizes worst-case clearance
+  // across all five nearby stations (64/17/57/19/6): 7.49/3.89/3.86/
+  // 4.55/4.68 units respectively.
+  "63-7": -11.6,
+  // "1-69": new bus route Chhoti Bijasan<->Chhota GhatyaPatya. A straight
+  // line here would run through station 77 (0.01 units clearance -- a
+  // real overlap) and pass very close to 61 (0.86). -13.4 is the offset
+  // that maximizes worst-case clearance across 77/61/79/82: 6.70/6.52/
+  // 9.12/6.53 units respectively.
+  "1-69": -13.4,
 };
 
 export const cityOfSendhwaMap = {

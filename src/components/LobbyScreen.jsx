@@ -4,6 +4,7 @@ import * as api from "../lib/supabaseApi.js";
 import { supabase } from "../lib/supabaseClient.js";
 import { MAP_LIST } from "../maps/index.js";
 import { computeSeatLayout, seatLabel } from "../lib/seatLayout.js";
+import RulebookButton from "./RulebookButton.jsx";
 
 // ---------------------------------------------------------------------------
 // LOBBY SCREEN — shown after creating or joining a room, before the game
@@ -30,6 +31,7 @@ export default function LobbyScreen({
   mapId,
   onStart,
   onLeave,
+  onOpenRulebook,
 }) {
   const [players, setPlayers] = useState([]);
   const [starting, setStarting] = useState(false);
@@ -212,8 +214,13 @@ export default function LobbyScreen({
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <h1 style={styles.title}>Lobby</h1>
-        <p style={styles.subtitle}>{map?.label || mapId}</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <h1 style={styles.title}>Lobby</h1>
+            <p style={styles.subtitle}>{map?.label || mapId}</p>
+          </div>
+          {onOpenRulebook && <RulebookButton compact onClick={onOpenRulebook} />}
+        </div>
 
         <div style={styles.codeBox}>
           <div style={styles.codeLabel}>Room code — share with friends</div>

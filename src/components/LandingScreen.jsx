@@ -7,6 +7,7 @@ import { usePublicRooms } from "../lib/usePublicRooms.js";
 import * as auth from "../lib/accessControlApi.js";
 import * as api from "../lib/supabaseApi.js";
 import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
+import RulebookButton from "./RulebookButton.jsx";
 
 // ---------------------------------------------------------------------------
 // LANDING SCREEN — the very first thing a player sees.
@@ -22,6 +23,7 @@ export default function LandingScreen({
   onOpenAdminPanel,
   accountDisplayName,
   onLogout,
+  onOpenRulebook,
 }) {
   const [mode, setMode] = useState(null); // null | "online" | "create" | "join"
   const configured = isSupabaseConfigured();
@@ -47,11 +49,14 @@ export default function LandingScreen({
               ← Back
             </button>
           ) : (
-            onLogout && (
-              <button style={styles.logoutBtn} onClick={onLogout}>
-                Log out
-              </button>
-            )
+            <div style={{ display: "flex", gap: 8 }}>
+              {onOpenRulebook && <RulebookButton compact onClick={onOpenRulebook} />}
+              {onLogout && (
+                <button style={styles.logoutBtn} onClick={onLogout}>
+                  Log out
+                </button>
+              )}
+            </div>
           )}
         </div>
 

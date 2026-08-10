@@ -21,12 +21,12 @@
 // ---------------------------------------------------------------------------
 
 export const ICON_CATEGORIES = {
-  Nature: ["water", "lake", "river", "mountain", "hill", "forest", "tree", "palm"],
-  Civic: ["landmark", "school", "hospital", "police", "firestation", "church", "temple", "courthouse", "library", "prison"],
-  Transport: ["bus", "train", "airport", "port", "parking", "bridge", "subway", "road"],
-  Commerce: ["shop", "mall", "market", "restaurant", "hotel", "bank", "factory", "office"],
-  Recreation: ["stadium", "museum", "theater", "zoo", "playground", "pool", "monument", "campsite"],
-  Symbols: ["star", "flag", "pin", "cross", "crown", "anchor", "compass", "heart"],
+  Nature: ["water", "lake", "pond", "river", "waterfall", "mountain", "hill", "cliff", "cave", "forest", "tree", "palm"],
+  Civic: ["landmark", "fort", "school", "college", "hospital", "police", "firestation", "church", "temple", "monastery", "courthouse", "library", "prison"],
+  Transport: ["bus", "train", "railway", "metro", "subway", "tram", "airport", "port", "cablecar", "parking", "bridge", "road"],
+  Commerce: ["shop", "mall", "market", "cafe", "restaurant", "bakery", "hotel", "bank", "pharmacy", "gasstation", "factory", "office"],
+  Recreation: ["stadium", "arena", "museum", "theater", "zoo", "amusementpark", "garden", "playground", "pool", "monument", "campsite", "casino"],
+  Symbols: ["star", "flag", "pin", "cross", "crown", "anchor", "compass", "heart", "trophy", "gem", "key", "lightbulb"],
 };
 
 export const ICON_LIBRARY = Object.values(ICON_CATEGORIES).flat();
@@ -34,46 +34,65 @@ export const ICON_LIBRARY = Object.values(ICON_CATEGORIES).flat();
 export const ICON_LABELS = {
   water: "Water",
   lake: "Lake",
+  pond: "Pond",
   river: "River",
+  waterfall: "Waterfall",
   mountain: "Mountain",
   hill: "Hill",
+  cliff: "Cliff",
+  cave: "Cave",
   forest: "Forest",
   tree: "Tree",
   palm: "Palm tree",
   landmark: "Landmark",
+  fort: "Fort",
   school: "School",
+  college: "College",
   hospital: "Hospital",
   police: "Police",
   firestation: "Fire station",
   church: "Church",
   temple: "Temple",
+  monastery: "Monastery",
   courthouse: "Courthouse",
   library: "Library",
   prison: "Prison",
   bus: "Bus stop",
   train: "Train station",
+  railway: "Railway",
+  metro: "Metro station",
+  subway: "Subway sign",
+  tram: "Tram",
   airport: "Airport",
   port: "Port / dock",
+  cablecar: "Cable car",
   parking: "Parking",
   bridge: "Bridge",
-  subway: "Subway",
   road: "Road",
   shop: "Shop",
   mall: "Mall",
   market: "Market",
+  cafe: "Cafe",
   restaurant: "Restaurant",
+  bakery: "Bakery",
   hotel: "Hotel",
   bank: "Bank",
+  pharmacy: "Pharmacy",
+  gasstation: "Gas station",
   factory: "Factory",
   office: "Office",
   stadium: "Stadium",
+  arena: "Arena",
   museum: "Museum",
   theater: "Theater",
   zoo: "Zoo",
+  amusementpark: "Amusement park",
+  garden: "Garden",
   playground: "Playground",
   pool: "Pool",
   monument: "Monument",
   campsite: "Campsite",
+  casino: "Casino",
   star: "Star",
   flag: "Flag",
   pin: "Pin",
@@ -82,6 +101,10 @@ export const ICON_LABELS = {
   anchor: "Anchor",
   compass: "Compass",
   heart: "Heart",
+  trophy: "Trophy",
+  gem: "Gem",
+  key: "Key",
+  lightbulb: "Idea / lightbulb",
 };
 
 // Shared sub-shapes reused across a few icons so buildings/columns read
@@ -179,12 +202,61 @@ export function renderIconPaths(name) {
           ))}
         </>
       );
+    case "pond":
+      return <ellipse cx="0" cy="0" rx="2.6" ry="1.8" />;
+    case "waterfall":
+      return (
+        <>
+          <rect x="-2" y="-4.4" width="4" height="1.4" opacity="0.6" />
+          {[-1.4, -0.4, 0.6, 1.6].map((x, i) => (
+            <line key={i} x1={x} y1="-3" x2={x - 0.4} y2="3" stroke="currentColor" strokeWidth="0.6" strokeLinecap="round" opacity={0.6 + i * 0.08} />
+          ))}
+          <ellipse cx="-0.6" cy="3.6" rx="3" ry="0.9" opacity="0.6" />
+        </>
+      );
+    case "cliff":
+      return (
+        <>
+          <polygon points="-5,4 -5,1 -1,-4.4 3,-1 5,4" />
+          <line x1="-3" y1="1.6" x2="0" y2="4" stroke="#fff" strokeWidth="0.4" opacity="0.5" />
+          <line x1="0.4" y1="-1" x2="2.6" y2="1.4" stroke="#fff" strokeWidth="0.4" opacity="0.5" />
+        </>
+      );
+    case "cave":
+      return (
+        <>
+          <path d="M -4.4,4 Q -4.4,-2.4 0,-3.4 Q 4.4,-2.4 4.4,4 Z" />
+          <ellipse cx="0" cy="2.2" rx="2.2" ry="1.8" fill="#000" opacity="0.55" />
+        </>
+      );
 
     // ---- Civic ----
     case "landmark":
       return columnsBuilding("0,-4 2.2,-2 -2.2,-2");
+    case "fort":
+      return (
+        <>
+          <rect x="-4" y="0" width="8" height="3" />
+          {[-3.2, -1.3, 0.5, 2.4].map((dx, i) => (
+            <rect key={i} x={dx} y="-1.1" width="1.2" height="1.3" />
+          ))}
+          <rect x="-5" y="2.4" width="10" height="0.8" />
+        </>
+      );
     case "school":
       return mortarboard();
+    case "college":
+      return (
+        <>
+          <rect x="-4.4" y="-0.2" width="8.8" height="4" />
+          <polygon points="-4.8,-0.2 0,-2.8 4.8,-0.2" />
+          <rect x="-0.6" y="-4.6" width="1.2" height="2" />
+          <rect x="-1.4" y="-5.2" width="2.8" height="0.7" />
+          {[-2.8, -1, 0.8, 2.6].map((dx, i) => (
+            <rect key={i} x={dx - 0.5} y="0.6" width="1" height="2.4" fill="#fff" opacity="0.35" />
+          ))}
+        </>
+      );
     case "hospital":
       return (
         <>
@@ -235,6 +307,16 @@ export function renderIconPaths(name) {
           ))}
         </>
       );
+    case "monastery":
+      return (
+        <>
+          <rect x="-3.6" y="0" width="7.2" height="3.4" />
+          <polygon points="-2.4,0 -2.4,-2.4 -1.4,-3.4 -0.4,-2.4 -0.4,0" />
+          <polygon points="0.4,0 0.4,-2.4 1.4,-3.4 2.4,-2.4 2.4,0" />
+          <circle cx="-1.4" cy="-3.4" r="0.4" />
+          <circle cx="1.4" cy="-3.4" r="0.4" />
+        </>
+      );
 
     // ---- Transport ----
     case "bus":
@@ -252,6 +334,43 @@ export function renderIconPaths(name) {
           <rect x="-2.2" y="-2.6" width="4.4" height="2.2" fill="#fff" opacity="0.35" />
           <circle cx="-1.6" cy="1.6" r="0.6" fill="#fff" />
           <circle cx="1.6" cy="1.6" r="0.6" fill="#fff" />
+        </>
+      );
+    case "railway":
+      return (
+        <>
+          <line x1="-4.4" y1="-1.4" x2="4.4" y2="-1.4" stroke="currentColor" strokeWidth="0.6" />
+          <line x1="-4.4" y1="1.4" x2="4.4" y2="1.4" stroke="currentColor" strokeWidth="0.6" />
+          {[-3.2, -1.6, 0, 1.6, 3.2].map((x, i) => (
+            <line key={i} x1={x} y1="-1.8" x2={x} y2="1.8" stroke="currentColor" strokeWidth="0.7" />
+          ))}
+        </>
+      );
+    case "metro":
+      return (
+        <>
+          <path d="M -4.6,2.4 L -2.4,-3 L 0,1.4 L 2.4,-3 L 4.6,2.4" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+        </>
+      );
+    case "tram":
+      return (
+        <>
+          <rect x="-3.4" y="-2.6" width="6.8" height="4.4" rx="0.6" />
+          <rect x="-2.6" y="-1.8" width="2" height="1.8" fill="#fff" opacity="0.4" />
+          <rect x="0.6" y="-1.8" width="2" height="1.8" fill="#fff" opacity="0.4" />
+          <line x1="0" y1="-4.4" x2="0" y2="-2.6" stroke="currentColor" strokeWidth="0.4" />
+          <circle cx="-1.8" cy="2.2" r="0.6" />
+          <circle cx="1.8" cy="2.2" r="0.6" />
+        </>
+      );
+    case "cablecar":
+      return (
+        <>
+          <line x1="-5" y1="-3.4" x2="5" y2="1.6" stroke="currentColor" strokeWidth="0.4" opacity="0.6" />
+          <line x1="-1" y1="-1.2" x2="-1" y2="0.2" stroke="currentColor" strokeWidth="0.4" />
+          <line x1="1.4" y1="-0.4" x2="1.4" y2="1" stroke="currentColor" strokeWidth="0.4" />
+          <rect x="-2.2" y="0.2" width="2.4" height="1.8" rx="0.3" />
+          <rect x="0.2" y="1" width="2.4" height="1.8" rx="0.3" />
         </>
       );
     case "airport":
@@ -344,12 +463,46 @@ export function renderIconPaths(name) {
           </g>
         </>
       );
+    case "cafe":
+      return (
+        <>
+          <rect x="-3" y="-1.6" width="5" height="3.6" rx="0.3" />
+          <path d="M 2,-1 Q 4,-1 4,0.4 Q 4,1.8 2,1.8" fill="none" stroke="currentColor" strokeWidth="0.6" />
+          <path d="M -2,-2.6 Q -1.6,-3.4 -1,-2.6" fill="none" stroke="currentColor" strokeWidth="0.4" opacity="0.7" />
+          <path d="M -0.4,-2.6 Q 0,-3.4 0.6,-2.6" fill="none" stroke="currentColor" strokeWidth="0.4" opacity="0.7" />
+        </>
+      );
+    case "bakery":
+      return (
+        <>
+          <path d="M -3.4,1.6 Q -3.4,-1.6 0,-2.2 Q 3.4,-1.6 3.4,1.6 Z" />
+          <line x1="-3.4" y1="1.6" x2="3.4" y2="1.6" stroke="currentColor" strokeWidth="0.5" />
+          <circle cx="-1.2" cy="-0.4" r="0.5" fill="#fff" opacity="0.6" />
+          <circle cx="0.8" cy="0.2" r="0.5" fill="#fff" opacity="0.6" />
+        </>
+      );
     case "hotel":
       return (
         <>
           <rect x="-4" y="-1.4" width="8" height="4.4" rx="0.4" />
           <circle cx="-2" cy="-2.6" r="1" fill="currentColor" />
           <rect x="-4" y="1.2" width="8" height="1.6" opacity="0.7" />
+        </>
+      );
+    case "pharmacy":
+      return (
+        <>
+          <rect x="-3.6" y="-3.6" width="7.2" height="7.2" rx="0.6" />
+          <rect x="-0.7" y="-2.4" width="1.4" height="4.8" fill="#fff" />
+          <rect x="-2.4" y="-0.7" width="4.8" height="1.4" fill="#fff" />
+        </>
+      );
+    case "gasstation":
+      return (
+        <>
+          <rect x="-3.4" y="-2.6" width="4.4" height="6.6" />
+          <rect x="-2.6" y="-1.8" width="2.8" height="2" fill="#fff" opacity="0.4" />
+          <path d="M 1.4,-1.6 L 3,-0.4 L 3,2.6 Q 3,3.4 2.2,3.4 Q 1.4,3.4 1.4,2.6 L 1.4,1.2 L 1,1.2 L 1,4 L 1.4,4" fill="none" stroke="currentColor" strokeWidth="0.5" strokeLinejoin="round" />
         </>
       );
     case "bank":
@@ -386,8 +539,59 @@ export function renderIconPaths(name) {
           <ellipse cx="0" cy="0" rx="2.6" ry="1.6" opacity="0.5" />
         </>
       );
+    case "arena":
+      return (
+        <>
+          <ellipse cx="0" cy="0.6" rx="4.6" ry="3" />
+          <ellipse cx="0" cy="0.2" rx="4.6" ry="3" fill="none" stroke="#fff" strokeWidth="0.3" opacity="0.5" />
+        </>
+      );
     case "museum":
       return columnsBuilding("0,-4.2 3.4,-1.6 -3.4,-1.6");
+    case "amusementpark":
+      return (
+        <>
+          <circle cx="0" cy="0" r="4.4" fill="none" stroke="currentColor" strokeWidth="0.7" />
+          <circle cx="0" cy="0" r="0.5" />
+          {[0, 60, 120, 180, 240, 300].map((deg, i) => (
+            <circle key={i} cx={4.4 * Math.cos((deg * Math.PI) / 180)} cy={4.4 * Math.sin((deg * Math.PI) / 180)} r="0.7" />
+          ))}
+          <line x1="0" y1="0" x2="0" y2="4.6" stroke="currentColor" strokeWidth="0.5" />
+        </>
+      );
+    case "garden":
+      return (
+        <>
+          <ellipse cx="0" cy="0" rx="4.2" ry="3" opacity="0.5" />
+          {[
+            [-2, -0.6],
+            [0, 0.4],
+            [2.2, -0.4],
+          ].map(([dx, dy], i) => (
+            <g key={i} transform={`translate(${dx}, ${dy})`}>
+              <circle r="0.9" />
+              {[0, 72, 144, 216, 288].map((deg, j) => (
+                <ellipse key={j} cx={Math.cos((deg * Math.PI) / 180) * 1.1} cy={Math.sin((deg * Math.PI) / 180) * 1.1} rx="0.55" ry="0.3" transform={`rotate(${deg} ${Math.cos((deg * Math.PI) / 180) * 1.1} ${Math.sin((deg * Math.PI) / 180) * 1.1})`} opacity="0.85" />
+              ))}
+            </g>
+          ))}
+        </>
+      );
+    case "casino":
+      return (
+        <>
+          <rect x="-3.2" y="-3.2" width="6.4" height="6.4" rx="1.1" />
+          {[
+            [-1.4, -1.4],
+            [1.4, -1.4],
+            [0, 0],
+            [-1.4, 1.4],
+            [1.4, 1.4],
+          ].map(([dx, dy], i) => (
+            <circle key={i} cx={dx} cy={dy} r="0.55" fill="#fff" />
+          ))}
+        </>
+      );
     case "theater":
       return (
         <>
@@ -488,6 +692,40 @@ export function renderIconPaths(name) {
     case "heart":
       return (
         <path d="M 0,3.6 C -4.6,0.4 -4.8,-2.6 -2.4,-3.6 C -0.9,-4.2 0,-3 0,-2 C 0,-3 0.9,-4.2 2.4,-3.6 C 4.8,-2.6 4.6,0.4 0,3.6 Z" />
+      );
+    case "trophy":
+      return (
+        <>
+          <path d="M -2.4,-3.4 L 2.4,-3.4 L 2,-0.4 Q 1.8,1.4 0,1.6 Q -1.8,1.4 -2,-0.4 Z" />
+          <path d="M -2.4,-3 Q -4.4,-3 -4.2,-1.2 Q -4,0.2 -2.2,0" fill="none" stroke="currentColor" strokeWidth="0.5" />
+          <path d="M 2.4,-3 Q 4.4,-3 4.2,-1.2 Q 4,0.2 2.2,0" fill="none" stroke="currentColor" strokeWidth="0.5" />
+          <rect x="-0.6" y="1.6" width="1.2" height="1.4" />
+          <rect x="-1.8" y="3" width="3.6" height="0.9" />
+        </>
+      );
+    case "gem":
+      return (
+        <>
+          <polygon points="0,-3.6 3.6,-1 2,3 -2,3 -3.6,-1" />
+          <polygon points="0,-3.6 1.8,-1 0,3 -1.8,-1" fill="#fff" opacity="0.25" />
+        </>
+      );
+    case "key":
+      return (
+        <>
+          <circle cx="-2.6" cy="0" r="1.8" fill="none" stroke="currentColor" strokeWidth="1" />
+          <line x1="-1" y1="0" x2="4.2" y2="0" stroke="currentColor" strokeWidth="0.9" />
+          <line x1="2.6" y1="0" x2="2.6" y2="1.6" stroke="currentColor" strokeWidth="0.9" />
+          <line x1="4.2" y1="0" x2="4.2" y2="1.6" stroke="currentColor" strokeWidth="0.9" />
+        </>
+      );
+    case "lightbulb":
+      return (
+        <>
+          <circle cx="0" cy="-1" r="3" />
+          <rect x="-1.2" y="1.6" width="2.4" height="1.6" rx="0.3" />
+          <line x1="-1" y1="3.4" x2="1" y2="3.4" stroke="currentColor" strokeWidth="0.5" />
+        </>
       );
     default:
       return <circle cx="0" cy="0" r="2" />;

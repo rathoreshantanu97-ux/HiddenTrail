@@ -1156,17 +1156,17 @@ begin
       if v_dec_type = 'icon' then
         v_dec_icon := v_dec->>'icon';
         -- Kept in sync with ICON_CATEGORIES in src/lib/decorationIcons.jsx
-        -- (48 icons across Nature/Civic/Transport/Commerce/Recreation/
+        -- (73 icons across Nature/Civic/Transport/Commerce/Recreation/
         -- Symbols) -- expanded specifically because custom image
         -- uploads aren't available, so a wide built-in variety is the
         -- actual mitigation for that gap, not a nice-to-have.
         if v_dec_icon not in (
-          'water','lake','river','mountain','hill','forest','tree','palm',
-          'landmark','school','hospital','police','firestation','church','temple','courthouse','library','prison',
-          'bus','train','airport','port','parking','bridge','subway','road',
-          'shop','mall','market','restaurant','hotel','bank','factory','office',
-          'stadium','museum','theater','zoo','playground','pool','monument','campsite',
-          'star','flag','pin','cross','crown','anchor','compass','heart'
+          'water','lake','pond','river','waterfall','mountain','hill','cliff','cave','forest','tree','palm',
+          'landmark','fort','school','college','hospital','police','firestation','church','temple','monastery','courthouse','library','prison',
+          'bus','train','railway','metro','subway','tram','airport','port','cablecar','parking','bridge','road',
+          'shop','mall','market','cafe','restaurant','bakery','hotel','bank','pharmacy','gasstation','factory','office',
+          'stadium','arena','museum','theater','zoo','amusementpark','garden','playground','pool','monument','campsite','casino',
+          'star','flag','pin','cross','crown','anchor','compass','heart','trophy','gem','key','lightbulb'
         ) then
           raise exception 'Invalid decoration icon';
         end if;

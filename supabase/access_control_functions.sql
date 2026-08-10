@@ -935,17 +935,22 @@ returns table (
   -- Added for the in-UI map editor -- see curve_offset_overrides /
   -- station_overrides column comments in access_control_schema.sql.
   out_curve_offset_overrides jsonb,
-  out_station_overrides jsonb
+  out_station_overrides jsonb,
+  -- Added for map beautification (icons/shapes/text/images + background
+  -- color) -- see decorations / background_override column comments in
+  -- access_control_schema.sql.
+  out_decorations jsonb,
+  out_background_override text
 )
 language sql
 security definer
 as $$
   select map_id, detective_density_ratio_override, ticket_counts_override, round_scaling_ratio_override,
-         curve_offset_overrides, station_overrides
+         curve_offset_overrides, station_overrides, decorations, background_override
   from map_settings
   where detective_density_ratio_override is not null or ticket_counts_override is not null
      or round_scaling_ratio_override is not null or curve_offset_overrides is not null
-     or station_overrides is not null;
+     or station_overrides is not null or decorations is not null or background_override is not null;
 $$;
 grant execute on function get_map_overrides() to anon, authenticated;
 
@@ -977,11 +982,14 @@ grant execute on function get_map_overrides() to anon, authenticated;
 -- table comment above).
 -- -----------------------------------------------------------------------------
 drop function if exists set_map_visual_overrides(uuid, text, jsonb, jsonb);
+drop function if exists set_map_visual_overrides(uuid, text, jsonb, jsonb, jsonb, text);
 create or replace function set_map_visual_overrides(
   p_caller_account_id uuid,
   p_map_id text,
   p_curve_offset_overrides jsonb,
-  p_station_overrides jsonb
+  p_station_overrides jsonb,
+  p_decorations jsonb default null,
+  p_background_override text default null
 ) returns void
 language plpgsql
 security definer
@@ -1001,6 +1009,30 @@ declare
   v_name text;
   v_arr_elem jsonb;
   v_arr_clamped jsonb;
+  -- Decorations validation
+  v_clamped_decorations jsonb := '[]'::jsonb;
+  v_dec jsonb;
+  v_clamped_dec jsonb;
+  v_dec_type text;
+  v_dec_count int := 0;
+  v_dec_x numeric;
+  v_dec_y numeric;
+  v_dec_rotation numeric;
+  v_dec_opacity numeric;
+  v_dec_color text;
+  v_dec_size numeric;
+  v_dec_w numeric;
+  v_dec_h numeric;
+  v_dec_icon text;
+  v_dec_shape text;
+  v_dec_stroke_width numeric;
+  v_dec_stroke_color text;
+  v_dec_fill_color text;
+  v_dec_text text;
+  v_dec_font_size numeric;
+  v_dec_url text;
+  v_dec_id text;
+  v_hex_re text := '^#[0-9a-fA-F]{6}$';
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
   if v_caller.id is null or not v_caller.is_admin then
@@ -1072,20 +1104,136 @@ begin
     end loop;
   end if;
 
-  insert into map_settings (map_id, curve_offset_overrides, station_overrides, updated_at)
+  -- Decorations: an ORDERED array (not a keyed object like the two
+  -- above), each item a small object describing one icon/shape/text/
+  -- image placed on the map. Capped at 60 items -- generous for
+  -- beautification, but a hard ceiling against a runaway/corrupted
+  -- payload bloating every game-load response. Every numeric field is
+  -- clamped to a sane range and every enum-like field (type/icon/shape)
+  -- is checked against the actual allowed set (kept in sync with
+  -- ICON_LIBRARY in src/lib/decorationIcons.jsx and the shape list in
+  -- DecorationsLayer.jsx) rather than passed through -- this is still
+  -- purely cosmetic data (never touches stations/edges/tickets/rounds),
+  -- but validating it properly means a corrupted or malicious payload
+  -- can't inject something that fails to render, points off-canvas, or
+  -- (for images) loads from an arbitrary external host.
+  if p_decorations is not null then
+    if jsonb_typeof(p_decorations) <> 'array' then
+      raise exception 'decorations must be an array';
+    end if;
+    if jsonb_array_length(p_decorations) > 60 then
+      raise exception 'Too many decorations (max 60)';
+    end if;
+
+    for v_dec in select * from jsonb_array_elements(p_decorations) loop
+      v_dec_type := v_dec->>'type';
+      if v_dec_type not in ('icon', 'shape', 'text', 'image') then
+        raise exception 'Invalid decoration type';
+      end if;
+
+      v_dec_id := left(coalesce(v_dec->>'id', ''), 60);
+      if v_dec_id = '' then
+        raise exception 'Decoration is missing an id';
+      end if;
+
+      v_dec_x := greatest(-20, least(300, coalesce((v_dec->>'x')::numeric, 0)));
+      v_dec_y := greatest(-20, least(300, coalesce((v_dec->>'y')::numeric, 0)));
+      v_dec_rotation := greatest(-360, least(360, coalesce((v_dec->>'rotation')::numeric, 0)));
+      v_dec_opacity := greatest(0, least(1, coalesce((v_dec->>'opacity')::numeric, 1)));
+      v_dec_color := v_dec->>'color';
+      if v_dec_color is not null and v_dec_color !~ v_hex_re then
+        v_dec_color := null;
+      end if;
+
+      v_clamped_dec := jsonb_build_object(
+        'id', v_dec_id, 'type', v_dec_type, 'x', v_dec_x, 'y', v_dec_y,
+        'rotation', v_dec_rotation, 'opacity', v_dec_opacity
+      );
+      if v_dec_color is not null then
+        v_clamped_dec := v_clamped_dec || jsonb_build_object('color', v_dec_color);
+      end if;
+
+      if v_dec_type = 'icon' then
+        v_dec_icon := v_dec->>'icon';
+        if v_dec_icon not in ('landmark','water','park','tree','school','bus','police','fort','airport','building','star','flag') then
+          raise exception 'Invalid decoration icon';
+        end if;
+        v_dec_size := greatest(1, least(40, coalesce((v_dec->>'size')::numeric, 6)));
+        v_clamped_dec := v_clamped_dec || jsonb_build_object('icon', v_dec_icon, 'size', v_dec_size);
+
+      elsif v_dec_type = 'shape' then
+        v_dec_shape := v_dec->>'shape';
+        if v_dec_shape not in ('rect', 'circle', 'line') then
+          raise exception 'Invalid decoration shape';
+        end if;
+        v_dec_w := greatest(0.5, least(60, coalesce((v_dec->>'w')::numeric, 8)));
+        v_dec_h := greatest(0.5, least(60, coalesce((v_dec->>'h')::numeric, 8)));
+        v_dec_stroke_width := greatest(0, least(3, coalesce((v_dec->>'strokeWidth')::numeric, 0)));
+        v_dec_stroke_color := v_dec->>'strokeColor';
+        if v_dec_stroke_color is not null and v_dec_stroke_color !~ v_hex_re then
+          v_dec_stroke_color := null;
+        end if;
+        v_dec_fill_color := v_dec->>'fillColor';
+        if v_dec_fill_color is not null and v_dec_fill_color <> 'none' then
+          v_dec_fill_color := null;
+        end if;
+        v_clamped_dec := v_clamped_dec || jsonb_build_object('shape', v_dec_shape, 'w', v_dec_w, 'h', v_dec_h, 'strokeWidth', v_dec_stroke_width);
+        if v_dec_stroke_color is not null then
+          v_clamped_dec := v_clamped_dec || jsonb_build_object('strokeColor', v_dec_stroke_color);
+        end if;
+        if v_dec_fill_color is not null then
+          v_clamped_dec := v_clamped_dec || jsonb_build_object('fillColor', v_dec_fill_color);
+        end if;
+
+      elsif v_dec_type = 'text' then
+        v_dec_text := left(coalesce(v_dec->>'text', ''), 40);
+        v_dec_font_size := greatest(1, least(10, coalesce((v_dec->>'fontSize')::numeric, 2.5)));
+        v_clamped_dec := v_clamped_dec || jsonb_build_object('text', v_dec_text, 'fontSize', v_dec_font_size);
+
+      elsif v_dec_type = 'image' then
+        v_dec_url := v_dec->>'url';
+        -- Must be a URL our own upload path actually produced (the
+        -- public URL of the map-decorations storage bucket) -- never an
+        -- arbitrary external URL, which would otherwise let an admin
+        -- (accidentally or otherwise) turn this into an open image proxy
+        -- or link out to untrusted/mixed content on every player's client.
+        if v_dec_url is null or v_dec_url !~ '^https://[a-z0-9-]+\.supabase\.co/storage/v1/object/public/map-decorations/' then
+          raise exception 'Invalid decoration image url';
+        end if;
+        v_dec_w := greatest(0.5, least(60, coalesce((v_dec->>'w')::numeric, 10)));
+        v_dec_h := greatest(0.5, least(60, coalesce((v_dec->>'h')::numeric, 10)));
+        v_clamped_dec := v_clamped_dec || jsonb_build_object('url', v_dec_url, 'w', v_dec_w, 'h', v_dec_h);
+      end if;
+
+      v_clamped_decorations := v_clamped_decorations || jsonb_build_array(v_clamped_dec);
+      v_dec_count := v_dec_count + 1;
+    end loop;
+  end if;
+
+  -- Background override: a single hex color, or null to clear it back to
+  -- the map's own default.
+  if p_background_override is not null and p_background_override !~ v_hex_re then
+    raise exception 'Invalid background color';
+  end if;
+
+  insert into map_settings (map_id, curve_offset_overrides, station_overrides, decorations, background_override, updated_at)
   values (
     p_map_id,
     case when p_curve_offset_overrides is null then null else v_clamped_curves end,
     case when p_station_overrides is null then null else v_clamped_stations end,
+    case when p_decorations is null then null else v_clamped_decorations end,
+    p_background_override,
     now()
   )
   on conflict (map_id) do update set
     curve_offset_overrides = case when p_curve_offset_overrides is null then null else v_clamped_curves end,
     station_overrides = case when p_station_overrides is null then null else v_clamped_stations end,
+    decorations = case when p_decorations is null then null else v_clamped_decorations end,
+    background_override = p_background_override,
     updated_at = now();
 end;
 $$;
-grant execute on function set_map_visual_overrides(uuid, text, jsonb, jsonb) to anon, authenticated;
+grant execute on function set_map_visual_overrides(uuid, text, jsonb, jsonb, jsonb, text) to anon, authenticated;
 
 
 -- -----------------------------------------------------------------------------

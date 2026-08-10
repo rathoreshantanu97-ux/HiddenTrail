@@ -75,6 +75,20 @@ export function applyMapOverride(map, override) {
     }
   }
 
+  // Decorations (icons/shapes/text/images) and the background color
+  // override are both whole-value overrides, not merged piecemeal like
+  // manualCurveOffsets/stations above -- a decorations LIST is an
+  // ordered array where position matters, so there's no sensible
+  // per-key merge (unlike an edge-keyed or station-id-keyed object); the
+  // editor always saves/loads the complete list. undefined means "no
+  // override object at all," so the map's own default (no decorations,
+  // no override color) still applies -- only an explicit override value
+  // (including an empty array, meaning "admin cleared every decoration")
+  // replaces it.
+  const effectiveDecorations = override.decorations !== undefined ? override.decorations : map.decorations || null;
+  const effectiveBackgroundOverrideColor =
+    override.backgroundOverrideColor !== undefined ? override.backgroundOverrideColor : null;
+
   return {
     ...map,
     mapLimits: effectiveLimits,
@@ -86,6 +100,8 @@ export function applyMapOverride(map, override) {
     majorLabelDir: effectiveMajorLabelDir,
     minorLabelDir: effectiveMinorLabelDir,
     majorStations: effectiveMajorStations,
+    decorations: effectiveDecorations,
+    backgroundOverrideColor: effectiveBackgroundOverrideColor,
   };
 }
 

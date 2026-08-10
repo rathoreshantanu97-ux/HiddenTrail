@@ -254,22 +254,35 @@ export async function getMapOverrides() {
       // Added for the in-UI map editor -- see MapEditorPanel.jsx.
       curveOffsetOverrides: row.out_curve_offset_overrides,
       stationOverrides: row.out_station_overrides,
+      // Added for map beautification -- see DecorationsLayer.jsx.
+      decorations: row.out_decorations,
+      backgroundOverrideColor: row.out_background_override,
     };
   }
   return result;
 }
 
 // setMapVisualOverrides -- saves the in-UI map editor's changes (curve
-// shapes + station position/label/name/prominence). Kept as a separate
-// call from setMapTicketOverrides below since it's a different form/flow
-// with different data shape -- see set_map_visual_overrides in
-// access_control_functions.sql for the full reasoning and validation.
-export async function setMapVisualOverrides({ callerAccountId, mapId, curveOffsetOverrides, stationOverrides }) {
+// shapes + station position/label/name/prominence + decorations +
+// background color). Kept as a separate call from setMapTicketOverrides
+// below since it's a different form/flow with different data shape --
+// see set_map_visual_overrides in access_control_functions.sql for the
+// full reasoning and validation.
+export async function setMapVisualOverrides({
+  callerAccountId,
+  mapId,
+  curveOffsetOverrides,
+  stationOverrides,
+  decorations,
+  backgroundOverrideColor,
+}) {
   await callRpc("set_map_visual_overrides", {
     p_caller_account_id: callerAccountId,
     p_map_id: mapId,
     p_curve_offset_overrides: curveOffsetOverrides,
     p_station_overrides: stationOverrides,
+    p_decorations: decorations,
+    p_background_override: backgroundOverrideColor,
   });
 }
 

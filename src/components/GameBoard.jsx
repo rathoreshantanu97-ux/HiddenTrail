@@ -13,6 +13,7 @@ import {
   formatLogEntry,
 } from "../lib/gameEngine.js";
 import { curvePathD } from "../lib/curveGeometry.js";
+import DecorationsLayer from "./DecorationsLayer.jsx";
 
 // ---------------------------------------------------------------------------
 // GAME BOARD — renders the full playing screen: header, ticket panel,
@@ -1081,6 +1082,11 @@ export default function GameBoard({
 
               <MapBackground map={map} />
               <MapFrameAndCompass map={map} />
+              {/* Admin decorations (icons/shapes/text/images) -- always
+                  painted directly after the background and before any
+                  transit line or station, so they can never visually
+                  cover anything gameplay-relevant. See DecorationsLayer.jsx. */}
+              <DecorationsLayer decorations={map.decorations} />
 
               {[...map.allRenderEdges]
                 .map((e, i) => [e, i])

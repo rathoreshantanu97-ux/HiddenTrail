@@ -5,6 +5,8 @@ import { applyMapOverride } from "../lib/useMapWithOverrides.js";
 import { curvePathD, curveControlPoints, sampleCurvePoints, normalizeCurveOffsets } from "../lib/curveGeometry.js";
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
+import DecorationsLayer, { DecorationItem } from "./DecorationsLayer.jsx";
+import { ICON_LIBRARY, ICON_LABELS, renderIconPaths } from "../lib/decorationIcons.jsx";
 
 // ---------------------------------------------------------------------------
 // MAP EDITOR PANEL — lets an admin visually drag a route's curve (like
@@ -39,6 +41,25 @@ const LABEL_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const NODE_R = 1.6; // matches GameBoard.jsx's own station radius exactly
 const HANDLE_R = 0.65; // small, design-tool-anchor sized -- not station-sized
 const HANDLE_R_SELECTED = 0.85;
+const MAX_DECORATIONS = 60; // matches the server-side cap in set_map_visual_overrides
+const SHAPE_LIST = ["rect", "circle", "line"];
+const SHAPE_LABELS = { rect: "Rectangle", circle: "Circle", line: "Line" };
+// Presets chosen to sit comfortably behind every mode color on every map
+// (light, low-saturation) -- a background this light never fights the
+// route colors for attention, the same principle the maps' own default
+// parchment tone (#f6f1e5) was tuned around.
+const BACKGROUND_PRESETS = [
+  { label: "Default", value: null },
+  { label: "Parchment", value: "#f6f1e5" },
+  { label: "Cool grey", value: "#eef0f2" },
+  { label: "Sage", value: "#eef3e5" },
+  { label: "Sand", value: "#f3ecd9" },
+  { label: "Sky", value: "#e8f0f6" },
+  { label: "Blush", value: "#f6ebe9" },
+];
+function makeDecorationId() {
+  return `dec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function edgeKey(a, b) {
   return a < b ? `${a}-${b}` : `${b}-${a}`;
@@ -69,7 +90,17 @@ export default function MapEditorPanel({ accountId, onBack }) {
   const [selectedStation, setSelectedStation] = useState(null);
   const [selectedEdge, setSelectedEdge] = useState(null); // edge key of the curve currently focused
   const [hoveredEdge, setHoveredEdge] = useState(null);
-  const [dragState, setDragState] = useState(null); // { type: "curve"|"station", key/id, pointIndex }
+  // "edit" = curves + stations (the original tool); "decorate" = the new
+  // icons/shapes/text/background beautification layer. Kept as separate
+  // modes (rather than one giant always-on canvas) so the canvas's click/
+  // drag behavior is never ambiguous about which kind of thing you're
+  // about to grab.
+  const [editorMode, setEditorMode] = useState("edit"); // named editorMode (not "mode") to avoid shadowing the per-edge transport "mode" variable used throughout this file's edge-rendering code
+  const [decorationDraft, setDecorationDraft] = useState([]); // ordered array, same shape saved to the server
+  const [backgroundDraft, setBackgroundDraft] = useState(null);
+  const [selectedDecorationId, setSelectedDecorationId] = useState(null);
+  const [placementTool, setPlacementTool] = useState(null); // {type:"icon",icon} | {type:"shape",shape} | {type:"text"} -- armed, next canvas click places it
+  const [dragState, setDragState] = useState(null); // { type: "curve"|"station"|"decoration", key/id, pointIndex }
   const [warning, setWarning] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState("");
@@ -86,6 +117,8 @@ export default function MapEditorPanel({ accountId, onBack }) {
       setSavedOverride(existing);
       setCurveDraft(existing?.curveOffsetOverrides || {});
       setStationDraft(existing?.stationOverrides || {});
+      setDecorationDraft(existing?.decorations || []);
+      setBackgroundDraft(existing?.backgroundOverrideColor || null);
     } catch (e) {
       setErr(e.message);
     }
@@ -94,6 +127,9 @@ export default function MapEditorPanel({ accountId, onBack }) {
   useEffect(() => {
     setSelectedStation(null);
     setSelectedEdge(null);
+    setSelectedDecorationId(null);
+    setPlacementTool(null);
+    setEditorMode("edit");
     setWarning("");
     setZoom(1);
     loadOverrides();
@@ -103,8 +139,13 @@ export default function MapEditorPanel({ accountId, onBack }) {
   // via the SAME applyMapOverride every other part of the app uses.
   const displayMap = useMemo(() => {
     if (!rawMap) return null;
-    return applyMapOverride(rawMap, { curveOffsetOverrides: curveDraft, stationOverrides: stationDraft });
-  }, [rawMap, curveDraft, stationDraft]);
+    return applyMapOverride(rawMap, {
+      curveOffsetOverrides: curveDraft,
+      stationOverrides: stationDraft,
+      decorations: decorationDraft,
+      backgroundOverrideColor: backgroundDraft,
+    });
+  }, [rawMap, curveDraft, stationDraft, decorationDraft, backgroundDraft]);
 
   if (!rawMap || !displayMap) {
     return (
@@ -219,12 +260,82 @@ export default function MapEditorPanel({ accountId, onBack }) {
       } else {
         setWarning("");
       }
+    } else if (dragState.type === "decoration") {
+      const { id } = dragState;
+      setDecorationDraft((prev) => prev.map((d) => (d.id === id ? { ...d, x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 } : d)));
     }
   }
 
   function handlePointerUp() {
     setDragState(null);
     setWarning("");
+  }
+
+  // ---- decorations (icons/shapes/text/background) ----------------------
+  function placeDecorationAt(evt) {
+    if (!placementTool) return;
+    const p = screenToSVG(evt);
+    if (decorationDraft.length >= MAX_DECORATIONS) {
+      setErr(`This map already has the maximum of ${MAX_DECORATIONS} decorations.`);
+      setPlacementTool(null);
+      return;
+    }
+    const base = {
+      id: makeDecorationId(),
+      x: Math.round(p.x * 100) / 100,
+      y: Math.round(p.y * 100) / 100,
+      rotation: 0,
+      opacity: 1,
+      color: "#5c5648",
+    };
+    let created;
+    if (placementTool.type === "icon") {
+      created = { ...base, type: "icon", icon: placementTool.icon, size: 6 };
+    } else if (placementTool.type === "shape") {
+      created = { ...base, type: "shape", shape: placementTool.shape, w: 8, h: 8, strokeWidth: 0, color: "#9dc48a" };
+    } else if (placementTool.type === "text") {
+      created = { ...base, type: "text", text: "Label", fontSize: 2.5 };
+    } else {
+      return;
+    }
+    setDecorationDraft((prev) => [...prev, created]);
+    setSelectedDecorationId(created.id);
+    setPlacementTool(null);
+  }
+
+  function startDecorationDrag(evt, id) {
+    evt.stopPropagation();
+    setSelectedDecorationId(id);
+    setDragState({ type: "decoration", id });
+  }
+
+  function selectDecoration(evt, id) {
+    evt.stopPropagation();
+    setSelectedDecorationId(id);
+  }
+
+  function updateDecoration(id, fields) {
+    setDecorationDraft((prev) => prev.map((d) => (d.id === id ? { ...d, ...fields } : d)));
+  }
+
+  function removeDecoration(id) {
+    setDecorationDraft((prev) => prev.filter((d) => d.id !== id));
+    if (selectedDecorationId === id) setSelectedDecorationId(null);
+  }
+
+  // Layer order = array order (index 0 painted first/furthest back).
+  // "Send backward"/"Bring forward" swap the item with its neighbor,
+  // same one-step-at-a-time convention as PowerPoint's arrow buttons.
+  function moveDecorationLayer(id, direction) {
+    setDecorationDraft((prev) => {
+      const idx = prev.findIndex((d) => d.id === id);
+      if (idx === -1) return prev;
+      const swapWith = direction === "back" ? idx - 1 : idx + 1;
+      if (swapWith < 0 || swapWith >= prev.length) return prev;
+      const next = prev.slice();
+      [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+      return next;
+    });
   }
 
   function resetCurve(key) {
@@ -292,11 +403,14 @@ export default function MapEditorPanel({ accountId, onBack }) {
     try {
       const curvesToSave = Object.keys(curveDraft).length > 0 ? curveDraft : null;
       const stationsToSave = Object.keys(stationDraft).length > 0 ? stationDraft : null;
+      const decorationsToSave = decorationDraft.length > 0 ? decorationDraft : null;
       await auth.setMapVisualOverrides({
         callerAccountId: accountId,
         mapId,
         curveOffsetOverrides: curvesToSave,
         stationOverrides: stationsToSave,
+        decorations: decorationsToSave,
+        backgroundOverrideColor: backgroundDraft,
       });
       await loadOverrides();
       setSaved("Saved — live for every player now.");
@@ -312,10 +426,20 @@ export default function MapEditorPanel({ accountId, onBack }) {
     setBusy(true);
     setErr("");
     try {
-      await auth.setMapVisualOverrides({ callerAccountId: accountId, mapId, curveOffsetOverrides: null, stationOverrides: null });
+      await auth.setMapVisualOverrides({
+        callerAccountId: accountId,
+        mapId,
+        curveOffsetOverrides: null,
+        stationOverrides: null,
+        decorations: null,
+        backgroundOverrideColor: null,
+      });
       setCurveDraft({});
       setStationDraft({});
+      setDecorationDraft([]);
+      setBackgroundDraft(null);
       setSelectedEdge(null);
+      setSelectedDecorationId(null);
       await loadOverrides();
       setSaved("Reset to the map's original defaults.");
       setTimeout(() => setSaved(""), 3000);
@@ -337,7 +461,12 @@ export default function MapEditorPanel({ accountId, onBack }) {
 
   const curveEditCount = Object.keys(curveDraft).length;
   const stationEditCount = Object.keys(stationDraft).length;
-  const hasUnsavedChanges = curveEditCount > 0 || stationEditCount > 0;
+  const savedDecorationsJSON = JSON.stringify(savedOverride?.decorations || []);
+  const draftDecorationsJSON = JSON.stringify(decorationDraft);
+  const decorationsChanged = savedDecorationsJSON !== draftDecorationsJSON;
+  const backgroundChanged = (savedOverride?.backgroundOverrideColor || null) !== backgroundDraft;
+  const hasUnsavedChanges = curveEditCount > 0 || stationEditCount > 0 || decorationsChanged || backgroundChanged;
+  const selectedDecoration = decorationDraft.find((d) => d.id === selectedDecorationId) || null;
 
   const selectedEdgePoints = selectedEdge != null ? (normalizeCurveOffsets(curveDraft[selectedEdge]) || [0]).length : 0;
 
@@ -368,14 +497,47 @@ export default function MapEditorPanel({ accountId, onBack }) {
         ))}
       </div>
 
+      <div style={styles.modeTabs}>
+        <button
+          style={{ ...styles.modeTab, ...(editorMode === "edit" ? styles.modeTabActive : {}) }}
+          onClick={() => {
+            setEditorMode("edit");
+            setSelectedDecorationId(null);
+            setPlacementTool(null);
+          }}
+        >
+          Curves &amp; Stations
+        </button>
+        <button
+          style={{ ...styles.modeTab, ...(editorMode === "decorate" ? styles.modeTabActive : {}) }}
+          onClick={() => {
+            setEditorMode("decorate");
+            setSelectedStation(null);
+            setSelectedEdge(null);
+          }}
+        >
+          Decorate
+        </button>
+      </div>
+
       <div style={styles.helpBar}>
         <span style={styles.helpIcon}>i</span>
-        <span>
-          Click any route to select it, then drag its small circular handle to bend it — a <strong>+</strong> button
-          appears next to the handle so you can add up to 3 bend points for a smooth S-curve on longer routes.
-          Drag a station a little to nudge its position, or click it to rename/relabel. Nothing here can change
-          connectivity, tickets, or round timing, and nothing is live for players until you hit <strong>Save</strong>.
-        </span>
+        {editorMode === "edit" ? (
+          <span>
+            Click any route to select it, then drag its small circular handle to bend it — a <strong>+</strong>{" "}
+            button appears next to the handle so you can add up to 3 bend points for a smooth S-curve on longer
+            routes. Drag a station a little to nudge its position, or click it to rename/relabel. Nothing here can
+            change connectivity, tickets, or round timing, and nothing is live for players until you hit{" "}
+            <strong>Save</strong>.
+          </span>
+        ) : (
+          <span>
+            Pick an icon, shape, or text from the palette, then click anywhere on the map to place it. Drag a
+            placed item to move it, use the layer list to send it forward/backward, and set a background color for
+            the whole map. Purely decorative — never affects gameplay — and nothing is live until you hit{" "}
+            <strong>Save</strong>.
+          </span>
+        )}
       </div>
 
       <div style={styles.body}>
@@ -414,13 +576,18 @@ export default function MapEditorPanel({ accountId, onBack }) {
             <svg
               ref={svgRef}
               viewBox={`-1 -1.5 ${viewW + 2} ${viewH + 2.5}`}
-              style={{ ...styles.svg, transform: `scale(${zoom})` }}
+              style={{ ...styles.svg, transform: `scale(${zoom})`, cursor: placementTool ? "crosshair" : "default" }}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerLeave={handlePointerUp}
-              onClick={() => {
+              onClick={(e) => {
+                if (editorMode === "decorate" && placementTool) {
+                  placeDecorationAt(e);
+                  return;
+                }
                 setSelectedEdge(null);
                 setSelectedStation(null);
+                setSelectedDecorationId(null);
               }}
             >
               <defs>
@@ -446,6 +613,50 @@ export default function MapEditorPanel({ accountId, onBack }) {
                   a generic placeholder. */}
               <MapBackground map={displayMap} />
               <MapFrameAndCompass map={displayMap} />
+
+              {/* Decorations layer: read-only (via the same shared
+                  DecorationsLayer GameBoard/ReplayView use) while editing
+                  curves/stations, so it's visible as context but never
+                  gets in the way of route/station clicks; swapped for an
+                  interactive, selectable/draggable version in Decorate
+                  mode. Always painted before edges/stations either way,
+                  matching the "always behind transit" rule everywhere
+                  else. */}
+              {editorMode === "edit" ? (
+                <DecorationsLayer decorations={decorationDraft} />
+              ) : (
+                <g>
+                  {decorationDraft.map((d, idx) => {
+                    const isSelected = selectedDecorationId === d.id;
+                    return (
+                      <g key={d.id}>
+                        <DecorationItem d={d} />
+                        {/* Invisible generous hit-target + selection ring,
+                            drawn on top so a thin shape/line is still easy
+                            to grab and a selected item is obviously
+                            outlined. */}
+                        <circle
+                          cx={d.x}
+                          cy={d.y}
+                          r={Math.max(2.2, (d.size || d.w || d.fontSize || 6) / 2 + 1)}
+                          fill="transparent"
+                          stroke={isSelected ? "#2937c9" : "transparent"}
+                          strokeWidth={0.25}
+                          strokeDasharray={isSelected ? "0.8,0.6" : undefined}
+                          style={{ cursor: "grab" }}
+                          onPointerDown={(e) => startDecorationDrag(e, d.id)}
+                          onClick={(e) => selectDecoration(e, d.id)}
+                        />
+                        {isSelected && (
+                          <text x={d.x} y={d.y - Math.max(2.2, (d.size || d.w || d.fontSize || 6) / 2) - 1} fontSize="1.1" textAnchor="middle" fill="#2937c9" pointerEvents="none" fontWeight={700}>
+                            {idx + 1}
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </g>
+              )}
 
               {displayMap.edges.map(([a, b, mode], i) => {
                 const key = `${a}-${b}-${mode}-${i}`;
@@ -590,7 +801,239 @@ export default function MapEditorPanel({ accountId, onBack }) {
         </div>
 
         <div style={styles.sidePanel}>
-          {selectedStation != null && selectedStationData ? (
+          {editorMode === "decorate" ? (
+            <div>
+              {selectedDecoration ? (
+                <div>
+                  <div style={styles.sideTitle}>
+                    {selectedDecoration.type === "icon"
+                      ? ICON_LABELS[selectedDecoration.icon] || "Icon"
+                      : selectedDecoration.type === "shape"
+                      ? SHAPE_LABELS[selectedDecoration.shape] || "Shape"
+                      : selectedDecoration.type === "text"
+                      ? "Text"
+                      : "Item"}
+                  </div>
+
+                  {selectedDecoration.type === "text" && (
+                    <label style={styles.configLabel}>
+                      Text
+                      <input
+                        type="text"
+                        style={styles.configInput}
+                        value={selectedDecoration.text}
+                        onChange={(e) => updateDecoration(selectedDecoration.id, { text: e.target.value.slice(0, 40) })}
+                      />
+                    </label>
+                  )}
+
+                  <div style={styles.configLabelPlain}>Color</div>
+                  <input
+                    type="color"
+                    style={styles.colorInput}
+                    value={selectedDecoration.color || "#5c5648"}
+                    onChange={(e) => updateDecoration(selectedDecoration.id, { color: e.target.value })}
+                  />
+
+                  <div style={styles.configLabelPlain}>Size</div>
+                  <div style={styles.stepperRow}>
+                    <button
+                      style={styles.stepperBtn}
+                      onClick={() => {
+                        const field = selectedDecoration.type === "icon" ? "size" : selectedDecoration.type === "text" ? "fontSize" : "w";
+                        const cur = selectedDecoration[field] || 6;
+                        const next = Math.max(1, Math.round((cur - 1) * 10) / 10);
+                        if (selectedDecoration.type === "shape") {
+                          updateDecoration(selectedDecoration.id, { w: next, h: next * (selectedDecoration.h / selectedDecoration.w || 1) });
+                        } else {
+                          updateDecoration(selectedDecoration.id, { [field]: next });
+                        }
+                      }}
+                    >
+                      −
+                    </button>
+                    <span style={styles.stepperVal}>
+                      {Math.round((selectedDecoration.size || selectedDecoration.fontSize || selectedDecoration.w || 6) * 10) / 10}
+                    </span>
+                    <button
+                      style={styles.stepperBtn}
+                      onClick={() => {
+                        const field = selectedDecoration.type === "icon" ? "size" : selectedDecoration.type === "text" ? "fontSize" : "w";
+                        const cur = selectedDecoration[field] || 6;
+                        const next = Math.round((cur + 1) * 10) / 10;
+                        if (selectedDecoration.type === "shape") {
+                          updateDecoration(selectedDecoration.id, { w: next, h: next * (selectedDecoration.h / selectedDecoration.w || 1) });
+                        } else {
+                          updateDecoration(selectedDecoration.id, { [field]: next });
+                        }
+                      }}
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  <div style={styles.configLabelPlain}>Rotation</div>
+                  <div style={styles.stepperRow}>
+                    <button style={styles.stepperBtn} onClick={() => updateDecoration(selectedDecoration.id, { rotation: (selectedDecoration.rotation || 0) - 15 })}>
+                      ↺
+                    </button>
+                    <span style={styles.stepperVal}>{Math.round(selectedDecoration.rotation || 0)}°</span>
+                    <button style={styles.stepperBtn} onClick={() => updateDecoration(selectedDecoration.id, { rotation: (selectedDecoration.rotation || 0) + 15 })}>
+                      ↻
+                    </button>
+                  </div>
+
+                  <div style={styles.configLabelPlain}>Opacity</div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="1"
+                    step="0.05"
+                    value={selectedDecoration.opacity != null ? selectedDecoration.opacity : 1}
+                    onChange={(e) => updateDecoration(selectedDecoration.id, { opacity: Number(e.target.value) })}
+                    style={styles.rangeInput}
+                  />
+
+                  <div style={styles.configLabelPlain}>Layer order</div>
+                  <div style={styles.layerBtnRow}>
+                    <button style={styles.smallActionBtn} onClick={() => moveDecorationLayer(selectedDecoration.id, "back")}>
+                      ⬇ Send backward
+                    </button>
+                    <button style={styles.smallActionBtn} onClick={() => moveDecorationLayer(selectedDecoration.id, "front")}>
+                      ⬆ Bring forward
+                    </button>
+                  </div>
+
+                  <button style={{ ...styles.smallBtn, marginTop: 10, color: "#c0392b" }} onClick={() => removeDecoration(selectedDecoration.id)}>
+                    Delete
+                  </button>
+                  <button style={{ ...styles.smallBtn, marginTop: 6 }} onClick={() => setSelectedDecorationId(null)}>
+                    Deselect
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <div style={styles.sideTitle}>Add to map</div>
+                  <div style={styles.smallNote}>Pick an item, then click anywhere on the map to place it.</div>
+
+                  <div style={styles.configLabelPlain}>Icons</div>
+                  <div style={styles.iconGrid}>
+                    {ICON_LIBRARY.map((icon) => (
+                      <button
+                        key={icon}
+                        title={ICON_LABELS[icon]}
+                        style={{
+                          ...styles.iconBtn,
+                          ...(placementTool?.type === "icon" && placementTool.icon === icon ? styles.iconBtnActive : {}),
+                        }}
+                        onClick={() => setPlacementTool({ type: "icon", icon })}
+                      >
+                        <svg viewBox="-6 -6 12 12" width="20" height="20">
+                          <g fill="#5c5648">{renderIconPaths(icon)}</g>
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={styles.configLabelPlain}>Shapes</div>
+                  <div style={styles.iconGrid}>
+                    {SHAPE_LIST.map((shape) => (
+                      <button
+                        key={shape}
+                        title={SHAPE_LABELS[shape]}
+                        style={{
+                          ...styles.iconBtn,
+                          ...(placementTool?.type === "shape" && placementTool.shape === shape ? styles.iconBtnActive : {}),
+                        }}
+                        onClick={() => setPlacementTool({ type: "shape", shape })}
+                      >
+                        <svg viewBox="-6 -6 12 12" width="20" height="20">
+                          {shape === "circle" && <circle cx="0" cy="0" r="5" fill="#9dc48a" />}
+                          {shape === "rect" && <rect x="-5" y="-3.5" width="10" height="7" fill="#9dc48a" />}
+                          {shape === "line" && <line x1="-5" y1="0" x2="5" y2="0" stroke="#9dc48a" strokeWidth="1.4" />}
+                        </svg>
+                      </button>
+                    ))}
+                    <button
+                      title="Text label"
+                      style={{ ...styles.iconBtn, ...(placementTool?.type === "text" ? styles.iconBtnActive : {}) }}
+                      onClick={() => setPlacementTool({ type: "text" })}
+                    >
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#5c5648" }}>Aa</span>
+                    </button>
+                  </div>
+                  {placementTool && (
+                    <button style={{ ...styles.smallBtn, marginTop: 8 }} onClick={() => setPlacementTool(null)}>
+                      Cancel placing
+                    </button>
+                  )}
+
+                  <div style={styles.divider} />
+
+                  <div style={styles.sideTitle}>Background color</div>
+                  <div style={styles.bgSwatchGrid}>
+                    {BACKGROUND_PRESETS.map((preset) => (
+                      <button
+                        key={preset.label}
+                        title={preset.label}
+                        style={{
+                          ...styles.bgSwatch,
+                          background: preset.value || "repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 50% / 8px 8px",
+                          ...(backgroundDraft === preset.value ? styles.bgSwatchActive : {}),
+                        }}
+                        onClick={() => setBackgroundDraft(preset.value)}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      style={styles.colorInput}
+                      value={backgroundDraft || "#f6f1e5"}
+                      onChange={(e) => setBackgroundDraft(e.target.value)}
+                      title="Custom color"
+                    />
+                  </div>
+
+                  {decorationDraft.length > 0 && (
+                    <>
+                      <div style={styles.divider} />
+                      <div style={styles.sideTitle}>Layers ({decorationDraft.length})</div>
+                      <div style={styles.layerList}>
+                        {decorationDraft
+                          .slice()
+                          .map((d, idx) => idx)
+                          .reverse()
+                          .map((idx) => {
+                            const d = decorationDraft[idx];
+                            const label =
+                              d.type === "icon" ? ICON_LABELS[d.icon] : d.type === "shape" ? SHAPE_LABELS[d.shape] : d.type === "text" ? `"${d.text}"` : "Item";
+                            return (
+                              <div
+                                key={d.id}
+                                style={{ ...styles.layerRow, ...(selectedDecorationId === d.id ? styles.layerRowActive : {}) }}
+                                onClick={() => setSelectedDecorationId(d.id)}
+                              >
+                                <span>
+                                  {idx + 1}. {label}
+                                </span>
+                                <button
+                                  style={styles.tinyBtn}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeDecoration(d.id);
+                                  }}
+                                >
+                                  delete
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : selectedStation != null && selectedStationData ? (
             <div>
               <div style={styles.sideTitle}>Station {selectedStation}</div>
               <label style={styles.configLabel}>
@@ -660,6 +1103,8 @@ export default function MapEditorPanel({ accountId, onBack }) {
           <div style={styles.editSummaryRow}>
             <span style={styles.editSummaryPill}>{curveEditCount} curve{curveEditCount === 1 ? "" : "s"}</span>
             <span style={styles.editSummaryPill}>{stationEditCount} station{stationEditCount === 1 ? "" : "s"}</span>
+            {decorationsChanged && <span style={styles.editSummaryPill}>decorations changed</span>}
+            {backgroundChanged && <span style={styles.editSummaryPill}>background changed</span>}
           </div>
           {savedOverride && <div style={styles.smallNote}>Compared to what's already saved.</div>}
           {curveEditCount > 0 && (
@@ -794,4 +1239,22 @@ const styles = {
   smallBtn: { border: "1px solid #ddd", background: "#fff", borderRadius: 7, padding: "8px 10px", fontSize: 12, cursor: "pointer", width: "100%", fontWeight: 600 },
   errText: { fontSize: 13, color: "#c0392b", background: "#fdecea", borderRadius: 8, padding: "8px 10px", marginBottom: 10 },
   savedBanner: { fontSize: 13, color: "#1e8e5a", background: "#e8f7f0", border: "1px solid #b9e6cf", borderRadius: 8, padding: "8px 10px", marginBottom: 10, fontWeight: 600 },
+  modeTabs: { display: "flex", gap: 6, marginBottom: 12 },
+  modeTab: { flex: 1, border: "1.5px solid #ddd", background: "#fff", borderRadius: 9, padding: "9px 0", fontSize: 13, fontWeight: 700, cursor: "pointer", color: "#8a8375" },
+  modeTabActive: { background: "#2937c9", color: "#fff", borderColor: "#2937c9" },
+  colorInput: { width: "100%", height: 34, border: "1.5px solid #ddd", borderRadius: 8, padding: 2, cursor: "pointer", marginBottom: 12 },
+  stepperRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 },
+  stepperBtn: { width: 28, height: 28, borderRadius: 6, border: "1px solid #ddd", background: "#fafafa", fontSize: 15, cursor: "pointer", lineHeight: 1 },
+  stepperVal: { fontSize: 12.5, fontWeight: 700, color: "#5c5648", minWidth: 34, textAlign: "center" },
+  rangeInput: { width: "100%", marginBottom: 12 },
+  layerBtnRow: { display: "flex", gap: 6, marginBottom: 8 },
+  iconGrid: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 14 },
+  iconBtn: { width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #ddd", background: "#fafafa", borderRadius: 7, cursor: "pointer" },
+  iconBtnActive: { background: "#eef1fb", borderColor: "#2937c9" },
+  bgSwatchGrid: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12, alignItems: "center" },
+  bgSwatch: { width: 26, height: 26, borderRadius: "50%", border: "2px solid #ddd", cursor: "pointer", padding: 0 },
+  bgSwatchActive: { borderColor: "#2937c9", boxShadow: "0 0 0 2px #eef1fb" },
+  layerList: { display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" },
+  layerRow: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "6px 8px", borderRadius: 6, background: "#fafafa", cursor: "pointer", gap: 6 },
+  layerRowActive: { background: "#eef1fb", fontWeight: 700, color: "#2937c9" },
 };

@@ -225,6 +225,25 @@ create table if not exists map_settings (
   -- calibration (which is derived from the map's real inter-station
   -- distances).
   station_overrides jsonb,
+  -- decorations: [{id, type, x, y, ...type-specific fields}, ...] -- an
+  -- ORDERED array (index = paint order within this layer, back to
+  -- front), unlike curve_offset_overrides/station_overrides which are
+  -- keyed objects merged field-by-field. A decorations list is saved
+  -- and loaded as a whole -- there's no sensible per-item merge for an
+  -- ordered list the way there is for "this one edge's curve" or "this
+  -- one station's name." Purely visual (icons/shapes/text/images placed
+  -- by the admin for beautification) -- rendered by DecorationsLayer.jsx,
+  -- always directly after the background and before any transit line or
+  -- station, so it can never cover anything gameplay-relevant. See
+  -- set_map_visual_overrides below for the full validation.
+  decorations jsonb,
+  -- background_override: a single hex color string (e.g. "#eef3e0")
+  -- replacing just the base fill/wash MapBackground.jsx draws for
+  -- whichever theme is active -- every other piece of that theme's art
+  -- (water gradients, parks, landmark icons, region hulls for Westeros)
+  -- still renders on top exactly as before. null = use the map's own
+  -- default background color.
+  background_override text,
   updated_at timestamptz not null default now()
 );
 alter table map_settings add column if not exists detective_density_ratio_override numeric;
@@ -232,6 +251,8 @@ alter table map_settings add column if not exists ticket_counts_override jsonb;
 alter table map_settings add column if not exists round_scaling_ratio_override numeric;
 alter table map_settings add column if not exists curve_offset_overrides jsonb;
 alter table map_settings add column if not exists station_overrides jsonb;
+alter table map_settings add column if not exists decorations jsonb;
+alter table map_settings add column if not exists background_override text;
 
 
 -- -----------------------------------------------------------------------------

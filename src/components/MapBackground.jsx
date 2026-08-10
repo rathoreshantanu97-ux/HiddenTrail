@@ -23,6 +23,14 @@ export default function MapBackground({ map }) {
   const bg = map.background || { kind: "plain" };
   const w = map.viewW;
   const h = map.viewH;
+  // Admin-set background color override (from the Map Editor's
+  // background picker) -- a single flat fill that replaces just the base
+  // rect/wash for whichever theme is active, leaving all the actual
+  // decorative art (water gradients, parks, landmark icons, region
+  // hulls) drawn on top exactly as before. Purely cosmetic, same override
+  // mechanism as curve/station overrides -- see map_settings.background_
+  // override in access_control_schema.sql.
+  const overrideFill = map.backgroundOverrideColor || null;
 
   if (bg.kind === "regions" && bg.theme === "westeros") {
     const hulls = bg.regionHulls;
@@ -31,7 +39,7 @@ export default function MapBackground({ map }) {
         {/* Westeros: hand-drawn region hulls (derived from each region's
             actual station cluster), so the map keeps proper node spacing
             while still reading as a real illustrated continent. */}
-        <rect x="0" y="0" width={w} height={h} fill="url(#seaGrad)" />
+        <rect x="0" y="0" width={w} height={h} fill={overrideFill || "url(#seaGrad)"} />
 
         <path d={hulls.north} fill="#e4ecf0" opacity="0.95" filter="url(#regionShadow)" />
         <path d={hulls.riverlands} fill="#dce8d5" opacity="0.95" filter="url(#regionShadow)" />
@@ -111,7 +119,7 @@ export default function MapBackground({ map }) {
             since it pushes the background further from taxi's dark
             luminance in the correct direction. Combined with raising
             taxi's opacity to 0.85, effective contrast is now ~2.97:1. */}
-        <rect x="-10" y="-10" width="146" height="122" fill="#f6f1e5" />
+        <rect x="-10" y="-10" width="146" height="122" fill={overrideFill || "#f6f1e5"} />
 
         {/* Rural Lake -- station #86 @ (84.4, 8.85) */}
         <ellipse cx="84.4" cy="8.5" rx="4.5" ry="3" fill="url(#lakeGrad)" opacity="0.9" transform="rotate(10 84.4 8.5)" />
@@ -249,7 +257,7 @@ export default function MapBackground({ map }) {
     // of introducing a third, slightly-different parchment tone.
     return (
       <>
-        <rect x="-2" y="-2" width={w + 4} height={h + 4} fill="#f6f1e5" />
+        <rect x="-2" y="-2" width={w + 4} height={h + 4} fill={overrideFill || "#f6f1e5"} />
 
         {/* Lake near Chhota GhatyaPatya -- station #80 @ (42.65, 11.6) */}
         <ellipse cx="42.65" cy="11.6" rx="5.5" ry="3.8" fill="url(#lakeGrad)" opacity="0.9" />
@@ -341,7 +349,7 @@ export default function MapBackground({ map }) {
   // background tone rather than three near-duplicates.
   return (
     <>
-      <rect x="0" y="0" width={w} height={h} fill="#f6f1e5" />
+      <rect x="0" y="0" width={w} height={h} fill={overrideFill || "#f6f1e5"} />
       <circle cx="20" cy="25" r="17" fill="#ece2ca" opacity="0.6" />
       <circle cx="75" cy="20" r="15" fill="#ece2ca" opacity="0.6" />
       <circle cx="18" cy="70" r="16" fill="#e7e0c9" opacity="0.6" />

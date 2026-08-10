@@ -3,6 +3,7 @@ import { buildReplayTimeline } from "../lib/gameEngine.js";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
 import { curvePathD } from "../lib/curveGeometry.js";
+import DecorationsLayer from "./DecorationsLayer.jsx";
 
 // Label-placement helpers, matching GameBoard.jsx exactly, so a station's
 // name lands in the same spot in replay as it did during live play.
@@ -99,6 +100,7 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
           <svg viewBox={`-0.5 -1.5 ${(map.viewW || 100) + 1} ${(map.viewH || 100) + 2}`} preserveAspectRatio="none" style={styles.svg}>
             <MapBackground map={map} />
             <MapFrameAndCompass map={map} />
+            <DecorationsLayer decorations={map.decorations} />
             {[...map.allRenderEdges]
               .map((e, i) => [e, i])
               // Same render-order fix as GameBoard.jsx: taxi first, then

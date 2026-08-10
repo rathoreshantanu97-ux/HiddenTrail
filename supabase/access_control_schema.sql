@@ -200,11 +200,38 @@ create table if not exists map_settings (
   detective_density_ratio_override numeric,
   ticket_counts_override jsonb, -- {detective: {taxi,bus,underground}, mrx: {taxi,bus,underground,black,double}} or null
   round_scaling_ratio_override numeric, -- per-map override for the round-count scaling ratio, or null to use the global default
+  -- VISUAL overrides, added for the in-UI map editor (curve dragging +
+  -- small station adjustments). Deliberately kept separate in intent
+  -- from the gameplay-balance overrides above, even though they live in
+  -- the same row/table -- these only ever change how the map LOOKS
+  -- (curve shape, station position/label/name/prominence), never
+  -- connectivity, ticket counts, or round timing, so they can't affect
+  -- game balance no matter what an admin drags.
+  --
+  -- curve_offset_overrides: {"a-b": number, ...} -- same key format
+  -- (lower station id first) and same perpendicular-offset semantics as
+  -- MANUAL_CURVE_OFFSETS in each map's own JS file (see cityOfSendhwa.js
+  -- for the full explanation of the offset math) -- this OVERRIDES that
+  -- static value per-edge when present, exactly like ticket_counts_override
+  -- overrides the computed ticket defaults.
+  curve_offset_overrides jsonb,
+  -- station_overrides: {"<stationId>": {x, y, labelDir, name, isMajor}, ...}
+  -- -- any subset of these four fields may be present per station; a
+  -- missing field means "use the map's own default for that field."
+  -- Position nudges are capped server-side (see
+  -- set_map_visual_overrides) to a small radius from the station's
+  -- original coordinates, so this can't be used to drag a station
+  -- somewhere that would silently invalidate the ticket-count
+  -- calibration (which is derived from the map's real inter-station
+  -- distances).
+  station_overrides jsonb,
   updated_at timestamptz not null default now()
 );
 alter table map_settings add column if not exists detective_density_ratio_override numeric;
 alter table map_settings add column if not exists ticket_counts_override jsonb;
 alter table map_settings add column if not exists round_scaling_ratio_override numeric;
+alter table map_settings add column if not exists curve_offset_overrides jsonb;
+alter table map_settings add column if not exists station_overrides jsonb;
 
 
 -- -----------------------------------------------------------------------------

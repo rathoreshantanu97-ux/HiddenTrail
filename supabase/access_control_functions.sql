@@ -927,15 +927,144 @@ $$;
 -- -----------------------------------------------------------------------------
 drop function if exists get_map_overrides();
 create or replace function get_map_overrides()
-returns table (out_map_id text, out_detective_density_ratio_override numeric, out_ticket_counts_override jsonb, out_round_scaling_ratio_override numeric)
+returns table (
+  out_map_id text,
+  out_detective_density_ratio_override numeric,
+  out_ticket_counts_override jsonb,
+  out_round_scaling_ratio_override numeric,
+  -- Added for the in-UI map editor -- see curve_offset_overrides /
+  -- station_overrides column comments in access_control_schema.sql.
+  out_curve_offset_overrides jsonb,
+  out_station_overrides jsonb
+)
 language sql
 security definer
 as $$
-  select map_id, detective_density_ratio_override, ticket_counts_override, round_scaling_ratio_override
+  select map_id, detective_density_ratio_override, ticket_counts_override, round_scaling_ratio_override,
+         curve_offset_overrides, station_overrides
   from map_settings
-  where detective_density_ratio_override is not null or ticket_counts_override is not null or round_scaling_ratio_override is not null;
+  where detective_density_ratio_override is not null or ticket_counts_override is not null
+     or round_scaling_ratio_override is not null or curve_offset_overrides is not null
+     or station_overrides is not null;
 $$;
 grant execute on function get_map_overrides() to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- set_map_visual_overrides -- admin-only: set (or clear, by passing null)
+-- a specific map's curve-shape and station-appearance overrides, from
+-- the in-UI map editor. Deliberately a SEPARATE function from
+-- set_map_ticket_overrides (rather than folding these into it) since
+-- these two override groups are edited from genuinely different UI
+-- flows (a visual drag-editor vs a numeric settings form) and have
+-- different validation needs -- keeping them separate means a bug in
+-- one save path can't corrupt the other's data.
+--
+-- Validation here is deliberately modest: this can only ever change how
+-- the map LOOKS (curve bend amount, station position/label/name/
+-- prominence), never which stations exist, which edges connect them, or
+-- any ticket/round-timing value -- so there's no way for an admin
+-- (accidentally or otherwise) to break actual game balance through this
+-- function, only to make the map render oddly, which is low-stakes and
+-- immediately visible + reversible (every value can be cleared back to
+-- null = "use the map's own default"). Position/offset magnitudes are
+-- still clamped to a generous sanity range as a defensive backstop
+-- against a corrupted payload, but the REAL "keep nudges small" limit is
+-- enforced client-side in the editor itself (it won't let a drag travel
+-- far from the station's starting position), since the server has no
+-- independent knowledge of any map's actual layout to check against
+-- (maps are defined in code, not the database -- see the map_settings
+-- table comment above).
+-- -----------------------------------------------------------------------------
+drop function if exists set_map_visual_overrides(uuid, text, jsonb, jsonb);
+create or replace function set_map_visual_overrides(
+  p_caller_account_id uuid,
+  p_map_id text,
+  p_curve_offset_overrides jsonb,
+  p_station_overrides jsonb
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_caller accounts%rowtype;
+  v_clamped_curves jsonb := '{}'::jsonb;
+  v_clamped_stations jsonb := '{}'::jsonb;
+  v_key text;
+  v_val jsonb;
+  v_station_key text;
+  v_station_val jsonb;
+  v_clamped_station jsonb;
+  v_x numeric;
+  v_y numeric;
+  v_label_dir text;
+  v_name text;
+begin
+  select * into v_caller from accounts a where a.id = p_caller_account_id;
+  if v_caller.id is null or not v_caller.is_admin then
+    raise exception 'Only an app admin can change this setting';
+  end if;
+
+  -- Clamp every curve offset magnitude to a generous sanity range --
+  -- this is a defensive backstop only; the editor's own math (offset =
+  -- projected drag distance) never produces values anywhere near this
+  -- range in normal use.
+  if p_curve_offset_overrides is not null then
+    for v_key, v_val in select * from jsonb_each(p_curve_offset_overrides) loop
+      v_clamped_curves := v_clamped_curves || jsonb_build_object(
+        v_key, greatest(-150, least(150, (v_val#>>'{}')::numeric))
+      );
+    end loop;
+  end if;
+
+  -- Same defensive clamping per station field: label direction must be
+  -- one of the 8 real compass values (or null/absent), name capped at a
+  -- sane length, x/y clamped to a generous coordinate range covering
+  -- every current map's viewBox with room to spare.
+  if p_station_overrides is not null then
+    for v_station_key, v_station_val in select * from jsonb_each(p_station_overrides) loop
+      v_clamped_station := '{}'::jsonb;
+
+      if v_station_val ? 'x' and v_station_val ? 'y' then
+        v_x := greatest(-20, least(300, (v_station_val->>'x')::numeric));
+        v_y := greatest(-20, least(300, (v_station_val->>'y')::numeric));
+        v_clamped_station := v_clamped_station || jsonb_build_object('x', v_x, 'y', v_y);
+      end if;
+
+      if v_station_val ? 'labelDir' then
+        v_label_dir := v_station_val->>'labelDir';
+        if v_label_dir is null or v_label_dir = any(array['N','S','E','W','NE','NW','SE','SW']) then
+          v_clamped_station := v_clamped_station || jsonb_build_object('labelDir', v_label_dir);
+        end if;
+      end if;
+
+      if v_station_val ? 'name' then
+        v_name := left(v_station_val->>'name', 60);
+        v_clamped_station := v_clamped_station || jsonb_build_object('name', v_name);
+      end if;
+
+      if v_station_val ? 'isMajor' then
+        v_clamped_station := v_clamped_station || jsonb_build_object('isMajor', (v_station_val->>'isMajor')::boolean);
+      end if;
+
+      v_clamped_stations := v_clamped_stations || jsonb_build_object(v_station_key, v_clamped_station);
+    end loop;
+  end if;
+
+  insert into map_settings (map_id, curve_offset_overrides, station_overrides, updated_at)
+  values (
+    p_map_id,
+    case when p_curve_offset_overrides is null then null else v_clamped_curves end,
+    case when p_station_overrides is null then null else v_clamped_stations end,
+    now()
+  )
+  on conflict (map_id) do update set
+    curve_offset_overrides = case when p_curve_offset_overrides is null then null else v_clamped_curves end,
+    station_overrides = case when p_station_overrides is null then null else v_clamped_stations end,
+    updated_at = now();
+end;
+$$;
+grant execute on function set_map_visual_overrides(uuid, text, jsonb, jsonb) to anon, authenticated;
 
 
 -- -----------------------------------------------------------------------------

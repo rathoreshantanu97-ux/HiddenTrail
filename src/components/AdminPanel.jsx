@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import * as auth from "../lib/accessControlApi.js";
 import { MAP_LIST } from "../maps/index.js";
+import MapEditorPanel from "./MapEditorPanel.jsx";
 
 // ---------------------------------------------------------------------------
 // ADMIN PANEL — only reachable by an account with is_admin = true (the
@@ -11,6 +12,7 @@ import { MAP_LIST } from "../maps/index.js";
 // activate/deactivate, and turn-timer bounds / default invite limit.
 // ---------------------------------------------------------------------------
 export default function AdminPanel({ accountId, onBack }) {
+  const [showMapEditor, setShowMapEditor] = useState(false);
   const [isPublic, setIsPublicState] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [pending, setPending] = useState([]);
@@ -224,6 +226,10 @@ export default function AdminPanel({ accountId, onBack }) {
     }
   }
 
+  if (showMapEditor) {
+    return <MapEditorPanel accountId={accountId} onBack={() => setShowMapEditor(false)} />;
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.header}>
@@ -255,6 +261,9 @@ export default function AdminPanel({ accountId, onBack }) {
       <div style={styles.card}>
         <div style={styles.cardTitle}>Maps</div>
         <div style={styles.smallNote}>Deactivated maps won't appear in the map picker for new games.</div>
+        <button style={{ ...styles.toggleBtn, marginBottom: 12 }} onClick={() => setShowMapEditor(true)}>
+          Open Map Editor (drag curves &amp; adjust stations)
+        </button>
         <div style={styles.mapRow}>
           {MAP_LIST.map((m) => {
             const active = !inactiveMapIds.includes(m.id);

@@ -26,11 +26,66 @@ export function applyMapOverride(map, override) {
       ? computeRoundsAndRevealSchedule(map.graph, Object.keys(map.stations).map(Number), override.roundScalingRatioOverride)
       : map.roundsAndReveal;
 
+  // Curve/station VISUAL overrides, from the in-UI map editor
+  // (MapEditorPanel.jsx). Merged the same way as every override above --
+  // present fields replace the map's own default, everything else falls
+  // through unchanged. manualCurveOffsets is merged key-by-key (an
+  // override for ONE edge shouldn't drop every other edge's own manual
+  // curve) rather than wholesale replaced.
+  const effectiveManualCurveOffsets = override.curveOffsetOverrides
+    ? { ...(map.manualCurveOffsets || {}), ...override.curveOffsetOverrides }
+    : map.manualCurveOffsets;
+
+  let effectiveStations = map.stations;
+  let effectiveNames = map.names;
+  let effectiveMajorLabelDir = map.majorLabelDir;
+  let effectiveMinorLabelDir = map.minorLabelDir;
+  let effectiveMajorStations = map.majorStations;
+
+  if (override.stationOverrides) {
+    effectiveStations = { ...map.stations };
+    effectiveNames = { ...(map.names || {}) };
+    effectiveMajorLabelDir = { ...(map.majorLabelDir || {}) };
+    effectiveMinorLabelDir = { ...(map.minorLabelDir || {}) };
+    effectiveMajorStations = new Set(map.majorStations || []);
+
+    for (const [idStr, fields] of Object.entries(override.stationOverrides)) {
+      const id = Number(idStr);
+      if (fields.x != null && fields.y != null) {
+        effectiveStations[id] = [fields.x, fields.y];
+      }
+      if (fields.name != null) {
+        effectiveNames[id] = fields.name;
+      }
+      if (fields.isMajor != null) {
+        if (fields.isMajor) effectiveMajorStations.add(id);
+        else effectiveMajorStations.delete(id);
+      }
+      // labelDir applies to whichever list (major/minor) the station
+      // currently belongs to, checked AFTER the isMajor override above
+      // so a station just promoted/demoted this same save gets its
+      // label direction written to the right list.
+      if (fields.labelDir !== undefined) {
+        if (effectiveMajorStations.has(id)) {
+          effectiveMajorLabelDir[id] = fields.labelDir;
+        } else {
+          effectiveMinorLabelDir[id] = fields.labelDir;
+        }
+      }
+    }
+  }
+
   return {
     ...map,
     mapLimits: effectiveLimits,
     ticketCounts: effectiveTicketCounts,
     roundsAndReveal: effectiveRoundsAndReveal,
+    manualCurveOffsets: effectiveManualCurveOffsets,
+    stations: effectiveStations,
+    names: effectiveNames,
+    majorLabelDir: effectiveMajorLabelDir,
+    minorLabelDir: effectiveMinorLabelDir,
+    majorStations: effectiveMajorStations,
   };
 }
 

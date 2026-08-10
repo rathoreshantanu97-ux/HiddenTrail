@@ -1206,7 +1206,7 @@ export default function GameBoard({
                       opacity={mode === "taxi" ? taxiFadeOpacity * 0.9 : 0.9}
                     />
                     <path
-                      d={`M ${ax} ${ay} Q ${cx} ${cy} ${bx} ${by}`}
+                      d={pathD}
                       fill="none"
                       stroke={activeMode[mode].color}
                       strokeWidth={strokeW}

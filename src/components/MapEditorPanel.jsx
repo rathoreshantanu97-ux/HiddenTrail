@@ -3,6 +3,8 @@ import { MAP_LIST } from "../maps/index.js";
 import * as auth from "../lib/accessControlApi.js";
 import { applyMapOverride } from "../lib/useMapWithOverrides.js";
 import { curvePathD, curveControlPoints, sampleCurvePoints, normalizeCurveOffsets } from "../lib/curveGeometry.js";
+import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
+import { MODE_DEFAULT } from "../maps/mapSchema.js";
 
 // ---------------------------------------------------------------------------
 // MAP EDITOR PANEL — lets an admin visually drag a route's curve (like
@@ -10,36 +12,33 @@ import { curvePathD, curveControlPoints, sampleCurvePoints, normalizeCurveOffset
 // number, plus small, deliberately-LOW-RISK station adjustments
 // (reposition a little, relabel, rename, toggle prominence). Everything
 // here only ever changes how the map LOOKS -- never which stations
-// exist, which edges connect them, or any ticket/round-timing value --
-// see set_map_visual_overrides in access_control_functions.sql for the
-// full reasoning on why that split keeps this safe to hand to an admin
-// with no engine/graph knowledge.
+// exist, which edges connect them, or any ticket/round-timing value.
 //
-// Reuses the EXACT SAME override mechanism already used for ticket/ratio
-// overrides (map_settings + applyMapOverride) rather than inventing a
-// second system -- a curve/station edit is just another field in the
-// same per-map override row, merged onto the map the same way at load
-// time everywhere else in the app already expects.
+// Renders with the EXACT SAME background art, edge casing/width/opacity,
+// and station styling as GameBoard.jsx (same MapBackground/
+// MapFrameAndCompass components, same MODE_DEFAULT/modeTheme colors,
+// same nodeR/strokeW constants) -- previously this screen used its own
+// flat placeholder background and generic colors, which made it look
+// like a completely different map from the one players actually see.
+// Now what the admin edits against IS what the admin (and everyone
+// else) sees elsewhere.
 //
-// Live preview reuses applyMapOverride itself: the canvas always renders
-// `rawMap` merged with the CURRENT DRAFT (not yet saved) overrides, so
-// what the admin sees while dragging is pixel-for-pixel what a player
-// would see if they saved right now.
-//
-// Multi-point curves: an edge's manual offset can now be a single number
-// (one bend handle, exactly the original behavior) or an array of 2-3
-// numbers (2-3 independently-draggable handles for a longer route that
-// needs an S-shape). "+add point" / "remove point" buttons switch a
-// curve between these shapes; curveGeometry.js (shared with GameBoard.jsx
-// and ReplayView.jsx) guarantees the editor's preview renders pixel-
-// identical to what a player actually sees.
+// Curve handles are deliberately small (design-tool anchor-point sized,
+// not station-sized) so they read as editing chrome rather than as part
+// of the map art, with an inline "+" button riding along the selected
+// curve to add another bend point and a small "×" per handle to remove
+// just that one -- both directly on the canvas next to the handle
+// itself, not buried only in the side panel, so multi-point curves are
+// obviously available the moment a curve is selected.
 // ---------------------------------------------------------------------------
 
 const CLEARANCE_WARN_DISTANCE = 4.2; // matches the min-gap standard used across this project's map validation
 const MAX_STATION_NUDGE = 8; // units -- keeps station repositioning to "small adjustment," not a redesign
 const MAX_CURVE_POINTS = 3;
 const LABEL_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-const MODE_COLORS = { underground: "#c12115", bus: "#109347", ferry: "#1a1a1a", taxi: "#a0740d" };
+const NODE_R = 1.6; // matches GameBoard.jsx's own station radius exactly
+const HANDLE_R = 0.65; // small, design-tool-anchor sized -- not station-sized
+const HANDLE_R_SELECTED = 0.85;
 
 function edgeKey(a, b) {
   return a < b ? `${a}-${b}` : `${b}-${a}`;
@@ -68,7 +67,8 @@ export default function MapEditorPanel({ accountId, onBack }) {
   const [curveDraft, setCurveDraft] = useState({});
   const [stationDraft, setStationDraft] = useState({});
   const [selectedStation, setSelectedStation] = useState(null);
-  const [selectedEdge, setSelectedEdge] = useState(null); // edge key of the curve currently focused, for the add/remove-point controls
+  const [selectedEdge, setSelectedEdge] = useState(null); // edge key of the curve currently focused
+  const [hoveredEdge, setHoveredEdge] = useState(null);
   const [dragState, setDragState] = useState(null); // { type: "curve"|"station", key/id, pointIndex }
   const [warning, setWarning] = useState("");
   const [busy, setBusy] = useState(false);
@@ -100,10 +100,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
   }, [loadOverrides]);
 
   // Live preview: rawMap merged with whatever's currently in the drafts,
-  // via the SAME applyMapOverride every other part of the app uses --
-  // this is what makes "what you see while dragging" and "what a player
-  // would actually see after saving" identical by construction, not
-  // just by careful bookkeeping.
+  // via the SAME applyMapOverride every other part of the app uses.
   const displayMap = useMemo(() => {
     if (!rawMap) return null;
     return applyMapOverride(rawMap, { curveOffsetOverrides: curveDraft, stationOverrides: stationDraft });
@@ -123,6 +120,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
     );
   }
 
+  const activeMode = displayMap.modeTheme || MODE_DEFAULT;
   const viewW = displayMap.viewW || 100;
   const viewH = displayMap.viewH || 100;
 
@@ -139,8 +137,6 @@ export default function MapEditorPanel({ accountId, onBack }) {
   }
 
   // ---- curve dragging ---------------------------------------------------
-  // pointIndex identifies WHICH handle on a (possibly multi-point) curve
-  // is being dragged, so each handle moves independently.
   function startCurveDrag(evt, key, a, b, pointIndex) {
     evt.stopPropagation();
     setSelectedStation(null);
@@ -183,10 +179,6 @@ export default function MapEditorPanel({ accountId, onBack }) {
       const t = (pointIndex + 1) / (k + 1);
       const baseX = ax + (bx - ax) * t;
       const baseY = ay + (by - ay) * t;
-      // Project the drag point onto the edge's normal direction to get
-      // the equivalent offset value -- this is the whole trick that
-      // turns "drag a handle" into "the same offset number the map data
-      // already uses," with no separate representation to keep in sync.
       const offset = (p.x - baseX) * nx + (p.y - baseY) * ny;
       const nextOffsets = existing.slice();
       nextOffsets[pointIndex] = Math.round(offset * 100) / 100;
@@ -195,7 +187,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
       checkCurveClearance(a, b, nextOffsets);
     } else if (dragState.type === "station") {
       const { id } = dragState;
-      const [origX, origY] = rawMap.stations[id]; // clamp against the TRUE original, not the already-nudged position, so repeated edits can't creep arbitrarily far
+      const [origX, origY] = rawMap.stations[id];
       let nx = p.x;
       let ny = p.y;
       const dx = nx - origX;
@@ -248,9 +240,6 @@ export default function MapEditorPanel({ accountId, onBack }) {
     setCurveDraft((prev) => {
       const existing = normalizeCurveOffsets(prev[key]) || [0];
       if (existing.length >= MAX_CURVE_POINTS) return prev;
-      // Insert a new point at the midpoint value of its two nearest
-      // neighbors so it starts roughly on the existing curve, not at 0
-      // (which would visually kink the line at the moment it's added).
       const mid = existing.length ? existing[Math.floor(existing.length / 2)] : 0;
       const next = existing.slice();
       next.splice(Math.ceil(next.length / 2), 0, mid);
@@ -382,10 +371,10 @@ export default function MapEditorPanel({ accountId, onBack }) {
       <div style={styles.helpBar}>
         <span style={styles.helpIcon}>i</span>
         <span>
-          <strong>Curves:</strong> drag a white handle to bend a route. Click a curve to select it, then add up to
-          3 handles for long, S-shaped routes. <strong>Stations:</strong> drag a small nudge, or click to rename /
-          relabel. Nothing here can change connectivity, tickets, or round timing, and nothing is live for players
-          until you hit <strong>Save</strong>.
+          Click any route to select it, then drag its small circular handle to bend it — a <strong>+</strong> button
+          appears next to the handle so you can add up to 3 bend points for a smooth S-curve on longer routes.
+          Drag a station a little to nudge its position, or click it to rename/relabel. Nothing here can change
+          connectivity, tickets, or round timing, and nothing is live for players until you hit <strong>Save</strong>.
         </span>
       </div>
 
@@ -403,7 +392,9 @@ export default function MapEditorPanel({ accountId, onBack }) {
             </div>
             {selectedEdge && (
               <div style={styles.edgeToolbar}>
-                <span style={styles.edgeToolbarLabel}>Curve {selectedEdge}: {selectedEdgePoints} point{selectedEdgePoints === 1 ? "" : "s"}</span>
+                <span style={styles.edgeToolbarLabel}>
+                  {selectedEdgePoints} bend point{selectedEdgePoints === 1 ? "" : "s"}
+                </span>
                 <button
                   style={styles.smallActionBtn}
                   onClick={() => addCurvePoint(selectedEdge)}
@@ -422,7 +413,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
           <div style={styles.canvasWrap}>
             <svg
               ref={svgRef}
-              viewBox={`0 0 ${viewW} ${viewH}`}
+              viewBox={`-1 -1.5 ${viewW + 2} ${viewH + 2.5}`}
               style={{ ...styles.svg, transform: `scale(${zoom})` }}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
@@ -432,40 +423,83 @@ export default function MapEditorPanel({ accountId, onBack }) {
                 setSelectedStation(null);
               }}
             >
-              <rect x="0" y="0" width={viewW} height={viewH} fill="#f6f1e5" />
+              <defs>
+                <linearGradient id="riverGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#bcdcea" />
+                  <stop offset="100%" stopColor="#a7cede" />
+                </linearGradient>
+                <radialGradient id="lakeGrad" cx="50%" cy="40%" r="65%">
+                  <stop offset="0%" stopColor="#7aa8c7" />
+                  <stop offset="100%" stopColor="#5f93b8" />
+                </radialGradient>
+                <linearGradient id="seaGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#a8cbdb" />
+                  <stop offset="100%" stopColor="#88b3c9" />
+                </linearGradient>
+                <filter id="regionShadow" x="-30%" y="-30%" width="160%" height="160%">
+                  <feDropShadow dx="0" dy="0.4" stdDeviation="0.6" floodColor="#3d4a3a" floodOpacity="0.18" />
+                </filter>
+              </defs>
+
+              {/* Same background art the actual game renders -- this is
+                  what makes the editor look like the real map instead of
+                  a generic placeholder. */}
+              <MapBackground map={displayMap} />
+              <MapFrameAndCompass map={displayMap} />
 
               {displayMap.edges.map(([a, b, mode], i) => {
                 const key = `${a}-${b}-${mode}-${i}`;
                 const gKey = edgeKey(a, b);
                 const group = displayMap.edgeGroups?.[gKey] || [mode];
-                const canManuallyCurve = group.length === 1; // multi-mode parallel edges use automatic spacing -- see file header comment
+                const canManuallyCurve = group.length === 1; // multi-mode parallel edges use automatic spacing, not manual curves
                 const manualOffset = displayMap.manualCurveOffsets?.[gKey];
                 const offsets = normalizeCurveOffsets(manualOffset) || [0];
                 const [ax, ay] = displayMap.stations[a];
                 const [bx, by] = displayMap.stations[b];
                 const pathD = curvePathD(ax, ay, bx, by, manualOffset != null ? manualOffset : 0);
-                const color = MODE_COLORS[mode] || "#a0740d";
+                const modeInfo = activeMode[mode] || MODE_DEFAULT.taxi;
                 const isEdgeSelected = selectedEdge === gKey;
+                const isEdgeHovered = hoveredEdge === gKey && !isEdgeSelected;
                 const handlePts = canManuallyCurve ? curveControlPoints(ax, ay, bx, by, offsets) : [];
+                // Same width/opacity convention GameBoard.jsx uses, so a
+                // route reads with the same visual weight here as in an
+                // actual game -- just with an extra highlight state for
+                // whichever curve is currently selected/hovered.
+                const strokeW = mode === "underground" ? 0.5 : mode === "bus" ? 0.35 : mode === "ferry" ? 0.22 : 0.32;
+                const baseOpacity = mode === "ferry" ? 0.4 : 0.85;
 
                 return (
                   <g key={key}>
+                    <path d={pathD} fill="none" stroke="#ffffff" strokeWidth={strokeW + 0.35} strokeLinecap="round" opacity={0.9} />
                     <path
                       d={pathD}
                       fill="none"
-                      stroke={isEdgeSelected ? color : color}
-                      strokeWidth={isEdgeSelected ? 0.55 : 0.35}
-                      opacity={isEdgeSelected ? 0.95 : 0.7}
-                      style={{ cursor: canManuallyCurve ? "pointer" : "default" }}
-                      onClick={(e) => {
-                        if (!canManuallyCurve) return;
-                        e.stopPropagation();
-                        setSelectedStation(null);
-                        setSelectedEdge(gKey);
-                      }}
+                      stroke={modeInfo.color}
+                      strokeWidth={isEdgeSelected ? strokeW + 0.25 : strokeW}
+                      strokeLinecap="round"
+                      opacity={isEdgeSelected ? 1 : isEdgeHovered ? 0.95 : baseOpacity}
                     />
+                    {/* Wide, invisible hit-target so a thin route is still
+                        easy to click without needing to hit the visible
+                        line pixel-perfectly. */}
+                    {canManuallyCurve && (
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={2.2}
+                        style={{ cursor: "pointer" }}
+                        onMouseEnter={() => setHoveredEdge(gKey)}
+                        onMouseLeave={() => setHoveredEdge((h) => (h === gKey ? null : h))}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedStation(null);
+                          setSelectedEdge(gKey);
+                        }}
+                      />
+                    )}
                     {isEdgeSelected && (
-                      <path d={`M ${ax} ${ay} L ${bx} ${by}`} stroke="#2937c9" strokeWidth={0.12} strokeDasharray="0.6,0.6" opacity={0.5} />
+                      <path d={`M ${ax} ${ay} L ${bx} ${by}`} stroke="#2937c9" strokeWidth={0.1} strokeDasharray="0.5,0.5" opacity={0.4} />
                     )}
                     {canManuallyCurve &&
                       handlePts.map((pt) => (
@@ -473,28 +507,56 @@ export default function MapEditorPanel({ accountId, onBack }) {
                           <circle
                             cx={pt.x}
                             cy={pt.y}
-                            r={isEdgeSelected ? 1.35 : 1.0}
+                            r={isEdgeSelected ? HANDLE_R_SELECTED : HANDLE_R}
                             fill={isEdgeSelected ? "#2937c9" : "#fff"}
-                            stroke={isEdgeSelected ? "#fff" : "#666"}
-                            strokeWidth={0.3}
-                            style={{ cursor: "grab" }}
+                            stroke={isEdgeSelected ? "#fff" : "#2937c9"}
+                            strokeWidth={0.22}
+                            style={{ cursor: "grab", filter: "drop-shadow(0 0.15px 0.4px rgba(0,0,0,0.35))" }}
                             onPointerDown={(e) => startCurveDrag(e, gKey, a, b, pt.index)}
                           />
                           {isEdgeSelected && offsets.length > 1 && (
-                            <text
-                              x={pt.x}
-                              y={pt.y - 2}
-                              fontSize="1.4"
-                              textAnchor="middle"
-                              fill="#2937c9"
-                              pointerEvents="none"
-                              style={{ fontWeight: 700 }}
-                            >
+                            <text x={pt.x} y={pt.y - 1.15} fontSize="1.1" textAnchor="middle" fill="#2937c9" pointerEvents="none" style={{ fontWeight: 700 }}>
                               {pt.index + 1}
                             </text>
                           )}
+                          {/* Inline remove control per handle -- only once
+                              there's more than one point, so a single
+                              default handle can't be accidentally deleted
+                              down to "no curve at all" from the canvas. */}
+                          {isEdgeSelected && offsets.length > 1 && (
+                            <g
+                              transform={`translate(${pt.x + 1.3}, ${pt.y - 1.3})`}
+                              style={{ cursor: "pointer" }}
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                removeCurvePoint(gKey, pt.index);
+                              }}
+                            >
+                              <circle r={0.55} fill="#fff" stroke="#c0392b" strokeWidth={0.18} />
+                              <line x1={-0.28} y1={-0.28} x2={0.28} y2={0.28} stroke="#c0392b" strokeWidth={0.18} strokeLinecap="round" />
+                              <line x1={-0.28} y1={0.28} x2={0.28} y2={-0.28} stroke="#c0392b" strokeWidth={0.18} strokeLinecap="round" />
+                            </g>
+                          )}
                         </g>
                       ))}
+                    {/* Inline "add point" control -- rides along just past
+                        the last handle on the selected curve, so growing
+                        to a multi-point curve is one click right where
+                        you're already looking, not a trip to the sidebar. */}
+                    {isEdgeSelected && canManuallyCurve && offsets.length < MAX_CURVE_POINTS && handlePts.length > 0 && (
+                      <g
+                        transform={`translate(${handlePts[handlePts.length - 1].x}, ${handlePts[handlePts.length - 1].y - 2.6})`}
+                        style={{ cursor: "pointer" }}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          addCurvePoint(gKey);
+                        }}
+                      >
+                        <circle r={0.7} fill="#2937c9" stroke="#fff" strokeWidth={0.2} style={{ filter: "drop-shadow(0 0.15px 0.4px rgba(0,0,0,0.35))" }} />
+                        <line x1={-0.35} y1={0} x2={0.35} y2={0} stroke="#fff" strokeWidth={0.2} strokeLinecap="round" />
+                        <line x1={0} y1={-0.35} x2={0} y2={0.35} stroke="#fff" strokeWidth={0.2} strokeLinecap="round" />
+                      </g>
+                    )}
                   </g>
                 );
               })}
@@ -508,7 +570,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
                     <circle
                       cx={x}
                       cy={y}
-                      r={isSelected ? 2.0 : 1.6}
+                      r={isSelected ? NODE_R + 0.3 : NODE_R}
                       fill={isSelected ? "#2937c9" : isChanged ? "#fff4de" : "#fff"}
                       stroke={isSelected ? "#2937c9" : isChanged ? "#c98a1f" : "#8a8375"}
                       strokeWidth={isSelected ? 0.45 : 0.35}
@@ -516,7 +578,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
                       onPointerDown={(e) => startStationDrag(e, id)}
                       onClick={(e) => selectStation(e, id)}
                     />
-                    <text x={x} y={y + 3} fontSize="1.6" textAnchor="middle" fill="#5c5648" pointerEvents="none">
+                    <text x={x} y={y + 0.55} fontSize="1.35" textAnchor="middle" fill="#5c5648" pointerEvents="none" fontWeight={600}>
                       {displayMap.names?.[id] || id}
                     </text>
                   </g>
@@ -571,25 +633,13 @@ export default function MapEditorPanel({ accountId, onBack }) {
             <div>
               <div style={styles.sideTitle}>Curve {selectedEdge}</div>
               <div style={styles.smallNote}>
-                {selectedEdgePoints} handle{selectedEdgePoints === 1 ? "" : "s"}. Drag a numbered handle on the map
-                to bend the route at that point. Longer routes look best with 2-3 handles for a smooth S-shape.
+                {selectedEdgePoints} bend point{selectedEdgePoints === 1 ? "" : "s"}. Drag a handle on the map to
+                bend the route there, or use the blue <strong>+</strong> button right on the canvas to add another
+                point. Longer routes look best with 2-3 points for a smooth S-shape.
               </div>
-              <button
-                style={styles.smallBtn}
-                onClick={() => addCurvePoint(selectedEdge)}
-                disabled={selectedEdgePoints >= MAX_CURVE_POINTS}
-              >
-                + Add another handle ({selectedEdgePoints}/{MAX_CURVE_POINTS})
+              <button style={styles.smallBtn} onClick={() => addCurvePoint(selectedEdge)} disabled={selectedEdgePoints >= MAX_CURVE_POINTS}>
+                + Add another point ({selectedEdgePoints}/{MAX_CURVE_POINTS})
               </button>
-              {selectedEdgePoints > 1 && (
-                <div style={{ marginTop: 8 }}>
-                  {Array.from({ length: selectedEdgePoints }).map((_, idx) => (
-                    <button key={idx} style={{ ...styles.smallBtn, marginTop: 6 }} onClick={() => removeCurvePoint(selectedEdge, idx)}>
-                      Remove handle {idx + 1}
-                    </button>
-                  ))}
-                </div>
-              )}
               <button style={{ ...styles.smallBtn, marginTop: 6 }} onClick={() => resetCurve(selectedEdge)}>
                 Reset this curve to default
               </button>
@@ -600,7 +650,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
           ) : (
             <div style={styles.emptyState}>
               <div style={styles.emptyStateIcon}>✎</div>
-              <div style={styles.smallNote}>Click a station or a route curve on the map to edit it.</div>
+              <div style={styles.smallNote}>Click a station or a route on the map to edit it.</div>
             </div>
           )}
 

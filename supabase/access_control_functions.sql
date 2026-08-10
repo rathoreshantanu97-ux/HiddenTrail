@@ -1156,17 +1156,21 @@ begin
       if v_dec_type = 'icon' then
         v_dec_icon := v_dec->>'icon';
         -- Kept in sync with ICON_CATEGORIES in src/lib/decorationIcons.jsx
-        -- (73 icons across Nature/Civic/Transport/Commerce/Recreation/
-        -- Symbols) -- expanded specifically because custom image
+        -- (100 icons across Nature/Civic/Transport/Commerce/Recreation/
+        -- Rural/Symbols) -- expanded specifically because custom image
         -- uploads aren't available, so a wide built-in variety is the
         -- actual mitigation for that gap, not a nice-to-have.
         if v_dec_icon not in (
           'water','lake','pond','river','waterfall','mountain','hill','cliff','cave','forest','tree','palm',
-          'landmark','fort','school','college','hospital','police','firestation','church','temple','monastery','courthouse','library','prison',
-          'bus','train','railway','metro','subway','tram','airport','port','cablecar','parking','bridge','road',
+          'landmark','fort','school','college','hospital','police','firestation','church','temple','mosque','synagogue',
+          'monastery','courthouse','cityhall','library','prison','cemetery',
+          'bus','train','railway','metro','subway','tram','airport','port','ferry','cablecar','lighthouse','helipad','parking','bridge','road',
           'shop','mall','market','cafe','restaurant','bakery','hotel','bank','pharmacy','gasstation','factory','office',
+          'skyscraper','warehouse','powerplant','mine',
           'stadium','arena','museum','theater','zoo','amusementpark','garden','playground','pool','monument','campsite','casino',
-          'star','flag','pin','cross','crown','anchor','compass','heart','trophy','gem','key','lightbulb'
+          'golfcourse','aquarium','circus','skatepark',
+          'farm','farmland','vineyard','windmill','house','apartment','village','suburb',
+          'star','flag','pin','cross','crown','anchor','compass','heart','trophy','gem','key','lightbulb','shield','medal','gift','clock'
         ) then
           raise exception 'Invalid decoration icon';
         end if;

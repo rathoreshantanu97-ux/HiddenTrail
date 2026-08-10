@@ -7,7 +7,8 @@
 // with no code access, so they can't be tied to one specific real
 // building the way MapBackground's icons are.
 //
-// Expanded to ~48 icons across 7 categories specifically because custom
+// Expanded to 100 icons across 7 categories (Nature, Civic, Transport,
+// Commerce, Recreation, Rural, Symbols) specifically because custom
 // image uploads aren't available (see DecorationsLayer.jsx / the Map
 // Editor's "Deliberately deferred" note on uploads) -- a wide built-in
 // variety is the actual mitigation for not having uploads, not a nice-
@@ -22,11 +23,21 @@
 
 export const ICON_CATEGORIES = {
   Nature: ["water", "lake", "pond", "river", "waterfall", "mountain", "hill", "cliff", "cave", "forest", "tree", "palm"],
-  Civic: ["landmark", "fort", "school", "college", "hospital", "police", "firestation", "church", "temple", "monastery", "courthouse", "library", "prison"],
-  Transport: ["bus", "train", "railway", "metro", "subway", "tram", "airport", "port", "cablecar", "parking", "bridge", "road"],
-  Commerce: ["shop", "mall", "market", "cafe", "restaurant", "bakery", "hotel", "bank", "pharmacy", "gasstation", "factory", "office"],
-  Recreation: ["stadium", "arena", "museum", "theater", "zoo", "amusementpark", "garden", "playground", "pool", "monument", "campsite", "casino"],
-  Symbols: ["star", "flag", "pin", "cross", "crown", "anchor", "compass", "heart", "trophy", "gem", "key", "lightbulb"],
+  Civic: [
+    "landmark", "fort", "school", "college", "hospital", "police", "firestation", "church", "temple", "mosque",
+    "synagogue", "monastery", "courthouse", "cityhall", "library", "prison", "cemetery",
+  ],
+  Transport: ["bus", "train", "railway", "metro", "subway", "tram", "airport", "port", "ferry", "cablecar", "lighthouse", "helipad", "parking", "bridge", "road"],
+  Commerce: [
+    "shop", "mall", "market", "cafe", "restaurant", "bakery", "hotel", "bank", "pharmacy", "gasstation",
+    "factory", "office", "skyscraper", "warehouse", "powerplant", "mine",
+  ],
+  Recreation: [
+    "stadium", "arena", "museum", "theater", "zoo", "amusementpark", "garden", "playground", "pool", "monument",
+    "campsite", "casino", "golfcourse", "aquarium", "circus", "skatepark",
+  ],
+  Rural: ["farm", "farmland", "vineyard", "windmill", "house", "apartment", "village", "suburb"],
+  Symbols: ["star", "flag", "pin", "cross", "crown", "anchor", "compass", "heart", "trophy", "gem", "key", "lightbulb", "shield", "medal", "gift", "clock"],
 };
 
 export const ICON_LIBRARY = Object.values(ICON_CATEGORIES).flat();
@@ -53,10 +64,14 @@ export const ICON_LABELS = {
   firestation: "Fire station",
   church: "Church",
   temple: "Temple",
+  mosque: "Mosque",
+  synagogue: "Synagogue",
   monastery: "Monastery",
   courthouse: "Courthouse",
+  cityhall: "City hall",
   library: "Library",
   prison: "Prison",
+  cemetery: "Cemetery",
   bus: "Bus stop",
   train: "Train station",
   railway: "Railway",
@@ -65,7 +80,10 @@ export const ICON_LABELS = {
   tram: "Tram",
   airport: "Airport",
   port: "Port / dock",
+  ferry: "Ferry",
   cablecar: "Cable car",
+  lighthouse: "Lighthouse",
+  helipad: "Helipad",
   parking: "Parking",
   bridge: "Bridge",
   road: "Road",
@@ -81,6 +99,10 @@ export const ICON_LABELS = {
   gasstation: "Gas station",
   factory: "Factory",
   office: "Office",
+  skyscraper: "Skyscraper",
+  warehouse: "Warehouse",
+  powerplant: "Power plant",
+  mine: "Mine",
   stadium: "Stadium",
   arena: "Arena",
   museum: "Museum",
@@ -93,6 +115,18 @@ export const ICON_LABELS = {
   monument: "Monument",
   campsite: "Campsite",
   casino: "Casino",
+  golfcourse: "Golf course",
+  aquarium: "Aquarium",
+  circus: "Circus",
+  skatepark: "Skate park",
+  farm: "Farm",
+  farmland: "Farmland",
+  vineyard: "Vineyard",
+  windmill: "Windmill",
+  house: "House",
+  apartment: "Apartment",
+  village: "Village",
+  suburb: "Suburb",
   star: "Star",
   flag: "Flag",
   pin: "Pin",
@@ -105,6 +139,10 @@ export const ICON_LABELS = {
   gem: "Gem",
   key: "Key",
   lightbulb: "Idea / lightbulb",
+  shield: "Shield",
+  medal: "Medal",
+  gift: "Gift",
+  clock: "Clock",
 };
 
 // Shared sub-shapes reused across a few icons so buildings/columns read
@@ -289,6 +327,27 @@ export function renderIconPaths(name) {
           <rect x="-2.4" y="-0.6" width="4.8" height="2" fill="#fff" opacity="0.3" />
         </>
       );
+    case "mosque":
+      return (
+        <>
+          <rect x="-3.6" y="0.4" width="7.2" height="3" />
+          <path d="M -1.6,0.4 Q -1.6,-2.4 0,-3.4 Q 1.6,-2.4 1.6,0.4 Z" />
+          <line x1="0" y1="-3.4" x2="0" y2="-5" stroke="currentColor" strokeWidth="0.4" />
+          <circle cx="0" cy="-5.2" r="0.4" />
+          <circle cx="-3.6" cy="1.8" r="0.5" />
+          <line x1="-3.6" y1="1.3" x2="-3.6" y2="-1" stroke="currentColor" strokeWidth="0.4" />
+          <circle cx="3.6" cy="1.8" r="0.5" />
+          <line x1="3.6" y1="1.3" x2="3.6" y2="-1" stroke="currentColor" strokeWidth="0.4" />
+        </>
+      );
+    case "synagogue":
+      return (
+        <>
+          <rect x="-3.4" y="0" width="6.8" height="3.4" />
+          <polygon points="0,-4 3.4,0 -3.4,0" />
+          <path d="M 0,-6 L 0.6,-4.9 L 1.8,-4.9 L 0.9,-4.2 L 1.2,-3 L 0,-3.7 L -1.2,-3 L -0.9,-4.2 L -1.8,-4.9 L -0.6,-4.9 Z" />
+        </>
+      );
     case "courthouse":
       return columnsBuilding("0,-4.4 3,-1.6 -3,-1.6");
     case "library":
@@ -315,6 +374,25 @@ export function renderIconPaths(name) {
           <polygon points="0.4,0 0.4,-2.4 1.4,-3.4 2.4,-2.4 2.4,0" />
           <circle cx="-1.4" cy="-3.4" r="0.4" />
           <circle cx="1.4" cy="-3.4" r="0.4" />
+        </>
+      );
+    case "cityhall":
+      return (
+        <>
+          {columnsBuilding("0,-4.6 3.2,-1.8 -3.2,-1.8")}
+          <rect x="-0.7" y="-6" width="1.4" height="1.6" />
+        </>
+      );
+    case "cemetery":
+      return (
+        <>
+          <rect x="-4.4" y="2.6" width="8.8" height="0.7" />
+          {[-2.6, 0, 2.6].map((dx, i) => (
+            <g key={i} transform={`translate(${dx}, 1)`}>
+              <rect x="-0.6" y="-2.4" width="1.2" height="3.4" rx="0.6" />
+              <rect x="-1.1" y="-1" width="2.2" height="0.5" />
+            </g>
+          ))}
         </>
       );
 
@@ -384,6 +462,36 @@ export function renderIconPaths(name) {
           <line x1="0" y1="-1.4" x2="0" y2="3" stroke="currentColor" strokeWidth="0.6" />
           <path d="M -3,1 Q 0,4 3,1" fill="none" stroke="currentColor" strokeWidth="0.6" />
           <line x1="-1.8" y1="0" x2="1.8" y2="0" stroke="currentColor" strokeWidth="0.6" />
+        </>
+      );
+    case "ferry":
+      return (
+        <>
+          <path d="M -3.6,0.6 L 3.6,0.6 L 2.6,3 L -2.6,3 Z" />
+          <rect x="-1.6" y="-2.4" width="3.2" height="3" fill="currentColor" />
+          <rect x="-1.1" y="-1.8" width="0.9" height="0.9" fill="#fff" opacity="0.5" />
+          <rect x="0.2" y="-1.8" width="0.9" height="0.9" fill="#fff" opacity="0.5" />
+          <line x1="0" y1="-2.4" x2="0" y2="-3.6" stroke="currentColor" strokeWidth="0.35" />
+        </>
+      );
+    case "lighthouse":
+      return (
+        <>
+          <polygon points="-1.2,3.6 -0.7,-3 0.7,-3 1.2,3.6" />
+          <rect x="-1.6" y="3.6" width="3.2" height="0.8" />
+          <rect x="-1.1" y="-4.4" width="2.2" height="1.4" />
+          {[-2, 0, 2].map((y, i) => (
+            <line key={i} x1="-0.9" y1={y - 3.6 + 3.6} x2="0.9" y2={y - 3.6 + 3.6} stroke="#fff" strokeWidth="0.3" opacity="0.5" />
+          ))}
+        </>
+      );
+    case "helipad":
+      return (
+        <>
+          <circle cx="0" cy="0" r="4.2" fill="none" stroke="currentColor" strokeWidth="0.5" />
+          <text x="0" y="1.6" fontSize="5.4" textAnchor="middle" fontWeight="700" fontFamily="sans-serif">
+            H
+          </text>
         </>
       );
     case "parking":
@@ -530,6 +638,41 @@ export function renderIconPaths(name) {
           <rect x="1.4" y="-3" width="2" height="7" />
         </>
       );
+    case "skyscraper":
+      return (
+        <>
+          <rect x="-1.6" y="-6.4" width="3.2" height="10.4" />
+          {[-5, -3.4, -1.8, -0.2, 1.4, 3].map((y, i) => (
+            <rect key={i} x="-1" y={y} width="0.8" height="1" fill="#fff" opacity="0.4" />
+          ))}
+          <polygon points="0,-6.4 -1.6,-5 1.6,-5" opacity="0.85" />
+        </>
+      );
+    case "warehouse":
+      return (
+        <>
+          <rect x="-4.4" y="0" width="8.8" height="3.6" />
+          <polygon points="-4.8,0 0,-2.6 4.8,0" />
+          <rect x="-3.4" y="1.2" width="2" height="2.4" fill="#fff" opacity="0.35" />
+          <rect x="1.4" y="1.2" width="2" height="2.4" fill="#fff" opacity="0.35" />
+        </>
+      );
+    case "powerplant":
+      return (
+        <>
+          <path d="M -3.6,3.4 Q -3.6,-1 -1.6,-1 Q -1.6,-3.2 0,-3.2 Q 1.6,-3.2 1.6,-1 Q 3.6,-1 3.6,3.4 Z" />
+          <line x1="1.6" y1="-1" x2="1.6" y2="-3.4" stroke="currentColor" strokeWidth="0.5" />
+          <line x1="2.6" y1="-1.6" x2="2.6" y2="-4" stroke="currentColor" strokeWidth="0.5" opacity="0.7" />
+        </>
+      );
+    case "mine":
+      return (
+        <>
+          <path d="M -3.6,3.4 L -1.6,-2 L 1.6,-2 L 3.6,3.4 Z" />
+          <polygon points="-1.6,-2 0,-4.4 1.6,-2" fill="#fff" opacity="0.3" />
+          <rect x="-0.9" y="0.4" width="1.8" height="3" fill="#fff" opacity="0.2" />
+        </>
+      );
 
     // ---- Recreation ----
     case "stadium":
@@ -645,6 +788,134 @@ export function renderIconPaths(name) {
           <line x1="0" y1="-4.2" x2="0" y2="3" stroke="currentColor" strokeWidth="0.35" />
         </>
       );
+    case "golfcourse":
+      return (
+        <>
+          <line x1="-2.4" y1="4" x2="-2.4" y2="-4.6" stroke="currentColor" strokeWidth="0.5" />
+          <polygon points="-2.4,-4.6 2.6,-3.2 -2.4,-1.8" />
+          <ellipse cx="1.6" cy="3.6" rx="3.2" ry="0.9" opacity="0.4" />
+        </>
+      );
+    case "aquarium":
+      return (
+        <>
+          <rect x="-4.4" y="-3" width="8.8" height="6" rx="0.5" fill="none" stroke="currentColor" strokeWidth="0.5" />
+          <path d="M -1.4,0 Q -2.6,-1 -3.4,0 Q -2.6,1 -1.4,0 Z" />
+          <polygon points="-1.4,0 -0.4,-0.8 -0.4,0.8" />
+          <circle cx="1.8" cy="-1" r="0.35" opacity="0.7" />
+          <circle cx="2.6" cy="0.6" r="0.35" opacity="0.7" />
+          <circle cx="1.2" cy="1.4" r="0.35" opacity="0.7" />
+        </>
+      );
+    case "circus":
+      return (
+        <>
+          <polygon points="0,-4.6 3.4,3 -3.4,3" />
+          {[-2.3, -0.8, 0.8, 2.3].map((x, i) => (
+            <line key={i} x1={x} y1={3 - (Math.abs(x) / 3.4) * 7.6} x2={-x * 0.15} y2={3} stroke="#fff" strokeWidth="0.35" opacity="0.6" />
+          ))}
+          <circle cx="0" cy="-4.6" r="0.5" />
+        </>
+      );
+    case "skatepark":
+      return (
+        <>
+          <path d="M -4.4,3 Q -4.4,-3.4 1,-3.4 L 4.4,-3.4 L 4.4,0 Q 0,0 -1.4,3 Z" fill="none" stroke="currentColor" strokeWidth="1" />
+        </>
+      );
+
+    // ---- Rural ----
+    case "farm":
+      return (
+        <>
+          <rect x="-2.4" y="0.6" width="4.4" height="2.8" />
+          <polygon points="-2.8,0.6 -0.2,-1.8 2.4,0.6" />
+          <rect x="2" y="-0.6" width="2.4" height="3.2" opacity="0.85" />
+          <polygon points="1.8,-0.6 3.2,-2 4.6,-0.6" opacity="0.85" />
+        </>
+      );
+    case "farmland":
+      return (
+        <>
+          {[-3, -1, 1, 3].map((x, i) => (
+            <rect key={i} x={x - 0.7} y="-3.6" width="1.4" height="7.2" opacity={i % 2 ? 0.5 : 0.9} />
+          ))}
+        </>
+      );
+    case "vineyard":
+      return (
+        <>
+          {[-3, -1, 1, 3].map((x, i) => (
+            <g key={i}>
+              <line x1={x} y1="-3.4" x2={x} y2="3.4" stroke="currentColor" strokeWidth="0.4" />
+              {[-2.2, -0.6, 1, 2.6].map((y, j) => (
+                <circle key={j} cx={x} cy={y} r="0.4" />
+              ))}
+            </g>
+          ))}
+        </>
+      );
+    case "windmill":
+      return (
+        <>
+          <rect x="-0.6" y="-1" width="1.2" height="5" />
+          <polygon points="-0.6,-1 -3,-1.6 -0.6,0.4" />
+          <polygon points="0.6,-1 3,-0.4 0.6,0.4" />
+          <polygon points="-0.6,-1 -1.2,-3.4 0.6,-1" />
+          <circle cx="0" cy="-1" r="0.5" />
+        </>
+      );
+    case "house":
+      return (
+        <>
+          <rect x="-2.4" y="-0.2" width="4.8" height="3.4" />
+          <polygon points="-3,-0.2 0,-3 3,-0.2" />
+          <rect x="-0.7" y="1" width="1.4" height="2.2" fill="#fff" opacity="0.4" />
+        </>
+      );
+    case "apartment":
+      return (
+        <>
+          <rect x="-3.4" y="-4.4" width="6.8" height="8.4" />
+          {[-2.2, 0, 2.2].map((x, i) => (
+            <g key={i}>
+              <rect x={x - 0.6} y="-3.2" width="1.2" height="1.2" fill="#fff" opacity="0.4" />
+              <rect x={x - 0.6} y="-0.6" width="1.2" height="1.2" fill="#fff" opacity="0.4" />
+              <rect x={x - 0.6} y="2" width="1.2" height="1.2" fill="#fff" opacity="0.4" />
+            </g>
+          ))}
+        </>
+      );
+    case "village":
+      return (
+        <>
+          <g transform="translate(-2.2, 0.6)">
+            <rect x="-1.6" y="0" width="3.2" height="2.4" />
+            <polygon points="-2,0 0,-2 2,0" />
+          </g>
+          <g transform="translate(2, -0.4)">
+            <rect x="-1.4" y="0" width="2.8" height="3" />
+            <polygon points="-1.8,0 0,-2.2 1.8,0" />
+          </g>
+        </>
+      );
+    case "suburb":
+      return (
+        <>
+          <g transform="translate(-2.4, 0.4)">
+            <rect x="-1.4" y="0" width="2.8" height="2.4" />
+            <polygon points="-1.8,0 0,-1.8 1.8,0" />
+          </g>
+          <g transform="translate(0.6, 0.8)">
+            <rect x="-1.4" y="0" width="2.8" height="2" />
+            <polygon points="-1.8,0 0,-1.6 1.8,0" />
+          </g>
+          <g transform="translate(3.6, 0.4)">
+            <rect x="-1.4" y="0" width="2.8" height="2.4" />
+            <polygon points="-1.8,0 0,-1.8 1.8,0" />
+          </g>
+        </>
+      );
 
     // ---- Symbols ----
     case "star":
@@ -725,6 +996,35 @@ export function renderIconPaths(name) {
           <circle cx="0" cy="-1" r="3" />
           <rect x="-1.2" y="1.6" width="2.4" height="1.6" rx="0.3" />
           <line x1="-1" y1="3.4" x2="1" y2="3.4" stroke="currentColor" strokeWidth="0.5" />
+        </>
+      );
+    case "shield":
+      return <path d="M 0,-4 L 3.4,-2.6 L 3.4,0.4 Q 3.4,3 0,4.4 Q -3.4,3 -3.4,0.4 L -3.4,-2.6 Z" />;
+    case "medal":
+      return (
+        <>
+          <polygon points="-2,-4.4 -0.8,-1.4 -3.2,-1.4" />
+          <polygon points="2,-4.4 0.8,-1.4 3.2,-1.4" />
+          <circle cx="0" cy="1.2" r="3" />
+          <circle cx="0" cy="1.2" r="1.8" fill="none" stroke="#fff" strokeWidth="0.4" opacity="0.6" />
+        </>
+      );
+    case "gift":
+      return (
+        <>
+          <rect x="-3" y="-0.8" width="6" height="4.4" />
+          <rect x="-3.4" y="-1.8" width="6.8" height="1.4" />
+          <rect x="-0.6" y="-1.8" width="1.2" height="5.4" fill="#fff" opacity="0.4" />
+          <path d="M 0,-1.8 Q -2.4,-1.8 -2,-3.4 Q -1.6,-4.4 0,-1.8 Z" />
+          <path d="M 0,-1.8 Q 2.4,-1.8 2,-3.4 Q 1.6,-4.4 0,-1.8 Z" />
+        </>
+      );
+    case "clock":
+      return (
+        <>
+          <circle cx="0" cy="0" r="4.2" fill="none" stroke="currentColor" strokeWidth="0.9" />
+          <line x1="0" y1="0" x2="0" y2="-2.4" stroke="currentColor" strokeWidth="0.7" strokeLinecap="round" />
+          <line x1="0" y1="0" x2="1.8" y2="0.6" stroke="currentColor" strokeWidth="0.7" strokeLinecap="round" />
         </>
       );
     default:

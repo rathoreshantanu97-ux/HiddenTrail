@@ -153,6 +153,16 @@ export default function App({ account, onLogout }) {
   // own just because match data happens to exist.
   useEffect(() => {
     if (localStore.match && appMode === "landing") {
+      // BUG FIX: passAndPlayMapId is component state, NOT persisted to
+      // localStorage the way localStore.match is -- so on a fresh page
+      // load that restores an in-progress pass-and-play match,
+      // passAndPlayMapId starts back at null while appMode flips straight
+      // to "passandplay" below. getEffectiveMap(null) then resolves to
+      // undefined, which crashed GameBoard/EndedScreen the moment they
+      // tried to read map.modeTheme. match.mapId is the actual source of
+      // truth for which map a restored match belongs to, so restore it
+      // here instead of leaving passAndPlayMapId stuck at its initial value.
+      if (localStore.match.mapId) setPassAndPlayMapId(localStore.match.mapId);
       setAppMode("passandplay");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -633,15 +643,31 @@ export default function App({ account, onLogout }) {
 
   if (appMode === "passandplay") {
     const match = localStore.match;
-    const map = getEffectiveMap(passAndPlayMapId);
-    const mrxName = () => map.mrxName || "Mr. X";
-    const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
+    // Defensive fallback: passAndPlayMapId is component state and can in
+    // principle be stale/null (e.g. a restored match before the
+    // restore-effect above has run) while match.mapId -- the actual
+    // persisted source of truth for a match's map -- is already correct.
+    // Preferring match.mapId here means a stale passAndPlayMapId can no
+    // longer produce an undefined map and crash the board.
+    const map = getEffectiveMap(match?.mapId ?? passAndPlayMapId);
 
     if (!match) {
       return withRulebook(
         <SetupScreen onStart={handleStartPassAndPlay} onBack={() => setAppMode("landing")} onOpenRulebook={() => setShowRulebook(true)} />
       );
     }
+
+    if (!map) {
+      // Should be unreachable now, but if a match somehow references a
+      // map id that no longer exists (e.g. a map was removed from
+      // MAP_LIST), fail into a recoverable screen instead of crashing.
+      return withRulebook(
+        <SetupScreen onStart={handleStartPassAndPlay} onBack={handleResetPassAndPlay} onOpenRulebook={() => setShowRulebook(true)} />
+      );
+    }
+
+    const mrxName = () => map.mrxName || "Mr. X";
+    const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
     if (match.phase === "handoff") {
       return withRulebook(
         <HandoffScreen handoffFor={handoffFor} round={match.round} maxRounds={match.maxRounds} onReady={handleReadyForTurn} />

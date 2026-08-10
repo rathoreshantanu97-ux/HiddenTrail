@@ -509,6 +509,14 @@ export default function MapEditorPanel({ accountId, onBack }) {
 
   const selectedEdgeBaseline = selectedEdge != null && curveDraft[selectedEdge] !== undefined ? curveDraft[selectedEdge] : rawMap?.manualCurveOffsets?.[selectedEdge];
   const selectedEdgePoints = selectedEdge != null ? (normalizeCurveOffsets(selectedEdgeBaseline) || [0]).length : 0;
+  // Manual curve editing (add/remove/drag points) only applies to edges
+  // that are the ONLY route between their two stations -- an edge that
+  // shares its station pair with another mode (e.g. a bus+underground
+  // pair) is auto-separated instead (see autoParallelOffset), so there's
+  // nothing to manually curve. The edge is still selectable either way --
+  // this only controls which controls the sidebar/toolbar show.
+  const selectedEdgeGroup = selectedEdge != null ? displayMap.edgeGroups?.[selectedEdge] || [] : [];
+  const selectedEdgeCanCurve = selectedEdgeGroup.length <= 1;
 
   return (
     <div style={styles.page}>
@@ -592,7 +600,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
                 +
               </button>
             </div>
-            {selectedEdge && (
+            {selectedEdge && selectedEdgeCanCurve && (
               <div style={styles.edgeToolbar}>
                 <span style={styles.edgeToolbarLabel}>
                   {selectedEdgePoints} bend point{selectedEdgePoints === 1 ? "" : "s"}
@@ -608,6 +616,13 @@ export default function MapEditorPanel({ accountId, onBack }) {
                 <button style={styles.smallActionBtn} onClick={() => resetCurve(selectedEdge)}>
                   Reset curve
                 </button>
+              </div>
+            )}
+            {selectedEdge && !selectedEdgeCanCurve && (
+              <div style={styles.edgeToolbar}>
+                <span style={styles.edgeToolbarLabel}>
+                  This route shares its two stations with {selectedEdgeGroup.length - 1} other mode{selectedEdgeGroup.length - 1 === 1 ? "" : "s"} ({selectedEdgeGroup.join(", ")}) — its curve is spaced automatically and isn't manually editable.
+                </span>
               </div>
             )}
           </div>
@@ -757,23 +772,29 @@ export default function MapEditorPanel({ accountId, onBack }) {
                     />
                     {/* Wide, invisible hit-target so a thin route is still
                         easy to click without needing to hit the visible
-                        line pixel-perfectly. */}
-                    {canManuallyCurve && (
-                      <path
-                        d={pathD}
-                        fill="none"
-                        stroke="transparent"
-                        strokeWidth={2.2}
-                        style={{ cursor: "pointer" }}
-                        onMouseEnter={() => setHoveredEdge(gKey)}
-                        onMouseLeave={() => setHoveredEdge((h) => (h === gKey ? null : h))}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedStation(null);
-                          setSelectedEdge(gKey);
-                        }}
-                      />
-                    )}
+                        line pixel-perfectly. This used to only render when
+                        canManuallyCurve was true, which meant every route
+                        that shares its two stations with another mode
+                        (e.g. any bus+underground or taxi+bus pair -- a
+                        large fraction of the map) had NO click target at
+                        all and couldn't be selected. Every route is now
+                        clickable; canManuallyCurve only gates which
+                        CONTROLS show up once selected (see below and the
+                        sidebar), not whether it can be selected. */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={2.2}
+                      style={{ cursor: "pointer" }}
+                      onMouseEnter={() => setHoveredEdge(gKey)}
+                      onMouseLeave={() => setHoveredEdge((h) => (h === gKey ? null : h))}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedStation(null);
+                        setSelectedEdge(gKey);
+                      }}
+                    />
                     {isEdgeSelected && (
                       <path d={`M ${ax} ${ay} L ${bx} ${by}`} stroke="#2937c9" strokeWidth={0.1} strokeDasharray="0.5,0.5" opacity={0.4} />
                     )}
@@ -1172,7 +1193,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
                 Deselect
               </button>
             </div>
-          ) : selectedEdge != null ? (
+          ) : selectedEdge != null && selectedEdgeCanCurve ? (
             <div>
               <div style={styles.sideTitle}>Curve {selectedEdge}</div>
               <div style={styles.smallNote}>
@@ -1186,6 +1207,19 @@ export default function MapEditorPanel({ accountId, onBack }) {
               <button style={{ ...styles.smallBtn, marginTop: 6 }} onClick={() => resetCurve(selectedEdge)}>
                 Reset this curve to default
               </button>
+              <button style={{ ...styles.smallBtn, marginTop: 6 }} onClick={() => setSelectedEdge(null)}>
+                Deselect
+              </button>
+            </div>
+          ) : selectedEdge != null ? (
+            <div>
+              <div style={styles.sideTitle}>Route {selectedEdge}</div>
+              <div style={styles.smallNote}>
+                This route shares its two stations with {selectedEdgeGroup.length - 1} other mode
+                {selectedEdgeGroup.length - 1 === 1 ? "" : "s"} ({selectedEdgeGroup.join(", ")}). When more than one
+                mode connects the same two stations, their curves are spaced apart automatically so they don't
+                overlap — this one isn't manually editable, only single-mode routes are.
+              </div>
               <button style={{ ...styles.smallBtn, marginTop: 6 }} onClick={() => setSelectedEdge(null)}>
                 Deselect
               </button>

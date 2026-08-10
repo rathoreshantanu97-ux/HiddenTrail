@@ -725,6 +725,17 @@ export default function MapEditorPanel({ accountId, onBack }) {
                             strokeWidth={0.22}
                             style={{ cursor: "grab", filter: "drop-shadow(0 0.15px 0.4px rgba(0,0,0,0.35))" }}
                             onPointerDown={(e) => startCurveDrag(e, gKey, a, b, pt.index)}
+                            // The browser fires a synthetic "click" AFTER
+                            // pointerup on the same element, as a totally
+                            // separate event -- stopPropagation() on
+                            // pointerdown does NOT stop it. Without this,
+                            // that click bubbles up to the canvas's
+                            // click-empty-space-to-deselect handler and
+                            // immediately clears the selection the instant
+                            // you let go of a handle, which is exactly the
+                            // "options disappear the moment I unhold"
+                            // symptom this fixes.
+                            onClick={(e) => e.stopPropagation()}
                           />
                           {isEdgeSelected && offsets.length > 1 && (
                             <text x={pt.x} y={pt.y - 1.15} fontSize="1.1" textAnchor="middle" fill="#2937c9" pointerEvents="none" style={{ fontWeight: 700 }}>
@@ -743,6 +754,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
                                 e.stopPropagation();
                                 removeCurvePoint(gKey, pt.index);
                               }}
+                              onClick={(e) => e.stopPropagation()}
                             >
                               <circle r={0.55} fill="#fff" stroke="#c0392b" strokeWidth={0.18} />
                               <line x1={-0.28} y1={-0.28} x2={0.28} y2={0.28} stroke="#c0392b" strokeWidth={0.18} strokeLinecap="round" />
@@ -763,6 +775,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
                           e.stopPropagation();
                           addCurvePoint(gKey);
                         }}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <circle r={0.7} fill="#2937c9" stroke="#fff" strokeWidth={0.2} style={{ filter: "drop-shadow(0 0.15px 0.4px rgba(0,0,0,0.35))" }} />
                         <line x1={-0.35} y1={0} x2={0.35} y2={0} stroke="#fff" strokeWidth={0.2} strokeLinecap="round" />

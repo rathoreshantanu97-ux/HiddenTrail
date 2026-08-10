@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { buildReplayTimeline } from "../lib/gameEngine.js";
 import { MODE_DEFAULT } from "../maps/mapSchema.js";
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
+import { curvePathD } from "../lib/curveGeometry.js";
 
 // Label-placement helpers, matching GameBoard.jsx exactly, so a station's
 // name lands in the same spot in replay as it did during live play.
@@ -144,13 +145,15 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
               // Same manualCurveOffsets support as GameBoard.jsx -- see
               // that file for the full reasoning.
               const manualOffset = map.manualCurveOffsets && map.manualCurveOffsets[key];
+              // finalOffset may be a single number (legacy) or an array of
+              // 2-3 numbers (multi-point curve) -- curvePathD handles both,
+              // see curveGeometry.js for the full reasoning.
               const finalOffset = manualOffset != null ? manualOffset : offset;
-              const cx = mx + nx * finalOffset;
-              const cy = my + ny * finalOffset;
+              const pathD = curvePathD(ax, ay, bx, by, finalOffset);
               return (
                 <path
                   key={i}
-                  d={`M ${ax} ${ay} Q ${cx} ${cy} ${bx} ${by}`}
+                  d={pathD}
                   fill="none"
                   stroke={activeMode[mode]?.color || "#ccc"}
                   strokeWidth={mode === "underground" ? 0.5 : mode === "bus" ? 0.35 : 0.2}

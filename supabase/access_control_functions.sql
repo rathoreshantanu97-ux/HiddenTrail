@@ -999,6 +999,8 @@ declare
   v_y numeric;
   v_label_dir text;
   v_name text;
+  v_arr_elem jsonb;
+  v_arr_clamped jsonb;
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
   if v_caller.id is null or not v_caller.is_admin then
@@ -1009,11 +1011,30 @@ begin
   -- this is a defensive backstop only; the editor's own math (offset =
   -- projected drag distance) never produces values anywhere near this
   -- range in normal use.
+  -- Each curve offset value is either a legacy scalar number (single-point
+  -- curve) or an array of 1-3 numbers (new multi-point curve, one
+  -- perpendicular offset per bend point) -- both shapes are clamped the
+  -- same way, element by element.
   if p_curve_offset_overrides is not null then
     for v_key, v_val in select * from jsonb_each(p_curve_offset_overrides) loop
-      v_clamped_curves := v_clamped_curves || jsonb_build_object(
-        v_key, greatest(-150, least(150, (v_val#>>'{}')::numeric))
-      );
+      if jsonb_typeof(v_val) = 'array' then
+        if jsonb_array_length(v_val) < 1 or jsonb_array_length(v_val) > 3 then
+          raise exception 'Invalid curve offset value';
+        end if;
+
+        v_arr_clamped := '[]'::jsonb;
+        for v_arr_elem in select * from jsonb_array_elements(v_val) loop
+          v_arr_clamped := v_arr_clamped || jsonb_build_array(
+            greatest(-150, least(150, (v_arr_elem#>>'{}')::numeric))
+          );
+        end loop;
+
+        v_clamped_curves := v_clamped_curves || jsonb_build_object(v_key, v_arr_clamped);
+      else
+        v_clamped_curves := v_clamped_curves || jsonb_build_object(
+          v_key, greatest(-150, least(150, (v_val#>>'{}')::numeric))
+        );
+      end if;
     end loop;
   end if;
 

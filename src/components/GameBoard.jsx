@@ -12,6 +12,7 @@ import {
   occupiedByDetective,
   formatLogEntry,
 } from "../lib/gameEngine.js";
+import { curvePathD } from "../lib/curveGeometry.js";
 
 // ---------------------------------------------------------------------------
 // GAME BOARD — renders the full playing screen: header, ticket panel,
@@ -1156,8 +1157,17 @@ export default function GameBoard({
                 // specific bow shape.
                 const manualOffset = map.manualCurveOffsets && map.manualCurveOffsets[key];
                 const finalOffset = manualOffset != null ? manualOffset : offset;
-                const cx = mx + nx * finalOffset;
-                const cy = my + ny * finalOffset;
+                // curvePathD handles both shapes uniformly: a single
+                // number (the automatic per-edge offset above is always
+                // this shape, and so is every EXISTING manual override in
+                // every map file) renders as the exact same single
+                // quadratic Bezier this project has always used; an
+                // array of 2-3 numbers (a manual override with multiple
+                // bend points, set via the admin Map Editor for longer
+                // routes that need an S-shape) renders as a smooth
+                // multi-point spline instead -- see curveGeometry.js for
+                // the full reasoning.
+                const pathD = curvePathD(ax, ay, bx, by, finalOffset);
                 // Underground/metro gets a small additional weight boost
                 // (0.5 vs the earlier 0.45) so it reads clearly even amid
                 // a dense taxi mesh, since it's the rarest/most important
@@ -1188,7 +1198,7 @@ export default function GameBoard({
                 return (
                   <g key={`${key}-${mode}-${i}`}>
                     <path
-                      d={`M ${ax} ${ay} Q ${cx} ${cy} ${bx} ${by}`}
+                      d={pathD}
                       fill="none"
                       stroke="#ffffff"
                       strokeWidth={strokeW + 0.35}

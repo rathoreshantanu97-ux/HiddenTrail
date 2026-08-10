@@ -224,7 +224,11 @@ export default function MapEditorPanel({ accountId, onBack }) {
       const [ax, ay] = displayMap.stations[a];
       const [bx, by] = displayMap.stations[b];
       const { nx, ny } = perpendicular(ax, ay, bx, by);
-      const existing = normalizeCurveOffsets(curveDraft[key]) || [0];
+      // Same baseline fallback as addCurvePoint -- if this edge hasn't
+      // been touched by the admin yet this session, the point count/
+      // positions must come from the map's own default curve, not [0].
+      const baseline = curveDraft[key] !== undefined ? curveDraft[key] : rawMap?.manualCurveOffsets?.[key];
+      const existing = normalizeCurveOffsets(baseline) || [0];
       const k = existing.length;
       const t = (pointIndex + 1) / (k + 1);
       const baseX = ax + (bx - ax) * t;
@@ -358,11 +362,26 @@ export default function MapEditorPanel({ accountId, onBack }) {
 
   function addCurvePoint(key) {
     setCurveDraft((prev) => {
-      const existing = normalizeCurveOffsets(prev[key]) || [0];
+      // Fall back to the map's own default bend (rawMap.manualCurveOffsets)
+      // when this edge has no admin override yet -- otherwise the first
+      // "+Add point" click on an edge that already has a real default
+      // curve would silently reset it to straight (0) before adding.
+      const baseline = prev[key] !== undefined ? prev[key] : rawMap?.manualCurveOffsets?.[key];
+      const existing = normalizeCurveOffsets(baseline) || [0];
       if (existing.length >= MAX_CURVE_POINTS) return prev;
-      const mid = existing.length ? existing[Math.floor(existing.length / 2)] : 0;
+      const insertAt = Math.ceil(existing.length / 2);
+      const neighborLeft = existing[insertAt - 1] ?? 0;
+      const neighborRight = existing[insertAt] ?? neighborLeft;
+      const mid = (neighborLeft + neighborRight) / 2;
+      // Nudge the new point's offset away from its neighbor's value when
+      // they'd otherwise match exactly (e.g. adding a 2nd point to a
+      // perfectly straight edge would put both points AT 0 -- invisible,
+      // sitting right on the baseline). Without this, a freshly-added
+      // point is indistinguishable from "no point at all", which is what
+      // made removing/re-adding points look like nothing was happening.
+      const nudge = Math.abs(neighborLeft - neighborRight) > 0.5 ? 0 : 1.5;
       const next = existing.slice();
-      next.splice(Math.ceil(next.length / 2), 0, mid);
+      next.splice(insertAt, 0, Math.round((mid + nudge) * 100) / 100);
       return { ...prev, [key]: next };
     });
   }
@@ -488,7 +507,8 @@ export default function MapEditorPanel({ accountId, onBack }) {
   const hasUnsavedChanges = curveEditCount > 0 || stationEditCount > 0 || decorationsChanged || backgroundChanged;
   const selectedDecoration = decorationDraft.find((d) => d.id === selectedDecorationId) || null;
 
-  const selectedEdgePoints = selectedEdge != null ? (normalizeCurveOffsets(curveDraft[selectedEdge]) || [0]).length : 0;
+  const selectedEdgeBaseline = selectedEdge != null && curveDraft[selectedEdge] !== undefined ? curveDraft[selectedEdge] : rawMap?.manualCurveOffsets?.[selectedEdge];
+  const selectedEdgePoints = selectedEdge != null ? (normalizeCurveOffsets(selectedEdgeBaseline) || [0]).length : 0;
 
   return (
     <div style={styles.page}>

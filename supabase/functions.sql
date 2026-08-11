@@ -3330,8 +3330,13 @@ as $$
 declare
   v_room rooms%rowtype;
   v_owns_seat boolean;
+  -- Same order as DETECTIVE_COLORS in gameEngine.js -- array index i
+  -- (1-indexed, Postgres arrays start at 1) is detective seat i-1's
+  -- DEFAULT color, same assignment initMatch()/start_game use when a
+  -- seat hasn't picked an explicit override.
   v_valid_colors text[] := array['#056bd1', '#E85D00', '#0d9c20', '#4B0082', '#cb110b', '#d13da5', '#049589', '#B8860B'];
-  v_taken_by text;
+  v_i int;
+  v_effective_color text;
 begin
   select * into v_room from rooms r where r.id = p_room_id for update;
   if v_room.id is null then raise exception 'Room not found'; end if;
@@ -3354,16 +3359,23 @@ begin
     if not (p_color = any(v_valid_colors)) then
       raise exception 'Invalid detective color: %', p_color;
     end if;
-    -- Reject picking a color another seat already has -- the whole
-    -- point of a picker is staying visually distinct; two identical
-    -- tokens on the board would defeat that.
-    select key into v_taken_by
-      from jsonb_each_text(coalesce(v_room.seat_colors, '{}'::jsonb))
-      where value = p_color and key <> p_detective_id::text
-      limit 1;
-    if v_taken_by is not null then
-      raise exception 'That color is already taken by detective seat %', v_taken_by;
-    end if;
+    -- Reject picking a color any OTHER detective seat is already
+    -- effectively wearing -- whether they explicitly picked it (present
+    -- in seat_colors) or are just sitting on their default
+    -- DETECTIVE_COLORS[i] assignment (no entry yet). A color nobody's
+    -- touched still visually belongs to that seat once the game starts,
+    -- so it has to be off-limits to everyone else just like an explicit
+    -- pick -- this is the actual fix for a real gap: the previous
+    -- version only checked EXPLICIT seat_colors entries, so a seat
+    -- could steal another seat's still-default color.
+    for v_i in 0 .. (v_room.num_detectives - 1) loop
+      if v_i <> p_detective_id then
+        v_effective_color := coalesce(v_room.seat_colors ->> v_i::text, v_valid_colors[v_i + 1]);
+        if v_effective_color = p_color then
+          raise exception 'That color is already taken by detective seat %', v_i;
+        end if;
+      end if;
+    end loop;
     update rooms
     set seat_colors = coalesce(seat_colors, '{}'::jsonb) || jsonb_build_object(p_detective_id::text, p_color)
     where id = p_room_id;

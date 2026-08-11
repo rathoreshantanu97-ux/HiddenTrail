@@ -8,6 +8,12 @@ import { useMapWithOverrides } from "../lib/useMapWithOverrides.js";
 import { DETECTIVE_COLORS } from "../lib/gameEngine.js";
 import RulebookButton from "./RulebookButton.jsx";
 
+// Human-readable names for DETECTIVE_COLORS, same order -- used in the
+// dropdown picker since a <select>'s options can't render colored
+// circles directly, only text (plus a small color-dot preview next to
+// the control itself).
+const DETECTIVE_COLOR_NAMES = ["Blue", "Orange", "Green", "Indigo", "Red", "Magenta", "Teal", "Gold"];
+
 // ---------------------------------------------------------------------------
 // LOBBY SCREEN — shown after creating or joining a room, before the game
 // starts. Polls the players list (simple + reliable; a lobby with a
@@ -349,37 +355,46 @@ export default function LobbyScreen({
                   <div style={styles.colorPickerRow} onClick={(e) => e.stopPropagation()}>
                     {detectiveIds.map((detId) => {
                       const currentColor = seatColors[String(detId)] || DETECTIVE_COLORS[detId];
-                      const takenColors = new Set(
-                        Object.entries(seatColors)
-                          .filter(([k]) => Number(k) !== detId)
-                          .map(([, v]) => v)
-                      );
+                      // "Taken" = every OTHER detective's EFFECTIVE color,
+                      // whether they explicitly picked it or are just
+                      // sitting on their default DETECTIVE_COLORS[i]
+                      // assignment -- a color nobody's touched yet still
+                      // belongs to that seat visually, so it must be just
+                      // as unavailable to everyone else as an explicit
+                      // pick. Mirrors the same effective-color check now
+                      // enforced server-side in set_seat_color.
+                      const takenColors = new Set();
+                      for (let d = 0; d < numDetectives; d++) {
+                        if (d === detId) continue;
+                        takenColors.add(seatColors[String(d)] || DETECTIVE_COLORS[d]);
+                      }
+                      const disabled = !isMine || colorPicking !== null;
                       return (
-                        <div key={detId} style={styles.colorSwatchGroup}>
+                        <div key={detId} style={styles.colorPickerGroup}>
                           {detectiveIds.length > 1 && <span style={styles.colorSwatchLabel}>D{detId + 1}</span>}
-                          {DETECTIVE_COLORS.map((c) => {
-                            const isCurrent = c === currentColor;
-                            const isTaken = takenColors.has(c) && !isCurrent;
-                            const clickable = isMine && !isTaken && colorPicking === null;
-                            return (
-                              <button
-                                key={c}
-                                aria-label={isTaken ? `${c} (already taken)` : `Set color ${c}`}
-                                title={isTaken ? "Already taken by another detective" : undefined}
-                                disabled={!clickable}
-                                onClick={() => clickable && handlePickColor(detId, isCurrent ? null : c)}
-                                style={{
-                                  ...styles.colorSwatch,
-                                  background: c,
-                                  ...(isCurrent ? styles.colorSwatchSelected : {}),
-                                  ...(isTaken ? styles.colorSwatchTaken : {}),
-                                  ...(isMine ? {} : styles.colorSwatchReadOnly),
-                                }}
-                              >
-                                {isTaken && <span style={styles.colorSwatchTakenMark}>×</span>}
-                              </button>
-                            );
-                          })}
+                          <span style={{ ...styles.colorDot, background: currentColor }} />
+                          {isMine ? (
+                            <select
+                              value={currentColor}
+                              disabled={disabled}
+                              onChange={(e) => handlePickColor(detId, e.target.value)}
+                              style={styles.colorSelect}
+                            >
+                              {DETECTIVE_COLORS.map((c, idx) => {
+                                const isTaken = takenColors.has(c) && c !== currentColor;
+                                return (
+                                  <option key={c} value={c} disabled={isTaken}>
+                                    {DETECTIVE_COLOR_NAMES[idx]}
+                                    {isTaken ? " (taken)" : ""}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          ) : (
+                            <span style={styles.colorReadOnlyLabel}>
+                              {DETECTIVE_COLOR_NAMES[DETECTIVE_COLORS.indexOf(currentColor)] || "Color"}
+                            </span>
+                          )}
                         </div>
                       );
                     })}
@@ -510,30 +525,26 @@ const styles = {
     borderTop: "1px solid #eee",
     cursor: "default",
   },
-  colorSwatchGroup: { display: "flex", alignItems: "center", gap: 4 },
+  colorPickerGroup: { display: "flex", alignItems: "center", gap: 6 },
   colorSwatchLabel: { fontSize: 10, color: "#888", fontWeight: 600, marginRight: 2 },
-  colorSwatch: {
-    width: 18,
-    height: 18,
+  colorDot: {
+    width: 14,
+    height: 14,
     borderRadius: "50%",
     border: "1.5px solid #fff",
     boxShadow: "0 0 0 1px #ddd",
-    padding: 0,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    lineHeight: 1,
+    flexShrink: 0,
   },
-  colorSwatchSelected: { boxShadow: "0 0 0 2px #111" },
-  // Grayscale + darkened + a visible "x" mark, not just faded opacity --
-  // a paled-down COLORED swatch still reads as "a lighter version of
-  // this color" rather than "unavailable", especially at this small
-  // size with no side-by-side comparison. Grayscale removes the color
-  // signal entirely so "taken" can't be mistaken for "just a pale pick".
-  colorSwatchTaken: { filter: "grayscale(1) brightness(0.85)", opacity: 0.55, cursor: "not-allowed" },
-  colorSwatchTakenMark: { color: "#fff", fontSize: 12, fontWeight: 700, textShadow: "0 0 2px rgba(0,0,0,0.6)" },
-  colorSwatchReadOnly: { cursor: "default" },
+  colorSelect: {
+    fontSize: 12,
+    padding: "2px 6px",
+    borderRadius: 6,
+    border: "1px solid #ddd",
+    background: "#fff",
+    color: "#333",
+    cursor: "pointer",
+  },
+  colorReadOnlyLabel: { fontSize: 12, color: "#888" },
   slotRowMine: { border: "1.5px solid #111", background: "#f4f2ec" },
   slotRowClickable: { cursor: "pointer", border: "1.5px dashed #bbb" },
   youTag: { color: "#888", fontWeight: 400, fontSize: 12 },

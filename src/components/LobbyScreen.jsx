@@ -364,7 +364,8 @@ export default function LobbyScreen({
                             return (
                               <button
                                 key={c}
-                                aria-label={`Set color ${c}`}
+                                aria-label={isTaken ? `${c} (already taken)` : `Set color ${c}`}
+                                title={isTaken ? "Already taken by another detective" : undefined}
                                 disabled={!clickable}
                                 onClick={() => clickable && handlePickColor(detId, isCurrent ? null : c)}
                                 style={{
@@ -374,7 +375,9 @@ export default function LobbyScreen({
                                   ...(isTaken ? styles.colorSwatchTaken : {}),
                                   ...(isMine ? {} : styles.colorSwatchReadOnly),
                                 }}
-                              />
+                              >
+                                {isTaken && <span style={styles.colorSwatchTakenMark}>×</span>}
+                              </button>
                             );
                           })}
                         </div>
@@ -517,9 +520,19 @@ const styles = {
     boxShadow: "0 0 0 1px #ddd",
     padding: 0,
     cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: 1,
   },
   colorSwatchSelected: { boxShadow: "0 0 0 2px #111" },
-  colorSwatchTaken: { opacity: 0.25, cursor: "not-allowed" },
+  // Grayscale + darkened + a visible "x" mark, not just faded opacity --
+  // a paled-down COLORED swatch still reads as "a lighter version of
+  // this color" rather than "unavailable", especially at this small
+  // size with no side-by-side comparison. Grayscale removes the color
+  // signal entirely so "taken" can't be mistaken for "just a pale pick".
+  colorSwatchTaken: { filter: "grayscale(1) brightness(0.85)", opacity: 0.55, cursor: "not-allowed" },
+  colorSwatchTakenMark: { color: "#fff", fontSize: 12, fontWeight: 700, textShadow: "0 0 2px rgba(0,0,0,0.6)" },
   colorSwatchReadOnly: { cursor: "default" },
   slotRowMine: { border: "1.5px solid #111", background: "#f4f2ec" },
   slotRowClickable: { cursor: "pointer", border: "1.5px dashed #bbb" },

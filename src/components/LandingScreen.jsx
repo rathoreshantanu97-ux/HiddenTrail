@@ -171,7 +171,7 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
   // Fallback bounds while the map hasn't resolved yet (e.g. very first
   // render, before the effect above picks one) -- matches the server's
   // own fallback in create_room when no map data is available.
-  const rawMapLimits = selectedMap?.mapLimits || { minDetectives: 3, maxDetectives: 20, minPlayers: 2, maxPlayers: 21 };
+  const rawMapLimits = selectedMap?.mapLimits || { minDetectives: 3, maxDetectives: 8, minPlayers: 2, maxPlayers: 9 };
   // Intersect with the ADMIN's global min/max_detectives config -- this
   // is the actual fix for the reported bug: the displayed range
   // previously only ever showed the map's own numbers, completely blind

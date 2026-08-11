@@ -209,6 +209,20 @@ export async function updateRoomSettings({ roomId, callerPlayerId, mapId, numDet
   });
 }
 
+// setSeatColor -- pass color: null to clear a seat's override back to
+// its default DETECTIVE_COLORS[seatIndex] assignment. See set_seat_color
+// in functions.sql for the full validation (ownership, allow-list,
+// duplicate-color rejection) -- this is a thin passthrough, all real
+// rules live server-side.
+export async function setSeatColor({ roomId, callerPlayerId, detectiveId, color }) {
+  await callRpc("set_seat_color", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_detective_id: detectiveId,
+    p_color: color ?? null,
+  });
+}
+
 export async function passTurn({ roomId, callerPlayerId, actor }) {
   await callRpc("pass_turn", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_actor: actor });
 }

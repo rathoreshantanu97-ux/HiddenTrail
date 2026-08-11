@@ -145,9 +145,9 @@ declare
   v_attempt int := 0;
   v_valid_roles text[];
   v_min_det int := 3;
-  v_max_det int := 20;
+  v_max_det int := 8;
   v_min_players int := 2;
-  v_max_players int := 21;
+  v_max_players int := 9;
   v_turn_min int := 30;
   v_turn_max int := 300;
   v_takeovers_overridable boolean := true;
@@ -193,6 +193,17 @@ begin
       from app_settings where id = 1;
   end if;
 
+  -- Hard absolute cap at 8 detectives / 9 players, independent of
+  -- whatever app_settings.max_detectives currently holds -- mirrors
+  -- MAX_DETECTIVES_ABSOLUTE in src/maps/mapSchema.js. DETECTIVE_COLORS
+  -- (gameEngine.js) only has 8 distinct colors, so this is a structural
+  -- ceiling, not a preference an admin should be able to raise -- an
+  -- admin directly editing app_settings.max_detectives to something
+  -- higher must not be able to create a room that needs a color that
+  -- doesn't exist.
+  v_max_det := least(v_max_det, 8);
+  v_max_players := least(v_max_players, 9);
+
   -- Map-level limits: mirrors computeMapLimits() in
   -- src/maps/mapSchema.js (client-side), so the server independently
   -- enforces what the map itself can support, rather than only trusting
@@ -214,7 +225,7 @@ begin
         v_map_ratio := greatest(0.01, least(0.20, v_map_ratio_override));
       end if;
     end if;
-    v_map_max_det := greatest(3, round(p_map_station_count * v_map_ratio)::int);
+    v_map_max_det := least(8, greatest(3, round(p_map_station_count * v_map_ratio)::int));
     v_map_min_det := 3;
     v_min_det := greatest(v_min_det, v_map_min_det);
     v_max_det := least(v_max_det, v_map_max_det);
@@ -3221,7 +3232,7 @@ as $$
 declare
   v_room rooms%rowtype;
   v_min_det int := 3;
-  v_max_det int := 20;
+  v_max_det int := 8;
   v_map_max_det int;
   v_seated_detective_count int;
   v_map_ratio numeric := 0.08;
@@ -3241,6 +3252,9 @@ begin
     select min_detectives, max_detectives into v_min_det, v_max_det from app_settings where id = 1;
   end if;
 
+  -- Hard absolute cap -- see matching comment in create_room above.
+  v_max_det := least(v_max_det, 8);
+
   if p_map_station_count is not null then
     if exists (select 1 from information_schema.tables where table_name = 'map_settings') then
       select detective_density_ratio_override into v_map_ratio_override
@@ -3249,7 +3263,7 @@ begin
         v_map_ratio := greatest(0.01, least(0.20, v_map_ratio_override));
       end if;
     end if;
-    v_map_max_det := greatest(3, round(p_map_station_count * v_map_ratio)::int);
+    v_map_max_det := least(8, greatest(3, round(p_map_station_count * v_map_ratio)::int));
     v_max_det := least(v_max_det, v_map_max_det);
     if v_max_det < v_min_det then v_min_det := v_max_det; end if;
   end if;
@@ -3276,6 +3290,88 @@ begin
       total_players = p_total_players,
       turn_timer_seconds = p_turn_timer_seconds
   where id = p_room_id;
+end;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- set_seat_color -- lets a player pick their DETECTIVE seat's token color
+-- in the lobby before the game starts. Colors are validated against a
+-- hardcoded allow-list matching DETECTIVE_COLORS in gameEngine.js
+-- exactly (not just "any hex string") so a caller can't set a color
+-- that's invisible, clashes with Mr. X's token, or simply doesn't exist
+-- in the palette -- same "server independently re-validates, never just
+-- trusts the client" principle as every other RPC in this file.
+--
+-- Keyed by SEAT INDEX (p_detective_id), not player id -- this is a
+-- deliberate design choice (see the seat_colors column comment in
+-- schema.sql): the color sticks with the seat, not the person, so it
+-- survives reconnects/reshuffles the same way DETECTIVE_COLORS[i] always
+-- has. Only the player CURRENTLY occupying that seat may change its
+-- color, and only while the room is still in the lobby -- once a game
+-- starts, colors are locked in via startGame's snapshot into the
+-- detective_colors passed to start_game, same reasoning as every other
+-- lobby-only setting (changing it mid-game would desync from what's
+-- already been committed to game_state).
+--
+-- Passing p_color = null CLEARS this seat's override, reverting it to
+-- the default DETECTIVE_COLORS[seatIndex] assignment.
+-- -----------------------------------------------------------------------------
+drop function if exists set_seat_color(uuid, uuid, int, text);
+create or replace function set_seat_color(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_detective_id int,
+  p_color text default null
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_owns_seat boolean;
+  v_valid_colors text[] := array['#056bd1', '#E85D00', '#0d9c20', '#4B0082', '#cb110b', '#d13da5', '#049589', '#B8860B'];
+  v_taken_by text;
+begin
+  select * into v_room from rooms r where r.id = p_room_id for update;
+  if v_room.id is null then raise exception 'Room not found'; end if;
+  if v_room.status <> 'lobby' then
+    raise exception 'Seat colors can only be changed before the game starts';
+  end if;
+  if p_detective_id < 0 or p_detective_id >= v_room.num_detectives then
+    raise exception 'Invalid detective seat: %', p_detective_id;
+  end if;
+
+  select exists(
+    select 1 from players p, unnest(string_to_array(p.role, ',')) as seat(d)
+    where p.room_id = p_room_id and p.id = p_caller_player_id and seat.d = 'd' || p_detective_id
+  ) into v_owns_seat;
+  if not v_owns_seat then
+    raise exception 'You do not control detective seat %', p_detective_id;
+  end if;
+
+  if p_color is not null then
+    if not (p_color = any(v_valid_colors)) then
+      raise exception 'Invalid detective color: %', p_color;
+    end if;
+    -- Reject picking a color another seat already has -- the whole
+    -- point of a picker is staying visually distinct; two identical
+    -- tokens on the board would defeat that.
+    select key into v_taken_by
+      from jsonb_each_text(coalesce(v_room.seat_colors, '{}'::jsonb))
+      where value = p_color and key <> p_detective_id::text
+      limit 1;
+    if v_taken_by is not null then
+      raise exception 'That color is already taken by detective seat %', v_taken_by;
+    end if;
+    update rooms
+    set seat_colors = coalesce(seat_colors, '{}'::jsonb) || jsonb_build_object(p_detective_id::text, p_color)
+    where id = p_room_id;
+  else
+    update rooms
+    set seat_colors = coalesce(seat_colors, '{}'::jsonb) - p_detective_id::text
+    where id = p_room_id;
+  end if;
 end;
 $$;
 grant execute on function update_room_settings(uuid, uuid, text, int, int, int, int) to anon, authenticated;

@@ -20,41 +20,23 @@
 // }
 // ---------------------------------------------------------------------------
 
-// DETECTIVE_COLORS -- rebalanced a second time after real feedback that
-// D2 (blue) and D3 (violet/purple) still looked too similar despite
-// clearing a 30-degree hue-distance check. That check alone wasn't
-// sufficient here: the blue-to-violet region of the color wheel is a
-// zone where human hue perception is naturally LESS sensitive than in
-// other regions (e.g. red-to-orange), so the same 30-degree gap that
-// reads as clearly distinct elsewhere can still look confusable there.
-// Fixed by (1) widening D2-D3's hue gap specifically (now part of a
-// worst-case 32 degrees across all pairs, up from 18-22 in the
-// previous version) AND (2) leaning harder on LIGHTNESS/SATURATION
-// character in that specific region -- D2 is now a vivid, bright true
-// blue while D3 is a deep, dark, more desaturated indigo-purple, so
-// they read as genuinely different KINDS of color, not just two points
-// on a hue wheel that happen to be far enough apart on paper.
-// DETECTIVE_COLORS -- expanded to 6 and rebuilt around specific requests
-// (blue, orange, indigo, a dark rose-red, a magenta-pink, emerald),
-// verified against a key finding: earlier attempts had been treating
-// detective colors as needing 30+ degree hue separation from taxi/bus/
-// metro's ROUTE colors, the same constraint route colors need from each
-// other -- but that's not actually the right comparison. A detective
-// token renders as a large filled circle with a white ring and drop
-// shadow (see the circle rendering in GameBoard.jsx), not a thin line,
-// so it doesn't visually compete with route lines the way two route
-// lines would compete with each other -- confirmed this let genuinely
-// good colors like real orange and dark red back into consideration,
-// which had been wrongly excluded earlier for conflicting with taxi/
-// metro's hues despite that conflict not actually mattering in
-// practice. The real constraint that DOES matter is detective-vs-
-// detective distinction (all 6 pairs stay at least ~22 degrees apart,
-// and the one closest pair -- rose-red vs magenta-pink, deliberately a
-// dark/light pairing in the same family per request -- has a large
-// lightness gap as a second, independent distinguishing signal) and
-// solid contrast against the map background (every color here clears
-// 3.6:1 or better).
-export const DETECTIVE_COLORS = ["#196ee6", "#c76005", "#402593", "#881121", "#e2368c", "#1d8763"];
+// DETECTIVE_COLORS -- this is the SELECTABLE PALETTE offered to players
+// in the lobby color picker (see LobbyScreen.jsx), not just a fixed
+// per-seat assignment -- so every entry has to survive being placed next
+// to ANY other entry, not just its "neighbors" in array order. Verified
+// with CIE Lab deltaE76 (a real perceptual-distance metric, not just
+// hue-angle -- an earlier hue-only check missed that magenta-pink and
+// violet were confusable despite a 30+ degree hue gap, because that
+// region of the wheel has naturally low human hue sensitivity) against
+// every OTHER color in this array AND against Mr. X's own token color
+// (#1a1a1a, see the "black" fill in GameBoard.jsx) so a detective color
+// can never be confused with Mr. X either. All pairs clear ~28+ deltaE.
+// Contrast-vs-board-background floor is 3.6:1, with one deliberate,
+// acknowledged exception: Gold clears only ~3.25:1 because true yellow
+// is physically incapable of both being "yellow" and contrasting well
+// against a light board -- every token (including Gold) gets the SAME
+// white ring treatment for consistency, no per-color outline exceptions.
+export const DETECTIVE_COLORS = ["#056bd1", "#E85D00", "#0d9c20", "#4B0082", "#cb110b", "#d13da5", "#049589", "#B8860B"];
 import { computeRoundsAndRevealSchedule, computeStartPool } from "../maps/mapSchema.js";
 
 export const REVEAL_ROUNDS = new Set([3, 8, 13, 18, 22]);

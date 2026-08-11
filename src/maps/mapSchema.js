@@ -101,14 +101,23 @@ export const MODE_DEFAULT = {
 //   maxDetectives = round(stationCount * ratio), ratio defaults to 0.08,
 //     admin-adjustable up to a hard ceiling of 0.20 (enforced server-side
 //     in set_timing_config, same "admin can't misconfigure this into
-//     something broken" principle as every other bound in this project).
+//     something broken" principle as every other bound in this project) --
+//     but ALSO hard-capped at MAX_DETECTIVES_ABSOLUTE regardless of ratio,
+//     since DETECTIVE_COLORS (gameEngine.js) only has that many distinct
+//     colors -- a detective seat past this cap would get an undefined
+//     color. This cap is enforced independently in three more places for
+//     defense in depth: create_room, update_room_settings (functions.sql)
+//     and set_timing_config (access_control_functions.sql) -- so no path,
+//     client or server, admin or player, can ever produce a room needing
+//     more colors than exist.
 //   minDetectives = 3 (the base game's absolute floor, unchanged).
 //   maxPlayers = maxDetectives + 1 (existing project-wide rule).
 //   minPlayers = 2 (unchanged base floor).
 // ---------------------------------------------------------------------------
+export const MAX_DETECTIVES_ABSOLUTE = 8;
 export function computeMapLimits(stationCount, detectiveDensityRatio = 0.08) {
   const clampedRatio = Math.max(0.01, Math.min(0.20, detectiveDensityRatio));
-  const maxDetectives = Math.max(3, Math.round(stationCount * clampedRatio));
+  const maxDetectives = Math.min(MAX_DETECTIVES_ABSOLUTE, Math.max(3, Math.round(stationCount * clampedRatio)));
   const minDetectives = 3;
   return {
     minDetectives,

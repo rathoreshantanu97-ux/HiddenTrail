@@ -37,7 +37,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, currentMapId,
 
   const rawSelectedMap = MAP_LIST.find((m) => m.id === mapId);
   const selectedMap = useMapWithOverrides(rawSelectedMap) || rawSelectedMap;
-  const mapLimits = selectedMap?.mapLimits || { minDetectives: 3, maxDetectives: 20 };
+  const mapLimits = selectedMap?.mapLimits || { minDetectives: 3, maxDetectives: 8 };
 
   async function handleSave() {
     setBusy(true);

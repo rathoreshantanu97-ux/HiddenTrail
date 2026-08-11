@@ -61,6 +61,18 @@ create table if not exists rooms (
   -- exact visibility rule).
   is_public boolean not null default false,
   room_name text,
+  -- seat_colors: { "0": "#056bd1", "2": "#cb110b", ... } -- maps a
+  -- detective SEAT INDEX (not a player id) to a chosen color from
+  -- DETECTIVE_COLORS (gameEngine.js), set via set_seat_color() in the
+  -- lobby before the game starts. Deliberately keyed by seat, not
+  -- player, so a color choice sticks with the seat even if players
+  -- reshuffle/reconnect into different seats -- matches how detective
+  -- colors have always worked (DETECTIVE_COLORS[seatIndex]) elsewhere in
+  -- the codebase. Any seat with no entry here falls back to
+  -- DETECTIVE_COLORS[seatIndex] at game-start time (see startGame in
+  -- supabaseGameStore.js) -- this column is purely an OVERRIDE layer,
+  -- same pattern as map_settings' overrides, not a replacement.
+  seat_colors jsonb,
   created_at timestamptz not null default now()
 );
 -- IMPORTANT: `create table if not exists` above does NOTHING if the table
@@ -85,6 +97,7 @@ alter table rooms add column if not exists route_explorer_enabled_override boole
 alter table rooms add column if not exists round_scaling_ratio_override numeric;
 alter table rooms add column if not exists is_public boolean not null default false;
 alter table rooms add column if not exists room_name text;
+alter table rooms add column if not exists seat_colors jsonb;
 
 -- -----------------------------------------------------------------------------
 -- PLAYERS — one row per connected participant (detective slot or Mr. X).

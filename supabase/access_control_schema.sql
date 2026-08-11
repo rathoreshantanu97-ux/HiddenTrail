@@ -61,9 +61,11 @@ create table if not exists app_settings (
   nomination_window_seconds int not null default 30,
   poll_window_seconds int not null default 60,
   min_detectives int not null default 3,
-  max_detectives int not null default 20,
+  -- Hard-capped at 8: DETECTIVE_COLORS (gameEngine.js) only has 8
+  -- distinct colors, enforced independently in set_timing_config too.
+  max_detectives int not null default 8,
   min_total_players int not null default 2,
-  max_total_players int not null default 21,
+  max_total_players int not null default 9,
   presence_grace_period_seconds int not null default 25,
   pause_resume_deadline_hours int not null default 36,
   takeover_reversal_window_minutes int not null default 5,

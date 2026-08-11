@@ -700,11 +700,21 @@ begin
   if p_max_detectives < p_min_detectives then
     raise exception 'Maximum detectives must be greater than or equal to the minimum';
   end if;
+  -- Hard structural ceiling: DETECTIVE_COLORS (gameEngine.js) only has 8
+  -- distinct colors, so no admin config can ask for more detectives than
+  -- that -- unlike the other bounds here, this isn't a tunable game-
+  -- balance preference, it's "this many colors physically exist."
+  if p_max_detectives > 8 then
+    raise exception 'Maximum detectives cannot exceed 8 (only 8 distinct detective colors exist)';
+  end if;
   if p_min_total_players < 2 then
     raise exception 'Minimum total players cannot go below 2';
   end if;
   if p_max_total_players < p_min_total_players then
     raise exception 'Maximum total players must be greater than or equal to the minimum';
+  end if;
+  if p_max_total_players > 9 then
+    raise exception 'Maximum total players cannot exceed 9 (8 detectives + Mr. X)';
   end if;
   if p_pause_resume_deadline_hours < 1 or p_pause_resume_deadline_hours > 336 then
     raise exception 'Pause resume deadline must be between 1 and 336 hours (2 weeks)';

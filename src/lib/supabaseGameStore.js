@@ -105,13 +105,24 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
             ? computeRoundsAndRevealSchedule(map.graph, Object.keys(map.stations).map(Number), roundScalingRatio)
             : map.roundsAndReveal;
 
+        // Build the ACTUAL per-seat color array from the room's
+        // seat_colors overrides (set via the lobby color picker), falling
+        // back to the default DETECTIVE_COLORS[i] for any seat that never
+        // picked one -- room.seat_colors is a jsonb object keyed by seat
+        // index as a STRING (e.g. {"0": "#cb110b"}), same shape written
+        // by set_seat_color. This is the one place those per-seat picks
+        // actually get turned into the positional array start_game (the
+        // SQL function) expects.
+        const seatColorOverrides = room?.seat_colors || {};
+        const detectiveColors = DETECTIVE_COLORS.map((defaultColor, i) => seatColorOverrides[String(i)] || defaultColor);
+
         await api.startGameRpc({
           roomId,
           callerPlayerId: myPlayerId,
           startPool: map.startPool,
           mrxStartingTickets: ticketCounts.mrx,
           detectiveStartingTickets: ticketCounts.detective,
-          detectiveColors: DETECTIVE_COLORS,
+          detectiveColors,
           maxRounds: roundsAndReveal?.totalRounds,
           revealRounds: roundsAndReveal?.revealRounds,
         });

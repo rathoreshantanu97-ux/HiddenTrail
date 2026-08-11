@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabaseClient.js";
 import { MAP_LIST } from "../maps/index.js";
 import { computeSeatLayout, seatLabel } from "../lib/seatLayout.js";
 import { useMapWithOverrides } from "../lib/useMapWithOverrides.js";
+import { DETECTIVE_COLORS } from "../lib/gameEngine.js";
 import RulebookButton from "./RulebookButton.jsx";
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,15 @@ export default function LobbyScreen({
   const [freeingSeat, setFreeingSeat] = useState(false);
   const [showEditSettings, setShowEditSettings] = useState(false);
   const [activePlayerIds, setActivePlayerIds] = useState(null); // null = not yet checked; otherwise a Set of currently-active player ids, used to offer "free this seat" for anyone inactive (not just the host)
+  // seatColors: room.seat_colors as fetched -- { "0": "#cb110b", ... },
+  // keyed by detective seat index as a STRING (same shape written by
+  // set_seat_color / read by startGame). colorPickErr/colorPicking track
+  // an in-flight pick attempt so a double-click can't fire two requests
+  // and so a rejected pick (e.g. "already taken") shows feedback right
+  // next to the swatch row instead of the shared page-level error banner.
+  const [seatColors, setSeatColors] = useState({});
+  const [colorPicking, setColorPicking] = useState(null); // detective id (number) currently being set, or null
+  const [colorPickErr, setColorPickErr] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -67,6 +77,7 @@ export default function LobbyScreen({
     try {
       const room = await api.fetchRoom(roomId);
       setHostPlayerId(room?.host_player_id ?? null);
+      setSeatColors(room?.seat_colors || {});
       const activeIds = await api.getActivePlayerIds(roomId);
       setActivePlayerIds(new Set(activeIds));
       if (room?.host_player_id) {
@@ -94,6 +105,24 @@ export default function LobbyScreen({
     const channel = supabase
       .channel(`lobby_players:${roomId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `room_id=eq.${roomId}` }, () => {
+        refresh();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId, refresh]);
+
+  // Separate subscription on the ROOMS table (not just players) --
+  // needed so a seat color pick made by another player shows up
+  // instantly for everyone else, instead of waiting on the 3-second
+  // poll. The players subscription above doesn't fire for this since
+  // seat_colors lives on the room row, not a player row.
+  useEffect(() => {
+    if (!supabase || !roomId) return;
+    const channel = supabase
+      .channel(`lobby_room:${roomId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, () => {
         refresh();
       })
       .subscribe();
@@ -147,6 +176,19 @@ export default function LobbyScreen({
   const joinedRoles = new Set(players.map((p) => p.role));
   const missingSeats = allSeatRoles.filter((r) => !joinedRoles.has(r));
   const allSeatsFilled = missingSeats.length === 0;
+
+  async function handlePickColor(detectiveId, color) {
+    setColorPicking(detectiveId);
+    setColorPickErr("");
+    try {
+      await api.setSeatColor({ roomId, callerPlayerId: myPlayerId, detectiveId, color });
+      await refresh();
+    } catch (e) {
+      setColorPickErr(e.message || "Failed to set color.");
+    } finally {
+      setColorPicking(null);
+    }
+  }
 
   async function handleStart() {
     setStarting(true);
@@ -255,6 +297,10 @@ export default function LobbyScreen({
             // deliberately doesn't require host status).
             const seatInactive = p && activePlayerIds && !activePlayerIds.has(p.id);
             const canFreeSeat = seatInactive && !isMine;
+            // Detective seats can control more than one detective (see
+            // computeSeatLayout's fair-split -- seatRole is comma-joined,
+            // e.g. "d0,d1"), so each one gets its own color swatch row.
+            const detectiveIds = seatRole === "mrx" ? [] : seatRole.split(",").map((s) => parseInt(s.slice(1), 10));
             return (
               <div
                 key={seatRole}
@@ -299,10 +345,48 @@ export default function LobbyScreen({
                     </button>
                   )}
                 </span>
+                {p && detectiveIds.length > 0 && (
+                  <div style={styles.colorPickerRow} onClick={(e) => e.stopPropagation()}>
+                    {detectiveIds.map((detId) => {
+                      const currentColor = seatColors[String(detId)] || DETECTIVE_COLORS[detId];
+                      const takenColors = new Set(
+                        Object.entries(seatColors)
+                          .filter(([k]) => Number(k) !== detId)
+                          .map(([, v]) => v)
+                      );
+                      return (
+                        <div key={detId} style={styles.colorSwatchGroup}>
+                          {detectiveIds.length > 1 && <span style={styles.colorSwatchLabel}>D{detId + 1}</span>}
+                          {DETECTIVE_COLORS.map((c) => {
+                            const isCurrent = c === currentColor;
+                            const isTaken = takenColors.has(c) && !isCurrent;
+                            const clickable = isMine && !isTaken && colorPicking === null;
+                            return (
+                              <button
+                                key={c}
+                                aria-label={`Set color ${c}`}
+                                disabled={!clickable}
+                                onClick={() => clickable && handlePickColor(detId, isCurrent ? null : c)}
+                                style={{
+                                  ...styles.colorSwatch,
+                                  background: c,
+                                  ...(isCurrent ? styles.colorSwatchSelected : {}),
+                                  ...(isTaken ? styles.colorSwatchTaken : {}),
+                                  ...(isMine ? {} : styles.colorSwatchReadOnly),
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
+        {colorPickErr && <div style={styles.errText}>{colorPickErr}</div>}
 
         {err && <div style={styles.errText}>{err}</div>}
 
@@ -402,6 +486,7 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap",
     padding: "8px 12px",
     background: "#fafafa",
     borderRadius: 8,
@@ -411,6 +496,31 @@ const styles = {
     cursor: "default",
     fontFamily: "inherit",
   },
+  colorPickerRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    marginTop: 8,
+    paddingTop: 8,
+    borderTop: "1px solid #eee",
+    cursor: "default",
+  },
+  colorSwatchGroup: { display: "flex", alignItems: "center", gap: 4 },
+  colorSwatchLabel: { fontSize: 10, color: "#888", fontWeight: 600, marginRight: 2 },
+  colorSwatch: {
+    width: 18,
+    height: 18,
+    borderRadius: "50%",
+    border: "1.5px solid #fff",
+    boxShadow: "0 0 0 1px #ddd",
+    padding: 0,
+    cursor: "pointer",
+  },
+  colorSwatchSelected: { boxShadow: "0 0 0 2px #111" },
+  colorSwatchTaken: { opacity: 0.25, cursor: "not-allowed" },
+  colorSwatchReadOnly: { cursor: "default" },
   slotRowMine: { border: "1.5px solid #111", background: "#f4f2ec" },
   slotRowClickable: { cursor: "pointer", border: "1.5px dashed #bbb" },
   youTag: { color: "#888", fontWeight: 400, fontSize: 12 },

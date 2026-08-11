@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { isSupabaseConfigured } from "../lib/supabaseClient.js";
 import { useActiveMaps } from "../lib/useActiveMaps.js";
+import { MAP_LIST } from "../maps/index.js";
 import { computeSeatLayout, computeSeatLayoutSafe, seatLabel } from "../lib/seatLayout.js";
-import { useMapWithOverrides } from "../lib/useMapWithOverrides.js";
+import { useMapWithOverrides, applyMapOverride } from "../lib/useMapWithOverrides.js";
 import { usePublicRooms } from "../lib/usePublicRooms.js";
 import * as auth from "../lib/accessControlApi.js";
 import * as api from "../lib/supabaseApi.js";
@@ -166,6 +167,7 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
 
   const rawSelectedMap = activeMaps.find((m) => m.id === mapId);
   const selectedMap = useMapWithOverrides(rawSelectedMap) || rawSelectedMap;
+  const selectedMapTheme = { mrxName: selectedMap?.mrxName, detectiveTeamName: selectedMap?.detectiveTeamName };
   // Fallback bounds while the map hasn't resolved yet (e.g. very first
   // render, before the effect above picks one) -- matches the server's
   // own fallback in create_room when no map data is available.
@@ -267,8 +269,8 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
   }
 
   const roleOptions = [
-    { value: "mrx", label: "Mr. X" },
-    ...seatLayout.map((s) => ({ value: s.seatRole, label: seatLabel(s.seatRole) })),
+    { value: "mrx", label: seatLabel("mrx", selectedMapTheme) },
+    ...seatLayout.map((s) => ({ value: s.seatRole, label: seatLabel(s.seatRole, selectedMapTheme) })),
   ];
 
   return (
@@ -364,7 +366,7 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
           <div style={{ fontWeight: 600, marginBottom: 4 }}>Seat layout preview:</div>
           <div>Mr. X</div>
           {seatLayout.map((s) => (
-            <div key={s.seatRole}>{seatLabel(s.seatRole)}</div>
+            <div key={s.seatRole}>{seatLabel(s.seatRole, selectedMapTheme)}</div>
           ))}
         </div>
       )}
@@ -621,11 +623,35 @@ function RejoinFlow({ roomCode, onBack, onJoin }) {
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+  const [theme, setTheme] = useState({});
 
   useEffect(() => {
     api
       .getReconnectableSeats(roomCode)
-      .then(setSeats)
+      .then((rows) => {
+        setSeats(rows);
+        // Look up this room's map once (any seat's roomId works, they're
+        // all the same room) so seat labels below use this room's real
+        // Mr. X/detective-team nomenclature instead of the generic
+        // default. Best-effort -- a failure here just means this one
+        // screen falls back to generic labels, not worth blocking the
+        // actual rejoin flow over.
+        if (rows && rows[0]) {
+          api
+            .fetchRoom(rows[0].roomId)
+            .then(async (room) => {
+              const rawMap = MAP_LIST.find((m) => m.id === room.map_id);
+              if (!rawMap) return;
+              // Apply any admin-saved theme override too (not just the
+              // map's own baked-in default) -- same source of truth
+              // every other screen uses.
+              const overrides = await auth.getMapOverrides().catch(() => ({}));
+              const map = applyMapOverride(rawMap, overrides[rawMap.id]);
+              setTheme({ mrxName: map.mrxName, detectiveTeamName: map.detectiveTeamName });
+            })
+            .catch(() => {});
+        }
+      })
       .catch((e) => setErr(e.message || "Failed to check this room."));
   }, [roomCode]);
 
@@ -683,7 +709,7 @@ function RejoinFlow({ roomCode, onBack, onJoin }) {
                 style={{ ...styles.pill, ...(selectedPlayerId === s.playerId ? styles.pillActive : {}) }}
                 onClick={() => setSelectedPlayerId(s.playerId)}
               >
-                {seatLabel(s.role)} ({s.displayName})
+                {seatLabel(s.role, theme)} ({s.displayName})
               </button>
             ))}
           </div>
@@ -721,11 +747,27 @@ function LobbyRejoinFlow({ roomCode, onBack, onJoin }) {
   const [busy, setBusy] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+  const [theme, setTheme] = useState({});
 
   useEffect(() => {
     api
       .getReconnectableLobbySeats(roomCode)
-      .then(setSeats)
+      .then((rows) => {
+        setSeats(rows);
+        // Same best-effort theme lookup as RejoinFlow -- see its comment.
+        if (rows && rows[0]) {
+          api
+            .fetchRoom(rows[0].roomId)
+            .then(async (room) => {
+              const rawMap = MAP_LIST.find((m) => m.id === room.map_id);
+              if (!rawMap) return;
+              const overrides = await auth.getMapOverrides().catch(() => ({}));
+              const map = applyMapOverride(rawMap, overrides[rawMap.id]);
+              setTheme({ mrxName: map.mrxName, detectiveTeamName: map.detectiveTeamName });
+            })
+            .catch(() => {});
+        }
+      })
       .catch((e) => setErr(e.message || "Failed to check this room."));
   }, [roomCode]);
 
@@ -777,7 +819,7 @@ function LobbyRejoinFlow({ roomCode, onBack, onJoin }) {
                 style={{ ...styles.pill, ...(selectedPlayerId === s.playerId ? styles.pillActive : {}) }}
                 onClick={() => setSelectedPlayerId(s.playerId)}
               >
-                {seatLabel(s.role)} ({s.displayName})
+                {seatLabel(s.role, theme)} ({s.displayName})
               </button>
             ))}
           </div>
@@ -809,6 +851,15 @@ function JoinRoomForm({ onJoin, accountDisplayName }) {
   const [role, setRole] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+
+  // Theme (Mr. X / detective team names) for whichever room's code was
+  // just looked up, so the role-picker below reads with this room's real
+  // nomenclature instead of the generic default -- unconditional hook
+  // call (Rules of Hooks), safe even before roomInfo/mapId is known since
+  // useMapWithOverrides itself handles a null map.
+  const rawJoinMap = roomInfo?.mapId ? MAP_LIST.find((m) => m.id === roomInfo.mapId) : null;
+  const joinMap = useMapWithOverrides(rawJoinMap) || rawJoinMap;
+  const joinTheme = { mrxName: joinMap?.mrxName, detectiveTeamName: joinMap?.detectiveTeamName };
 
   async function handleLookup() {
     if (!roomCode.trim()) {
@@ -931,7 +982,7 @@ function JoinRoomForm({ onJoin, accountDisplayName }) {
       <div style={styles.rowCenter}>
         {allSlots.map((s) => {
           const taken = roomInfo.takenRoles.includes(s);
-          const label = seatLabel(s);
+          const label = seatLabel(s, joinTheme);
           return (
             <button
               key={s}

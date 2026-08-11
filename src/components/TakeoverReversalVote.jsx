@@ -17,7 +17,7 @@ import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 //   2. The vote modal itself, shown to EVERYONE once a proposal exists
 //      (unlike the request button, which only the replaced player sees).
 // ---------------------------------------------------------------------------
-export default function TakeoverReversalVote({ roomId, myPlayerId, completedTakeoverEventId }) {
+export default function TakeoverReversalVote({ roomId, myPlayerId, completedTakeoverEventId, theme }) {
   const enabled = useFeatureEnabled("takeover_reversal_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = useTakeoverReversalVote({ roomId, myPlayerId });
 
@@ -46,7 +46,7 @@ export default function TakeoverReversalVote({ roomId, myPlayerId, completedTake
     <div style={styles.overlay}>
       <div style={styles.modal}>
         <div style={styles.title}>
-          {proposal.proposedByName} wants their seat back ({seatLabel(proposal.originalRole)})
+          {proposal.proposedByName} wants their seat back ({seatLabel(proposal.originalRole, theme)})
         </div>
         <div style={styles.desc}>
           The seat's moves so far are unaffected — this only changes who controls it going forward.

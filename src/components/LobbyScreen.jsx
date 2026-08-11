@@ -4,6 +4,7 @@ import * as api from "../lib/supabaseApi.js";
 import { supabase } from "../lib/supabaseClient.js";
 import { MAP_LIST } from "../maps/index.js";
 import { computeSeatLayout, seatLabel } from "../lib/seatLayout.js";
+import { useMapWithOverrides } from "../lib/useMapWithOverrides.js";
 import RulebookButton from "./RulebookButton.jsx";
 
 // ---------------------------------------------------------------------------
@@ -128,7 +129,12 @@ export default function LobbyScreen({
     }
   }
 
-  const map = MAP_LIST.find((m) => m.id === mapId);
+  const rawMap = MAP_LIST.find((m) => m.id === mapId);
+  // useMapWithOverrides so this reflects any admin-saved Theme tab
+  // customization (Mr. X/detective team/mode names), not just the map's
+  // own baked-in default -- same source of truth every other screen uses.
+  const map = useMapWithOverrides(rawMap) || rawMap;
+  const lobbyTheme = { mrxName: map?.mrxName, detectiveTeamName: map?.detectiveTeamName };
 
   let seats = [];
   try {
@@ -260,7 +266,7 @@ export default function LobbyScreen({
                 onClick={() => isOpen && !isMine && handleSwitchSeat(seatRole)}
               >
                 <span style={styles.slotRole}>
-                  {seatLabel(seatRole)}
+                  {seatLabel(seatRole, lobbyTheme)}
                   {isMine && <span style={styles.youTag}> (you)</span>}
                 </span>
                 <span style={styles.slotRightSide}>
@@ -303,7 +309,7 @@ export default function LobbyScreen({
         {!allSeatsFilled && (
           <div style={styles.waitingForSeatsNote}>
             Waiting for {missingSeats.length} more seat{missingSeats.length === 1 ? "" : "s"} to be filled:{" "}
-            {missingSeats.map((r) => seatLabel(r)).join(", ")}
+            {missingSeats.map((r) => seatLabel(r, lobbyTheme)).join(", ")}
           </div>
         )}
 

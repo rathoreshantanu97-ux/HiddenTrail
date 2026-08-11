@@ -949,6 +949,7 @@ export default function App({ account, onLogout }) {
                 roomId={mpRoomId}
                 myPlayerId={mpPlayerId}
                 completedTakeoverEventId={mpSpectatorInfo?.takeoverEventId || null}
+                theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }}
               />
               <RedistributeRolesVote
                 roomId={mpRoomId}
@@ -956,9 +957,10 @@ export default function App({ account, onLogout }) {
                 isHost={liveIsHost}
                 numDetectives={liveNumDetectives}
                 totalPlayers={liveTotalPlayers}
+                theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }}
               />
             </div>
-            <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={liveIsHost} />
+            <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={liveIsHost} theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }} />
           </div>
         }
         belowTicketsContent={

@@ -11,7 +11,7 @@ import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 // the caller (only rendered when isHost && redistributeRolesEnabled for
 // this room, mirroring every other feature toggle in this project).
 // ---------------------------------------------------------------------------
-export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numDetectives, totalPlayers }) {
+export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numDetectives, totalPlayers, theme }) {
   const enabled = useFeatureEnabled("redistribute_roles_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = useRedistributeVote({ roomId, myPlayerId });
   const [showForm, setShowForm] = useState(false);
@@ -51,7 +51,7 @@ export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numD
     const assignedRoles = Object.values(assignments);
     const missingOrDuplicate = allSeats.filter((s) => assignedRoles.filter((r) => r === s).length !== 1);
     if (missingOrDuplicate.length > 0) {
-      alert(`Each seat must be assigned to exactly one player. Check: ${missingOrDuplicate.map(seatLabel).join(", ")}`);
+      alert(`Each seat must be assigned to exactly one player. Check: ${missingOrDuplicate.map((s) => seatLabel(s, theme)).join(", ")}`);
       return;
     }
     try {
@@ -71,7 +71,7 @@ export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numD
           <div style={styles.assignmentPreview}>
             {Object.entries(proposal.newAssignments).map(([playerId, role]) => (
               <div key={playerId} style={styles.assignmentRow}>
-                {seatLabel(role)}
+                {seatLabel(role, theme)}
               </div>
             ))}
           </div>
@@ -123,7 +123,7 @@ export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numD
             >
               {allSeats.map((s) => (
                 <option key={s} value={s}>
-                  {seatLabel(s)}
+                  {seatLabel(s, theme)}
                 </option>
               ))}
             </select>

@@ -940,17 +940,25 @@ returns table (
   -- color) -- see decorations / background_override column comments in
   -- access_control_schema.sql.
   out_decorations jsonb,
-  out_background_override text
+  out_background_override text,
+  -- Added for per-map nomenclature theming (Mr. X's name, the detective
+  -- team's collective name, transport mode labels) -- see the theme
+  -- override column comments in access_control_schema.sql.
+  out_mrx_name_override text,
+  out_detective_team_name_override text,
+  out_mode_labels_override jsonb
 )
 language sql
 security definer
 as $$
   select map_id, detective_density_ratio_override, ticket_counts_override, round_scaling_ratio_override,
-         curve_offset_overrides, station_overrides, decorations, background_override
+         curve_offset_overrides, station_overrides, decorations, background_override,
+         mrx_name_override, detective_team_name_override, mode_labels_override
   from map_settings
   where detective_density_ratio_override is not null or ticket_counts_override is not null
      or round_scaling_ratio_override is not null or curve_offset_overrides is not null
-     or station_overrides is not null or decorations is not null or background_override is not null;
+     or station_overrides is not null or decorations is not null or background_override is not null
+     or mrx_name_override is not null or detective_team_name_override is not null or mode_labels_override is not null;
 $$;
 grant execute on function get_map_overrides() to anon, authenticated;
 
@@ -983,13 +991,17 @@ grant execute on function get_map_overrides() to anon, authenticated;
 -- -----------------------------------------------------------------------------
 drop function if exists set_map_visual_overrides(uuid, text, jsonb, jsonb);
 drop function if exists set_map_visual_overrides(uuid, text, jsonb, jsonb, jsonb, text);
+drop function if exists set_map_visual_overrides(uuid, text, jsonb, jsonb, jsonb, text, text, text, jsonb);
 create or replace function set_map_visual_overrides(
   p_caller_account_id uuid,
   p_map_id text,
   p_curve_offset_overrides jsonb,
   p_station_overrides jsonb,
   p_decorations jsonb default null,
-  p_background_override text default null
+  p_background_override text default null,
+  p_mrx_name_override text default null,
+  p_detective_team_name_override text default null,
+  p_mode_labels_override jsonb default null
 ) returns void
 language plpgsql
 security definer
@@ -1033,6 +1045,13 @@ declare
   v_dec_url text;
   v_dec_id text;
   v_hex_re text := '^#[0-9a-fA-F]{6}$';
+  -- Theme validation
+  v_clamped_mrx_name text;
+  v_clamped_team_name text;
+  v_clamped_mode_labels jsonb := '{}'::jsonb;
+  v_mode_key text;
+  v_mode_val jsonb;
+  v_mode_label text;
 begin
   select * into v_caller from accounts a where a.id = p_caller_account_id;
   if v_caller.id is null or not v_caller.is_admin then
@@ -1232,13 +1251,60 @@ begin
     raise exception 'Invalid background color';
   end if;
 
-  insert into map_settings (map_id, curve_offset_overrides, station_overrides, decorations, background_override, updated_at)
+  -- THEME: Mr. X's name and the detective team's collective name are
+  -- plain text, length-capped and stripped of control characters --
+  -- purely cosmetic strings shown in UI text, never interpreted as
+  -- markup/HTML (every render site uses plain React text nodes, not
+  -- dangerouslySetInnerHTML), so the only real risk is someone pasting
+  -- something absurdly long or with odd whitespace/control chars, both
+  -- handled here.
+  if p_mrx_name_override is not null then
+    v_clamped_mrx_name := left(regexp_replace(trim(p_mrx_name_override), '[\r\n\t]', ' ', 'g'), 40);
+    if v_clamped_mrx_name = '' then
+      v_clamped_mrx_name := null;
+    end if;
+  end if;
+
+  if p_detective_team_name_override is not null then
+    v_clamped_team_name := left(regexp_replace(trim(p_detective_team_name_override), '[\r\n\t]', ' ', 'g'), 40);
+    if v_clamped_team_name = '' then
+      v_clamped_team_name := null;
+    end if;
+  end if;
+
+  -- mode_labels_override: a keyed object, only "taxi"/"bus"/"underground"/
+  -- "ferry" are valid keys (the fixed internal mode identifiers used
+  -- everywhere else in the code -- renaming here only ever changes the
+  -- DISPLAY label, never these keys), each value a short plain-text
+  -- label with the same sanitization as the names above.
+  if p_mode_labels_override is not null then
+    if jsonb_typeof(p_mode_labels_override) <> 'object' then
+      raise exception 'mode_labels_override must be an object';
+    end if;
+    for v_mode_key, v_mode_val in select * from jsonb_each(p_mode_labels_override) loop
+      if v_mode_key not in ('taxi', 'bus', 'underground', 'ferry') then
+        raise exception 'Invalid transport mode key: %', v_mode_key;
+      end if;
+      v_mode_label := left(regexp_replace(trim(v_mode_val#>>'{}'), '[\r\n\t]', ' ', 'g'), 24);
+      if v_mode_label <> '' then
+        v_clamped_mode_labels := v_clamped_mode_labels || jsonb_build_object(v_mode_key, v_mode_label);
+      end if;
+    end loop;
+  end if;
+
+  insert into map_settings (
+    map_id, curve_offset_overrides, station_overrides, decorations, background_override,
+    mrx_name_override, detective_team_name_override, mode_labels_override, updated_at
+  )
   values (
     p_map_id,
     case when p_curve_offset_overrides is null then null else v_clamped_curves end,
     case when p_station_overrides is null then null else v_clamped_stations end,
     case when p_decorations is null then null else v_clamped_decorations end,
     p_background_override,
+    v_clamped_mrx_name,
+    v_clamped_team_name,
+    case when p_mode_labels_override is null then null else v_clamped_mode_labels end,
     now()
   )
   on conflict (map_id) do update set
@@ -1246,10 +1312,13 @@ begin
     station_overrides = case when p_station_overrides is null then null else v_clamped_stations end,
     decorations = case when p_decorations is null then null else v_clamped_decorations end,
     background_override = p_background_override,
+    mrx_name_override = v_clamped_mrx_name,
+    detective_team_name_override = v_clamped_team_name,
+    mode_labels_override = case when p_mode_labels_override is null then null else v_clamped_mode_labels end,
     updated_at = now();
 end;
 $$;
-grant execute on function set_map_visual_overrides(uuid, text, jsonb, jsonb, jsonb, text) to anon, authenticated;
+grant execute on function set_map_visual_overrides(uuid, text, jsonb, jsonb, jsonb, text, text, text, jsonb) to anon, authenticated;
 
 
 -- -----------------------------------------------------------------------------

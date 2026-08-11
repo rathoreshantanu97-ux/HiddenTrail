@@ -8,8 +8,12 @@ import { seatLabel } from "../lib/seatLayout.js";
 // than leaving them confused or showing raw errors when their moves
 // fail, this gives a clear explanation and lets them keep watching.
 // ---------------------------------------------------------------------------
-export default function SpectatorScreen({ replacedRole, onLeave, children }) {
-  const roleLabel = replacedRole ? (replacedRole === "mrx" ? "Mr. X" : seatLabel(replacedRole)) : "your seat";
+export default function SpectatorScreen({ replacedRole, mrxName, detectiveTeamName, onLeave, children }) {
+  const roleLabel = replacedRole
+    ? replacedRole === "mrx"
+      ? mrxName ? mrxName() : "Mr. X"
+      : seatLabel(replacedRole, { mrxName: mrxName ? mrxName() : undefined, detectiveTeamName })
+    : "your seat";
 
   return (
     <div>

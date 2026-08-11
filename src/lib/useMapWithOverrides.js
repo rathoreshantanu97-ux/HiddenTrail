@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { getMapOverrides } from "./accessControlApi.js";
-import { computeMapLimits, computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
+import { computeMapLimits, computeRoundsAndRevealSchedule, MODE_DEFAULT } from "../maps/mapSchema.js";
 
 // ---------------------------------------------------------------------------
 // applyMapOverride — pure merge function, factored out of the hook below
@@ -89,6 +89,24 @@ export function applyMapOverride(map, override) {
   const effectiveBackgroundOverrideColor =
     override.backgroundOverrideColor !== undefined ? override.backgroundOverrideColor : null;
 
+  // THEME overrides (Map Editor's Theme tab) -- mrxName/detectiveTeamName
+  // are simple whole-value replacements (null/undefined falls through to
+  // the map's own default, exactly like every scalar override above).
+  // modeTheme is merged per-mode-key (like manualCurveOffsets), replacing
+  // ONLY the `label` field of whichever modes were customized -- color/
+  // short stay exactly as the map defines them, so renaming "Taxi" to
+  // "Horse" can't accidentally also change its color or single-letter
+  // ticket-icon abbreviation.
+  const effectiveMrxName = override.mrxNameOverride || map.mrxName;
+  const effectiveDetectiveTeamName = override.detectiveTeamNameOverride || map.detectiveTeamName;
+  let effectiveModeTheme = map.modeTheme;
+  if (override.modeLabelsOverride && Object.keys(override.modeLabelsOverride).length > 0) {
+    effectiveModeTheme = { ...(map.modeTheme || MODE_DEFAULT) };
+    for (const [modeKey, label] of Object.entries(override.modeLabelsOverride)) {
+      effectiveModeTheme[modeKey] = { ...(effectiveModeTheme[modeKey] || {}), label };
+    }
+  }
+
   return {
     ...map,
     mapLimits: effectiveLimits,
@@ -102,6 +120,9 @@ export function applyMapOverride(map, override) {
     majorStations: effectiveMajorStations,
     decorations: effectiveDecorations,
     backgroundOverrideColor: effectiveBackgroundOverrideColor,
+    mrxName: effectiveMrxName,
+    detectiveTeamName: effectiveDetectiveTeamName,
+    modeTheme: effectiveModeTheme,
   };
 }
 

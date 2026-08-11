@@ -257,6 +257,11 @@ export async function getMapOverrides() {
       // Added for map beautification -- see DecorationsLayer.jsx.
       decorations: row.out_decorations,
       backgroundOverrideColor: row.out_background_override,
+      // Added for per-map nomenclature theming -- see MapEditorPanel.jsx's
+      // Theme tab.
+      mrxNameOverride: row.out_mrx_name_override,
+      detectiveTeamNameOverride: row.out_detective_team_name_override,
+      modeLabelsOverride: row.out_mode_labels_override,
     };
   }
   return result;
@@ -275,6 +280,9 @@ export async function setMapVisualOverrides({
   stationOverrides,
   decorations,
   backgroundOverrideColor,
+  mrxNameOverride,
+  detectiveTeamNameOverride,
+  modeLabelsOverride,
 }) {
   await callRpc("set_map_visual_overrides", {
     p_caller_account_id: callerAccountId,
@@ -283,6 +291,9 @@ export async function setMapVisualOverrides({
     p_station_overrides: stationOverrides,
     p_decorations: decorations,
     p_background_override: backgroundOverrideColor,
+    p_mrx_name_override: mrxNameOverride,
+    p_detective_team_name_override: detectiveTeamNameOverride,
+    p_mode_labels_override: modeLabelsOverride,
   });
 }
 

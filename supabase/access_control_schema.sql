@@ -244,6 +244,27 @@ create table if not exists map_settings (
   -- still renders on top exactly as before. null = use the map's own
   -- default background color.
   background_override text,
+  -- THEME overrides -- per-map nomenclature reskin (Mr. X's name, the
+  -- detective team's collective name, and each transport mode's display
+  -- label). Purely cosmetic text, like decorations/background_override
+  -- above: never touches connectivity, ticket counts, round timing, or
+  -- any mode's underlying KEY ("taxi"/"bus"/"underground"/"ferry" stay
+  -- fixed internal identifiers everywhere in the code -- only the display
+  -- LABEL shown to players changes), so it can't affect game balance no
+  -- matter what an admin types.
+  --
+  -- mrx_name_override / detective_team_name_override: plain text,
+  -- null = use the map's own default ("Mr. X" / "Detectives"). Length-
+  -- capped and sanitized server-side (see set_map_visual_overrides).
+  mrx_name_override text,
+  detective_team_name_override text,
+  -- mode_labels_override: {"taxi": "Horse", "bus": "Raven", ...} -- a
+  -- keyed object (like curve_offset_overrides/station_overrides above),
+  -- so an admin can rename just one or two modes without needing to
+  -- specify all four. Only "taxi"/"bus"/"underground"/"ferry" are valid
+  -- keys (validated server-side against the map's actual modeTheme,
+  -- same allow-list pattern as decoration icon names).
+  mode_labels_override jsonb,
   updated_at timestamptz not null default now()
 );
 alter table map_settings add column if not exists detective_density_ratio_override numeric;
@@ -253,6 +274,9 @@ alter table map_settings add column if not exists curve_offset_overrides jsonb;
 alter table map_settings add column if not exists station_overrides jsonb;
 alter table map_settings add column if not exists decorations jsonb;
 alter table map_settings add column if not exists background_override text;
+alter table map_settings add column if not exists mrx_name_override text;
+alter table map_settings add column if not exists detective_team_name_override text;
+alter table map_settings add column if not exists mode_labels_override jsonb;
 
 
 -- -----------------------------------------------------------------------------

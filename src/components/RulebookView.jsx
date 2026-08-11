@@ -30,9 +30,14 @@ const SECTIONS = [
   { id: "multiplayer", label: "Multiplayer extras" },
 ];
 
-export default function RulebookView({ onClose, mrxName, detectiveName, startOnSection }) {
+export default function RulebookView({ onClose, mrxName, detectiveName, modeTheme, startOnSection }) {
   const [activeSection, setActiveSection] = useState(startOnSection || "objective");
-  const activeMode = MODE_DEFAULT;
+  // modeTheme lets the rulebook's diagrams/copy reflect a map's custom
+  // transport names (e.g. Westeros's "Horse"/"Raven"/"Dragon" instead of
+  // "Taxi"/"Bus"/"Underground") -- same reskin idea as mrxName/
+  // detectiveName above. Falls back to the generic palette when no map
+  // is loaded yet (e.g. opened from LandingScreen).
+  const activeMode = modeTheme || MODE_DEFAULT;
   const mrxLabel = mrxName ? mrxName() : "Mr. X";
   const detLabel = (n) => (detectiveName ? detectiveName(n) : `Detective ${n + 1}`);
 

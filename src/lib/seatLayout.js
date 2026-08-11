@@ -34,12 +34,30 @@ export function computeSeatLayout(numDetectives, totalPlayers) {
 // Human-readable label for a seat role, e.g. "d0,d1" -> "Detectives 1 & 2"
 // or "d3,d4,d5" -> "Detectives 4-6". Single-detective seats just say
 // "Detective N".
-export function seatLabel(seatRole) {
-  if (seatRole === "mrx") return "Mr. X";
+//
+// `theme` is an optional { mrxName, detectiveTeamName } pair for maps that
+// reskin these terms (e.g. Westeros's "The Faceless Men" for Mr. X, "The
+// Common Men" for detectives) -- omit it (or leave a field unset) to fall
+// back to the generic default, same pattern as mrxName()/detectiveName()
+// elsewhere. This is a PURE function with no map access of its own, so
+// every call site that has a map loaded must pass its names through
+// explicitly.
+export function seatLabel(seatRole, theme) {
+  const mrxName = theme?.mrxName || "Mr. X";
+  // Same singular-preserving rule as detectiveLabel() in mapSchema.js:
+  // only switch wording once a REAL custom team name is set, otherwise
+  // keep the exact original "Detective"/"Detectives" text (the plural
+  // default alone would otherwise read as "Detectives 1" for a single
+  // seat on every map that hasn't customized this).
+  const rawTeamName = theme?.detectiveTeamName;
+  const hasCustomTeamName = !!rawTeamName && rawTeamName !== "Detectives";
+  const singular = hasCustomTeamName ? rawTeamName : "Detective";
+  const plural = hasCustomTeamName ? rawTeamName : "Detectives";
+  if (seatRole === "mrx") return mrxName;
   const ids = seatRole.split(",").map((s) => parseInt(s.slice(1), 10) + 1); // 1-indexed for display
-  if (ids.length === 1) return `Detective ${ids[0]}`;
-  if (ids.length === 2) return `Detectives ${ids[0]} & ${ids[1]}`;
-  return `Detectives ${ids[0]}-${ids[ids.length - 1]}`;
+  if (ids.length === 1) return `${singular} ${ids[0]}`;
+  if (ids.length === 2) return `${plural} ${ids[0]} & ${ids[1]}`;
+  return `${plural} ${ids[0]}-${ids[ids.length - 1]}`;
 }
 
 // Non-throwing wrapper for contexts where a crash would be worse than a

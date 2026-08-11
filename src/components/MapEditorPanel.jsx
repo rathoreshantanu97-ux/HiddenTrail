@@ -101,6 +101,15 @@ export default function MapEditorPanel({ accountId, onBack }) {
   const [selectedDecorationId, setSelectedDecorationId] = useState(null);
   const [placementTool, setPlacementTool] = useState(null); // {type:"icon",icon} | {type:"shape",shape} | {type:"text"} -- armed, next canvas click places it
   const [iconCategory, setIconCategory] = useState(Object.keys(ICON_CATEGORIES)[0]); // which icon category tab is showing in the palette -- 48 icons is too many for one flat grid
+  // Theme tab drafts: per-map nomenclature (Mr. X's name, the detective
+  // team's collective name, transport mode labels). Same draft/save
+  // pattern as decorationDraft -- seeded from the map's own defaults so
+  // the preview/inputs are always accurate, only sent to the server when
+  // actually changed (see decorationsChanged's reasoning above, applied
+  // the same way here).
+  const [mrxNameDraft, setMrxNameDraft] = useState("");
+  const [detectiveTeamNameDraft, setDetectiveTeamNameDraft] = useState("");
+  const [modeLabelsDraft, setModeLabelsDraft] = useState({});
   const [dragState, setDragState] = useState(null); // { type: "curve"|"station"|"decoration", key/id, pointIndex }
   const [warning, setWarning] = useState("");
   const [busy, setBusy] = useState(false);
@@ -128,6 +137,18 @@ export default function MapEditorPanel({ accountId, onBack }) {
       // curve) would wipe every default landmark for all players.
       setDecorationDraft(existing?.decorations ?? rawMap?.decorations ?? []);
       setBackgroundDraft(existing?.backgroundOverrideColor || null);
+      // Same "seed from what's actually in effect" rule as decorations
+      // above: saved override if present, else the map's own default, so
+      // the Theme tab's inputs always show real current values, never a
+      // misleadingly blank field.
+      setMrxNameDraft(existing?.mrxNameOverride || rawMap?.mrxName || "Mr. X");
+      setDetectiveTeamNameDraft(existing?.detectiveTeamNameOverride || rawMap?.detectiveTeamName || "Detectives");
+      setModeLabelsDraft({
+        taxi: existing?.modeLabelsOverride?.taxi || rawMap?.modeTheme?.taxi?.label || MODE_DEFAULT.taxi.label,
+        bus: existing?.modeLabelsOverride?.bus || rawMap?.modeTheme?.bus?.label || MODE_DEFAULT.bus.label,
+        underground: existing?.modeLabelsOverride?.underground || rawMap?.modeTheme?.underground?.label || MODE_DEFAULT.underground.label,
+        ferry: existing?.modeLabelsOverride?.ferry || rawMap?.modeTheme?.ferry?.label || MODE_DEFAULT.ferry.label,
+      });
     } catch (e) {
       setErr(e.message);
     }
@@ -153,8 +174,11 @@ export default function MapEditorPanel({ accountId, onBack }) {
       stationOverrides: stationDraft,
       decorations: decorationDraft,
       backgroundOverrideColor: backgroundDraft,
+      mrxNameOverride: mrxNameDraft,
+      detectiveTeamNameOverride: detectiveTeamNameDraft,
+      modeLabelsOverride: modeLabelsDraft,
     });
-  }, [rawMap, curveDraft, stationDraft, decorationDraft, backgroundDraft]);
+  }, [rawMap, curveDraft, stationDraft, decorationDraft, backgroundDraft, mrxNameDraft, detectiveTeamNameDraft, modeLabelsDraft]);
 
   if (!rawMap || !displayMap) {
     return (
@@ -439,6 +463,15 @@ export default function MapEditorPanel({ accountId, onBack }) {
       // curve) would freeze the current defaults into the DB forever,
       // silently ignoring any future code changes to the map's landmarks.
       const decorationsToSave = decorationsChanged ? decorationDraft : (savedOverride?.decorations ?? null);
+      // Same "only send what actually changed, otherwise preserve
+      // whatever was already saved" rule as decorations -- a blank
+      // mrxNameDraft/detectiveTeamNameDraft is just the default shown
+      // for preview and should never overwrite a real prior override
+      // (or freeze the map's default in as an explicit override) just
+      // because the admin saved something unrelated this session.
+      const mrxNameToSave = mrxNameChanged ? mrxNameDraft : (savedOverride?.mrxNameOverride ?? null);
+      const detectiveTeamNameToSave = detectiveTeamNameChanged ? detectiveTeamNameDraft : (savedOverride?.detectiveTeamNameOverride ?? null);
+      const modeLabelsToSave = modeLabelsChanged ? modeLabelsDraft : (savedOverride?.modeLabelsOverride ?? null);
       await auth.setMapVisualOverrides({
         callerAccountId: accountId,
         mapId,
@@ -446,6 +479,9 @@ export default function MapEditorPanel({ accountId, onBack }) {
         stationOverrides: stationsToSave,
         decorations: decorationsToSave,
         backgroundOverrideColor: backgroundDraft,
+        mrxNameOverride: mrxNameToSave,
+        detectiveTeamNameOverride: detectiveTeamNameToSave,
+        modeLabelsOverride: modeLabelsToSave,
       });
       await loadOverrides();
       setSaved("Saved — live for every player now.");
@@ -468,11 +504,22 @@ export default function MapEditorPanel({ accountId, onBack }) {
         stationOverrides: null,
         decorations: null,
         backgroundOverrideColor: null,
+        mrxNameOverride: null,
+        detectiveTeamNameOverride: null,
+        modeLabelsOverride: null,
       });
       setCurveDraft({});
       setStationDraft({});
       setDecorationDraft(rawMap?.decorations ?? []); // reset means "back to the map's own defaults", not "zero decorations"
       setBackgroundDraft(null);
+      setMrxNameDraft(rawMap?.mrxName || "Mr. X");
+      setDetectiveTeamNameDraft(rawMap?.detectiveTeamName || "Detectives");
+      setModeLabelsDraft({
+        taxi: rawMap?.modeTheme?.taxi?.label || MODE_DEFAULT.taxi.label,
+        bus: rawMap?.modeTheme?.bus?.label || MODE_DEFAULT.bus.label,
+        underground: rawMap?.modeTheme?.underground?.label || MODE_DEFAULT.underground.label,
+        ferry: rawMap?.modeTheme?.ferry?.label || MODE_DEFAULT.ferry.label,
+      });
       setSelectedEdge(null);
       setSelectedDecorationId(null);
       await loadOverrides();
@@ -504,7 +551,24 @@ export default function MapEditorPanel({ accountId, onBack }) {
   const draftDecorationsJSON = JSON.stringify(decorationDraft);
   const decorationsChanged = baselineDecorationsJSON !== draftDecorationsJSON;
   const backgroundChanged = (savedOverride?.backgroundOverrideColor || null) !== backgroundDraft;
-  const hasUnsavedChanges = curveEditCount > 0 || stationEditCount > 0 || decorationsChanged || backgroundChanged;
+  // Same baseline-comparison rule as decorations: compare the draft
+  // against what's ACTUALLY in effect right now (saved override, else
+  // the map's own default), not against a blank/null baseline -- so
+  // simply opening the Theme tab (drafts seeded from real defaults)
+  // never reads as an unsaved change.
+  const mrxNameBaseline = savedOverride?.mrxNameOverride || rawMap?.mrxName || "Mr. X";
+  const mrxNameChanged = mrxNameBaseline !== mrxNameDraft;
+  const detectiveTeamNameBaseline = savedOverride?.detectiveTeamNameOverride || rawMap?.detectiveTeamName || "Detectives";
+  const detectiveTeamNameChanged = detectiveTeamNameBaseline !== detectiveTeamNameDraft;
+  const modeLabelsBaseline = {
+    taxi: savedOverride?.modeLabelsOverride?.taxi || rawMap?.modeTheme?.taxi?.label || MODE_DEFAULT.taxi.label,
+    bus: savedOverride?.modeLabelsOverride?.bus || rawMap?.modeTheme?.bus?.label || MODE_DEFAULT.bus.label,
+    underground: savedOverride?.modeLabelsOverride?.underground || rawMap?.modeTheme?.underground?.label || MODE_DEFAULT.underground.label,
+    ferry: savedOverride?.modeLabelsOverride?.ferry || rawMap?.modeTheme?.ferry?.label || MODE_DEFAULT.ferry.label,
+  };
+  const modeLabelsChanged = JSON.stringify(modeLabelsBaseline) !== JSON.stringify(modeLabelsDraft);
+  const themeChanged = mrxNameChanged || detectiveTeamNameChanged || modeLabelsChanged;
+  const hasUnsavedChanges = curveEditCount > 0 || stationEditCount > 0 || decorationsChanged || backgroundChanged || themeChanged;
   const selectedDecoration = decorationDraft.find((d) => d.id === selectedDecorationId) || null;
 
   const selectedEdgeBaseline = selectedEdge != null && curveDraft[selectedEdge] !== undefined ? curveDraft[selectedEdge] : rawMap?.manualCurveOffsets?.[selectedEdge];
@@ -566,6 +630,18 @@ export default function MapEditorPanel({ accountId, onBack }) {
         >
           Decorate
         </button>
+        <button
+          style={{ ...styles.modeTab, ...(editorMode === "theme" ? styles.modeTabActive : {}) }}
+          onClick={() => {
+            setEditorMode("theme");
+            setSelectedStation(null);
+            setSelectedEdge(null);
+            setSelectedDecorationId(null);
+            setPlacementTool(null);
+          }}
+        >
+          Theme
+        </button>
       </div>
 
       <div style={styles.helpBar}>
@@ -577,6 +653,12 @@ export default function MapEditorPanel({ accountId, onBack }) {
             routes. Drag a station a little to nudge its position, or click it to rename/relabel. Nothing here can
             change connectivity, tickets, or round timing, and nothing is live for players until you hit{" "}
             <strong>Save</strong>.
+          </span>
+        ) : editorMode === "theme" ? (
+          <span>
+            Rename Mr. X, the detective team, and each transport mode for this map only (e.g. Westeros could use
+            "The Faceless Men" / "The Common Men" / "Horse" / "Raven" / "Dragon"). Purely nomenclature — every
+            other player, screen, and rulebook page picks up the new names automatically once saved.
           </span>
         ) : (
           <span>
@@ -1154,6 +1236,70 @@ export default function MapEditorPanel({ accountId, onBack }) {
                 </div>
               )}
             </div>
+          ) : editorMode === "theme" ? (
+            <div>
+              <div style={styles.sideTitle}>Nomenclature</div>
+              <div style={styles.smallNote}>
+                Rename Mr. X, the detective team, and each transport mode for this map only. Purely cosmetic text —
+                never affects gameplay, connectivity, or ticket counts. Leave any field as-is to keep the default.
+              </div>
+              <label style={styles.configLabel}>
+                Mr. X's name
+                <input
+                  type="text"
+                  style={styles.configInput}
+                  value={mrxNameDraft}
+                  maxLength={40}
+                  onChange={(e) => setMrxNameDraft(e.target.value)}
+                  placeholder="Mr. X"
+                />
+              </label>
+              <label style={styles.configLabel}>
+                Detective team's name
+                <input
+                  type="text"
+                  style={styles.configInput}
+                  value={detectiveTeamNameDraft}
+                  maxLength={40}
+                  onChange={(e) => setDetectiveTeamNameDraft(e.target.value)}
+                  placeholder="Detectives"
+                />
+              </label>
+              <div style={{ ...styles.configLabelPlain, marginTop: 14 }}>Transport mode names</div>
+              {[
+                { key: "taxi", fallback: MODE_DEFAULT.taxi.label },
+                { key: "bus", fallback: MODE_DEFAULT.bus.label },
+                { key: "underground", fallback: MODE_DEFAULT.underground.label },
+                { key: "ferry", fallback: MODE_DEFAULT.ferry.label },
+              ].map(({ key, fallback }) => (
+                <label key={key} style={styles.configLabel}>
+                  {fallback}
+                  <input
+                    type="text"
+                    style={styles.configInput}
+                    value={modeLabelsDraft[key] || ""}
+                    maxLength={24}
+                    onChange={(e) => setModeLabelsDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                    placeholder={fallback}
+                  />
+                </label>
+              ))}
+              <button
+                style={{ ...styles.smallBtn, marginTop: 10 }}
+                onClick={() => {
+                  setMrxNameDraft(rawMap?.mrxName || "Mr. X");
+                  setDetectiveTeamNameDraft(rawMap?.detectiveTeamName || "Detectives");
+                  setModeLabelsDraft({
+                    taxi: rawMap?.modeTheme?.taxi?.label || MODE_DEFAULT.taxi.label,
+                    bus: rawMap?.modeTheme?.bus?.label || MODE_DEFAULT.bus.label,
+                    underground: rawMap?.modeTheme?.underground?.label || MODE_DEFAULT.underground.label,
+                    ferry: rawMap?.modeTheme?.ferry?.label || MODE_DEFAULT.ferry.label,
+                  });
+                }}
+              >
+                Reset names to default
+              </button>
+            </div>
           ) : selectedStation != null && selectedStationData ? (
             <div>
               <div style={styles.sideTitle}>Station {selectedStation}</div>
@@ -1239,6 +1385,7 @@ export default function MapEditorPanel({ accountId, onBack }) {
             <span style={styles.editSummaryPill}>{stationEditCount} station{stationEditCount === 1 ? "" : "s"}</span>
             {decorationsChanged && <span style={styles.editSummaryPill}>decorations changed</span>}
             {backgroundChanged && <span style={styles.editSummaryPill}>background changed</span>}
+            {themeChanged && <span style={styles.editSummaryPill}>names changed</span>}
           </div>
           {savedOverride && <div style={styles.smallNote}>Compared to what's already saved.</div>}
           {curveEditCount > 0 && (

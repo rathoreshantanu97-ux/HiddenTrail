@@ -36,7 +36,7 @@ const NEAR_BOTTOM_PX = 24;
 // tradeoff once the sidebar itself is shorter.
 const CHAT_HEIGHT = 270;
 
-export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName }) {
+export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName, detectiveTeamName }) {
   const { allMessages, detectiveMessages, canUseDetectiveChannel, sendToAll, sendToDetectives } = useChat({
     roomId,
     myPlayerId,
@@ -149,7 +149,7 @@ export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName })
             }}
             onClick={() => setActiveTab("detectives")}
           >
-            Detectives Only
+            {detectiveTeamName || "Detectives"} Only
             {hasUnread("detectives") && <span style={styles.unreadDot} />}
           </button>
         )}

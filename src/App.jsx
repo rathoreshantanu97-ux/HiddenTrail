@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { MAPS } from "./maps/index.js";
+import { detectiveLabel } from "./maps/mapSchema.js";
 import { applyMapOverride } from "./lib/useMapWithOverrides.js";
 import { useLocalGameStore } from "./lib/localGameStore.js";
 import { useSupabaseGameStore } from "./lib/supabaseGameStore.js";
@@ -583,7 +584,7 @@ export default function App({ account, onLogout }) {
         actor === "mrx"
           ? map.mrxName || "Mr. X"
           : (map.characterNames && map.characterNames[parseInt(actor.slice(1))]) ||
-            `Detective ${parseInt(actor.slice(1)) + 1}`;
+            detectiveLabel(map, parseInt(actor.slice(1)) + 1);
       setHandoffFor(label);
     }
   }, [appMode, localStore.match, passAndPlayMapId]);
@@ -611,12 +612,12 @@ export default function App({ account, onLogout }) {
   // detectiveNameFn are optional -- screens without a map loaded yet
   // (LandingScreen, admin panel) just get the overlay's own generic
   // "Mr. X" / "Detective N" defaults.
-  function withRulebook(el, mrxNameFn, detectiveNameFn) {
+  function withRulebook(el, mrxNameFn, detectiveNameFn, modeTheme) {
     return (
       <>
         {el}
         {showRulebook && (
-          <RulebookView onClose={() => setShowRulebook(false)} mrxName={mrxNameFn} detectiveName={detectiveNameFn} />
+          <RulebookView onClose={() => setShowRulebook(false)} mrxName={mrxNameFn} detectiveName={detectiveNameFn} modeTheme={modeTheme} />
         )}
       </>
     );
@@ -667,7 +668,7 @@ export default function App({ account, onLogout }) {
     }
 
     const mrxName = () => map.mrxName || "Mr. X";
-    const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || `Detective ${id + 1}`;
+    const detectiveName = (id) => (map.characterNames && map.characterNames[id]) || detectiveLabel(map, id + 1);
     if (match.phase === "handoff") {
       return withRulebook(
         <HandoffScreen handoffFor={handoffFor} round={match.round} maxRounds={match.maxRounds} onReady={handleReadyForTurn} />
@@ -690,7 +691,8 @@ export default function App({ account, onLogout }) {
             onActivateDoubleMove={() => {}}
           />,
           mrxName,
-          detectiveName
+          detectiveName,
+          map.modeTheme
         );
       }
       return withRulebook(
@@ -702,7 +704,8 @@ export default function App({ account, onLogout }) {
           onNewGame={handleResetPassAndPlay}
         />,
         mrxName,
-        detectiveName
+        detectiveName,
+        map.modeTheme
       );
     }
     // phase === "playing"
@@ -725,7 +728,8 @@ export default function App({ account, onLogout }) {
         }
       />,
       mrxName,
-      detectiveName
+      detectiveName,
+      map.modeTheme
     );
   }
 
@@ -777,7 +781,7 @@ export default function App({ account, onLogout }) {
     // falling back to "Detective N" only if neither is available (e.g.
     // player data hasn't loaded yet).
     const detectiveName = (id) =>
-      (map.characterNames && map.characterNames[id]) || detectivePlayerNames[id] || `Detective ${id + 1}`;
+      (map.characterNames && map.characterNames[id]) || detectivePlayerNames[id] || detectiveLabel(map, id + 1);
 
     if (mpRoomNotFound) {
       return (
@@ -854,7 +858,8 @@ export default function App({ account, onLogout }) {
             onActivateDoubleMove={() => {}}
           />,
           mrxName,
-          detectiveName
+          detectiveName,
+          map.modeTheme
         );
       }
       return withRulebook(
@@ -866,7 +871,8 @@ export default function App({ account, onLogout }) {
           onNewGame={handleLeaveMultiplayer}
         />,
         mrxName,
-        detectiveName
+        detectiveName,
+        map.modeTheme
       );
     }
 
@@ -956,22 +962,23 @@ export default function App({ account, onLogout }) {
           </div>
         }
         belowTicketsContent={
-          <ChatPanel roomId={mpRoomId} myPlayerId={mpPlayerId} myRole={mpRole} myDisplayName={mpDisplayName} />
+          <ChatPanel roomId={mpRoomId} myPlayerId={mpPlayerId} myRole={mpRole} myDisplayName={mpDisplayName} detectiveTeamName={map.detectiveTeamName} />
         }
       />
     );
 
     if (mpSpectatorInfo) {
       return withRulebook(
-        <SpectatorScreen replacedRole={mpSpectatorInfo.replacedRole} onLeave={handleLeaveMultiplayer}>
+        <SpectatorScreen replacedRole={mpSpectatorInfo.replacedRole} mrxName={mrxName} detectiveTeamName={map.detectiveTeamName} onLeave={handleLeaveMultiplayer}>
           {gameBoardEl}
         </SpectatorScreen>,
         mrxName,
-        detectiveName
+        detectiveName,
+        map.modeTheme
       );
     }
 
-    return withRulebook(gameBoardEl, mrxName, detectiveName);
+    return withRulebook(gameBoardEl, mrxName, detectiveName, map.modeTheme);
   }
 
   return null;

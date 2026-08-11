@@ -31,8 +31,24 @@
 //   },
 //   characterNames: [string, ...] | null,  // optional theme reskin for player names
 //   mrxName: string | null,                // optional theme reskin, default "Mr. X"
+//   detectiveTeamName: string | null,      // optional theme reskin, default "Detectives"
 // }
 // ---------------------------------------------------------------------------
+
+// Shared helper for building a numbered detective label ("Detective 3")
+// that correctly reskins to a custom team name ("The Common Men 3") when
+// one is set, WITHOUT regressing the wording for every map that hasn't
+// customized it. detectiveTeamName defaults to the literal string
+// "Detectives" (see deriveMap below) rather than null, so a naive
+// `${map.detectiveTeamName} ${n}` would always read as the plural
+// "Detectives 3" instead of the correct singular "Detective 3" for every
+// untouched map -- this only switches wording once an admin has actually
+// set a real custom name.
+export function detectiveLabel(map, n) {
+  const teamName = map?.detectiveTeamName;
+  if (!teamName || teamName === "Detectives") return `Detective ${n}`;
+  return `${teamName} ${n}`;
+}
 
 export const MODE_DEFAULT = {
   // Full palette redesign from first principles: background, water,
@@ -578,6 +594,12 @@ export function deriveMap(config) {
     roundsAndReveal: computeRoundsAndRevealSchedule(graph, Object.keys(stations).map(Number), config.roundScalingRatio),
     characterNames: config.characterNames || null,
     mrxName: config.mrxName || "Mr. X",
+    // Collective name for the detective/seeker team (e.g. "The Common
+    // Men" for a Westeros-themed map), parallel to mrxName above. Same
+    // reskin pattern: default matches the game's original generic term
+    // so every existing map keeps working unchanged until an admin
+    // customizes it via the Map Editor's Theme tab.
+    detectiveTeamName: config.detectiveTeamName || "Detectives",
     majorIcon: config.majorIcon || null,
   };
 }

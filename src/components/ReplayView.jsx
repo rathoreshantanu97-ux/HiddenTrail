@@ -228,7 +228,11 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
             <div style={styles.ticketsTitle}>{mrxLabel}</div>
             <div style={styles.ticketsRow}>
               {Object.entries(step.mrXTickets || {}).map(([mode, count]) => (
-                <span key={mode} style={styles.miniChip}>
+                <span
+                  key={mode}
+                  title={mode === "double" ? "Double move" : mode === "black" ? "Black ticket" : activeMode[mode]?.label}
+                  style={styles.miniChip}
+                >
                   {mode === "double" ? "2x" : mode === "black" ? "Blk" : activeMode[mode]?.short || mode}
                   {count}
                 </span>
@@ -241,7 +245,7 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
                 </div>
                 <div style={styles.ticketsRow}>
                   {Object.entries(step.detectiveTickets?.[d.id] || {}).map(([mode, count]) => (
-                    <span key={mode} style={styles.miniChip}>
+                    <span key={mode} title={activeMode[mode]?.label} style={styles.miniChip}>
                       {activeMode[mode]?.short || mode}
                       {count}
                     </span>

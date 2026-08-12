@@ -54,6 +54,15 @@ import { currentActor } from "./lib/gameEngine.js";
 // ---------------------------------------------------------------------------
 
 const LOCAL_ROOM_KEY = "scotlandyard_room";
+// UI_MODE_KEY -- covers the two screens that had NO refresh persistence
+// at all before this fix: the pass-and-play SetupScreen (appMode
+// "passandplay" before a match exists -- localStore.match only starts
+// persisting once the game actually starts) and AdminPanel. Everything
+// else (lobby/playing/ended for both modes) already survives a refresh
+// via LOCAL_ROOM_KEY (multiplayer) or localGameStore's own persistence
+// (pass-and-play match) -- this key deliberately does NOT try to
+// duplicate that, it only fills the two remaining gaps.
+const UI_MODE_KEY = "scotlandyard_uimode";
 
 // Shows a normal "loading" message briefly, then -- if the game state
 // still hasn't arrived after a few seconds -- switches to a clear "this
@@ -168,6 +177,38 @@ export default function App({ account, onLogout }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Restore the two screens that previously had NO refresh persistence:
+  // pass-and-play's SetupScreen (before a match exists) and AdminPanel.
+  // Reads localStorage/localStore directly rather than trusting the
+  // `appMode` closure -- all these mount-time effects run against the
+  // SAME initial render, so checking `appMode` here would be stale and
+  // could race with the other two restore effects above. A saved
+  // multiplayer session or an in-progress pass-and-play match always
+  // wins over this -- this only fires when neither of those claims the
+  // screen, so it can never override a real game in progress.
+  useEffect(() => {
+    const hasMpSession = !!localStorage.getItem(LOCAL_ROOM_KEY);
+    const hasPassAndPlayMatch = !!localStore.match;
+    if (hasMpSession || hasPassAndPlayMatch) return;
+    const savedUiMode = localStorage.getItem(UI_MODE_KEY);
+    if (savedUiMode === "passandplay" || savedUiMode === "adminPanel") {
+      setAppMode(savedUiMode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep UI_MODE_KEY in sync going forward: cleared the moment we land
+  // back on the landing screen (covers every "back"/leave/end-of-game
+  // path in one place instead of touching every individual call site),
+  // set whenever we enter one of the two screens it covers.
+  useEffect(() => {
+    if (appMode === "landing") {
+      localStorage.removeItem(UI_MODE_KEY);
+    } else if (appMode === "passandplay" || appMode === "adminPanel") {
+      localStorage.setItem(UI_MODE_KEY, appMode);
+    }
+  }, [appMode]);
   // IMPORTANT: must never default to a hardcoded map id like "city" here
   // -- if that specific map is ever removed/deactivated, MAPS[id] would
   // resolve to undefined and break map lookups downstream (this was the

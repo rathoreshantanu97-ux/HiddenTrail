@@ -797,7 +797,17 @@ export default function GameBoard({
                 <div style={{ ...styles.detectiveOverviewDot, background: "#1a1a1a" }} />
                 <span style={{ fontWeight: 700, marginRight: 4 }}>{mrxName()}</span>
                 {sortTicketEntries(match.mrX.tickets).map(([mode, count]) => (
-                  <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode] ? activeMode[mode].color : "#666" }}>
+                  // title carries the FULL (possibly renamed) mode label --
+                  // the chip itself only has room for the short
+                  // abbreviation (e.g. "T"), so on a themed map (e.g.
+                  // "Horse" instead of "Taxi") the rename was previously
+                  // invisible here even though it correctly showed
+                  // elsewhere (legend, explore buttons). This is the fix.
+                  <span
+                    key={mode}
+                    title={mode === "double" ? "Double move" : activeMode[mode]?.label}
+                    style={{ ...styles.miniChip, color: activeMode[mode] ? activeMode[mode].color : "#666" }}
+                  >
                     {mode === "double" ? "2x" : activeMode[mode].short}
                     {count}
                   </span>
@@ -835,7 +845,7 @@ export default function GameBoard({
                     <div style={{ ...styles.detectiveOverviewDot, background: d.color }} />
                     <span style={{ fontWeight: 700, marginRight: 4 }}>{label}</span>
                     {sortTicketEntries(d.tickets).map(([mode, count]) => (
-                      <span key={mode} style={{ ...styles.miniChip, color: activeMode[mode].color }}>
+                      <span key={mode} title={activeMode[mode]?.label} style={{ ...styles.miniChip, color: activeMode[mode].color }}>
                         {activeMode[mode].short}
                         {count}
                       </span>

@@ -375,8 +375,9 @@ const MODE_GOT = {
 // first 5 are used for up to 5 detectives; rest are reserve names.
 const GOT_DETECTIVE_NAMES = [
   "Jon Snow", "Bran Stark", "Jaime Lannister", "Daenerys Targaryen", "Arya Stark",
-  "Melisandre", "Sansa Stark", "Tyrion Lannister", "Brienne of Tarth", "Sandor Clegane",
-  "Davos Seaworth", "Samwell Tarly",
+  "The Red Woman", "Sansa Stark", "Tyrion Lannister", "Samwell Tarly", "Cersei Lannister",
+  "Petyr Baelish", "Margaery Tyrell", "Ramsay Bolton", "Missandei", "Joffrey Baratheon",
+  "Ned Stark", "Robb Stark", "Ygritte",
 ];
 const GOT_MRX_NAME = "The Night King";
 

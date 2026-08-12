@@ -116,7 +116,11 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
   // changes, not on every explore-mode click).
   useEffect(() => {
     if (!channelRef.current) return;
-    channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable, strokes: myStrokes }).catch(() => {});
+    // Errors here (e.g. a payload over Presence's size limit) used to be
+    // silently swallowed, which is exactly why a too-large stroke set
+    // failing to sync was invisible even in the console -- now logged so
+    // a real sync failure is at least diagnosable.
+    channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable, strokes: myStrokes }).catch((e) => console.error("Presence track failed:", e));
     // Depend on the SERIALIZED array/objects, not their references -- the
     // caller reasonably passes freshly-built arrays each render (e.g.
     // Array.from(aSet)), which would otherwise re-track on every render
@@ -170,7 +174,7 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
   // event the target applies once and moves on.
   const sendRemoteStroke = useCallback((targetPlayerId, action) => {
     if (!channelRef.current) return;
-    channelRef.current.send({ type: "broadcast", event: "stroke", payload: { targetPlayerId, ...action } }).catch(() => {});
+    channelRef.current.send({ type: "broadcast", event: "stroke", payload: { targetPlayerId, ...action } }).catch((e) => console.error("Remote stroke broadcast failed:", e));
   }, []);
 
   return { onlinePlayerIds, presenceState, isInactive, sendRemoteStroke };

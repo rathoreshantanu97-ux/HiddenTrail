@@ -180,7 +180,6 @@ export default function GameBoard({
   // version, where clicking your own piece did nothing.
   const [toggledIds, setToggledIds] = useState(() => new Set());
   const seededOwnRef = React.useRef(false);
-  const [mrxSelfExplore, setMrxSelfExplore] = useState(false); // Mr.X clicking his OWN token toggles his own reachable-station highlight -- no teammates to coordinate with, so this stays purely local, never broadcast
   const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
   const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
 
@@ -194,6 +193,18 @@ export default function GameBoard({
   useEffect(() => {
     if (!preThinkActive && peekedPlayerId) setPeekedPlayerId(null);
   }, [preThinkActive, peekedPlayerId]);
+
+  // Real bug fix: if the player currently being peeked opts OUT of
+  // peekable mid-peek, the DATA sources (strokesToRender,
+  // highlightedDetectiveIds) already correctly went blank via
+  // peekedPlayerIsPeekable's live check further below -- but the peek
+  // ITSELF was never released, so the peeker stayed stuck looking at a
+  // now-empty board, still locked out of their own clicks (peeking blocks
+  // board interaction), instead of being dropped back to their own
+  // screen the instant the opt-out takes effect, as explicitly requested.
+  useEffect(() => {
+    if (peekedPlayerId && presenceState[peekedPlayerId]?.peekable === false) setPeekedPlayerId(null);
+  }, [peekedPlayerId, presenceState]);
 
   // ---------------------------------------------------------------------
   // FREEHAND DRAWING -- a quick, disposable "let me show you my
@@ -312,12 +323,31 @@ export default function GameBoard({
     }
   }
 
+  // MIN_POINT_SPACING: real bug fix -- a raw pointermove stream records a
+  // new point every few pixels, so even a short doodle easily produced
+  // 150-300+ {x,y} points in one stroke. That full array gets broadcast
+  // over Supabase Realtime Presence (see usePresence.js's track() call)
+  // on every stroke completion -- and Presence has a hard per-client
+  // payload size limit, well under what a handful of undecimated strokes
+  // adds up to. Past that limit the track() call is silently rejected by
+  // Supabase, so the stroke never reaches teammates at all -- exactly the
+  // reported "my drawing wasn't visible to whoever was peeking me" bug.
+  // Only keeping points that are genuinely at least this far apart (in
+  // MAP-SPACE units, so it scales with zoom consistently) cuts a typical
+  // stroke down to a few dozen points with no visible loss of shape,
+  // while staying well inside the payload limit.
+  const MIN_POINT_SPACING = 0.6;
+
   function handleDrawPointerMove(e) {
     if (!drawMode) return;
     const p = pointFromEvent(e);
     if (!p) return;
     if (drawMode === "pen" && liveStrokePoints) {
-      setLiveStrokePoints((prev) => [...prev, p]);
+      setLiveStrokePoints((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && Math.hypot(p.x - last.x, p.y - last.y) < MIN_POINT_SPACING) return prev;
+        return [...prev, p];
+      });
     } else if (drawMode === "eraser" && e.buttons === 1) {
       applyStrokeAction({ kind: "erase", point: p });
     }
@@ -749,15 +779,6 @@ export default function GameBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [Array.from(highlightedDetectiveIds).sort().join(","), match.detectives, map]);
 
-  // Mr.X's own self-explore -- unchanged in spirit, but now shows ALL
-  // modes he holds tickets for at once too, toggled by clicking his own
-  // token rather than a separate mode-picker row.
-  const mrxReachable = useMemo(() => {
-    if (!mrxSelfExplore || !isMrXTurn) return new Set();
-    return computeReachableAllModes(match.mrX.pos, match.mrX.tickets);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mrxSelfExplore, isMrXTurn, match.mrX.pos, match.mrX.tickets, map]);
-
   // Whether MY OWN position dot should render right now. Pass-and-play:
   // only during Mr. X's own turn (shared-device secrecy). Multiplayer:
   // Mr. X always sees themselves regardless of turn, since match.mrX.pos
@@ -793,11 +814,6 @@ export default function GameBoard({
       // detective is the part the admin's explore toggle controls.
       if (!isOwn && !routeExplorerEnabled) return;
       toggleDetectiveHighlight(detOnStation.id);
-      return;
-    }
-    if (showMrXPos && station === match.mrX.pos) {
-      // Mr.X clicking his own token toggles his own self-explore.
-      setMrxSelfExplore((prev) => !prev);
       return;
     }
     if (!isMyTurnToAct) return;
@@ -974,11 +990,6 @@ export default function GameBoard({
           {iAmDetective && routeExplorerEnabled && match.detectives.some((d) => !myOwnDetectives.some((md) => md.id === d.id)) && (
             <div style={styles.exploreHint}>💡 Click any teammate's piece on the map to see their reachable stations too.</div>
           )}
-          {isMrXTurn && iAmMrX && (
-            <div style={styles.exploreHint}>
-              {mrxSelfExplore ? "Showing your own reachable stations — click your token again to hide." : "💡 Click your own token to preview reachable stations."}
-            </div>
-          )}
 
           {/* Peek panel: pick ONE teammate (by player, not by detective --
               a player controlling several seats is one row) to mirror
@@ -1062,7 +1073,14 @@ export default function GameBoard({
               <button type="button" style={styles.drawToolBtn} onClick={undoLastStroke}>
                 ↩️ Undo
               </button>
-              {!peekedPlayerId && lastRoundStrokes.length > 0 && (
+              {/* Real bug fix: this used to stay clickable during act
+                  windows too -- but "recall last round" only makes sense
+                  as part of the shared thinking/buffer moment (bringing
+                  back what the team was sketching to keep reasoning from
+                  it), not mid-move when the drawing layer isn't even the
+                  point anymore. Gated to preThinkActive, same phase the
+                  peek panel itself is restricted to. */}
+              {!peekedPlayerId && preThinkActive && lastRoundStrokes.length > 0 && (
                 <button type="button" style={styles.drawToolBtn} onClick={recallLastRoundStrokes}>
                   🕓 Recall last round
                 </button>
@@ -1569,18 +1587,28 @@ export default function GameBoard({
                 const isCurrentReveal = isLastKnown && match.mrX.lastRevealMove === match.mrX.travelLog.length;
                 // Every currently-highlighted detective that can reach
                 // THIS station (all-modes-at-once, ticket-aware -- see
-                // reachableByDetectiveId above), plus Mr.X's own
-                // self-explore highlight if he's toggled it on. The
-                // active mover's OWN entry is dropped whenever this
-                // station is already one of their real legal moves
-                // (isLegal, below) -- that ring already shows the exact
-                // same information (and more precisely, ticket- and
-                // occupancy-checked), so keeping both was pure visual
-                // redundancy, not two different facts.
+                // reachableByDetectiveId above). The active mover's OWN
+                // entry is dropped whenever this station is already one
+                // of their real legal moves (isLegal, below) -- that ring
+                // already shows the exact same information (and more
+                // precisely, ticket- and occupancy-checked), so keeping
+                // both was pure visual redundancy, not two different
+                // facts. NOTE: legalTargets (and therefore isLegal) is
+                // NOT itself gated by preThinkActive -- it already
+                // previews the upcoming act-window's legal moves during
+                // the shared buffer, for whichever seat happens to be
+                // acting next. Real bug fix: this dedup used to ALSO
+                // require `!preThinkActive`, so during that buffer window
+                // the ring rendered (via isLegal) but the overlay wasn't
+                // dropped, showing both at once for exactly that first
+                // seat to act -- confirmed via direct testing with a
+                // 3-detective seat, where only the seat about to act
+                // showed the double-highlight (the other two never get a
+                // ring at all, since legalTargets only ever reflects
+                // whichever single actor's turn it currently is).
                 const reachingDetectives = (reachableByDetectiveId.get(numId) || []).filter(
-                  (rd) => !(isLegal && activeDetective && rd.detId === activeDetective.id && isMyTurnToAct && !preThinkActive)
+                  (rd) => !(isLegal && activeDetective && rd.detId === activeDetective.id && isMyTurnToAct)
                 );
-                const isMrxReachable = mrxReachable.has(numId);
                 // Whether THIS station is a highlighted detective's
                 // CURRENT position (its "origin" for the explore
                 // highlight) -- skipped when it's already the active
@@ -1669,9 +1697,6 @@ export default function GameBoard({
                         strokeDasharray={i === 0 ? undefined : "0.4,0.4"}
                       />
                     ))}
-                    {isMrxReachable && (
-                      <circle cx={x} cy={y} r={nodeR + 1.0} fill="#1a1a1a" opacity={0.22} stroke="#1a1a1a" strokeWidth={0.3} />
-                    )}
                     {/* Origin ring for any highlighted detective's CURRENT
                         position -- lets you see, at a glance, whose
                         highlight a given cluster of destinations belongs

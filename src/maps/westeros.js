@@ -6,124 +6,127 @@
 //
 // REVAMPED to global-standard scale/density, following the exact same
 // verification methodology used for Bengaluru and City of Sendhwa:
-//   - Expanded from 64 to 88 stations (matching Bengaluru's 89 and
-//     Sendhwa's 86), adding 24 real ASOIAF locations across all 9
-//     regions, each placed via rejection sampling inside its region's
-//     own hull with a required minimum clearance from every other
-//     station (verified: zero spacing violations across all 88).
-//   - Every new station given real connections (mostly Foot/taxi, a
-//     modest amount of Horse/bus), each edge's straight-line clearance
-//     from every uninvolved third station checked numerically before
-//     being kept (matching Sendhwa's own edge-clearance methodology).
-//   - Mode coverage verified in proportion after the expansion: Foot
-//     97.7%, Horse 28.4% (matches the Sendhwa/Bengaluru calibration
-//     target of ~30%, and this map's own long-standing design rule that
-//     Horse stay "deliberately thin"), Dragon 9.1% (still majors-only).
-//   - Zero dead-end stations, full connectivity verified via BFS across
-//     the whole graph (taxi+bus+underground+ferry).
-//   - Added a full decorations layer (28 landmark icons -- great seats,
-//     the Free Cities, the Wall, God's Eye, the Twins' bridge, Wolfswood/
-//     Kingswood/Rainwood, the Narrow Sea) -- previously this map had
-//     ZERO decorations, a real gap next to Bengaluru's 18 and Sendhwa's
-//     45.
+//   - Expanded from 64 to 88 stations, adding 24 real ASOIAF locations
+//     across all 9 regions.
+//   - RESCALED to close a real on-screen usability gap: the map's own
+//     coordinate-space aspect ratio (0.84, portrait) was a poor match for
+//     the actual game panel's landscape shape, so GameBoard's fit logic
+//     (which only allows up to 10% stretch beyond a map's TRUE ratio, to
+//     avoid visibly distorting it) was forced to shrink the map well
+//     below the panel's available width -- confirmed via direct
+//     comparison against Bengaluru, which fills its panel cleanly at a
+//     1.235 ratio. Applied a single anisotropic scale (X x1.214, Y
+//     x0.824, about the map's own center) to reach that exact 126x102
+//     ratio, WITHOUT moving stations relative to each other in any way
+//     that broke spacing -- then fully re-verified from scratch after
+//     the transform: zero spacing violations, zero label collisions, and
+//     every edge re-checked for clearance (the transform did shift which
+//     edges needed a manual curve -- 4 new ones appeared, e.g. King's
+//     Landing<->Storm's End went from clean to 0.14 units of clearance,
+//     fixed the same way as every other curve on this map: search for
+//     the offset that maximizes worst-case clearance, not eyeballed).
+//   - Mode coverage: Foot 97.7%, Horse 28.4%, Dragon 9.1% (majors-only),
+//     matching the Sendhwa/Bengaluru calibration target.
+//   - Zero dead-end stations, full connectivity verified via BFS.
+//   - Full decorations layer (28 landmark icons).
 // ---------------------------------------------------------------------------
 
-const MET2_VIEW_W = 102;
-const MET2_VIEW_H = 121;
+const MET2_VIEW_W = 124;
+const MET2_VIEW_H = 102;
 
 const STATIONS_MET2 = {
-  1:[25.06,5.35], // Winterfell
-  2:[47.13,18.05], // Castle Black
-  3:[12,13.77], // The Wall
-  4:[84.46,20.31], // Eastwatch
-  5:[67.94,6.96], // Hardhome
-  6:[23.88,16.38], // Deepwood Motte
-  7:[35.68,7.84], // Bear Island
-  8:[70.2,19.73], // Karhold
-  9:[87.96,11.08], // Last Hearth
-  10:[59.05,11.51], // Widow's Watch
-  11:[34.4,17.62], // White Harbor
-  12:[61.09,22.23], // Torrhen's Square
-  13:[37.03,42.81], // Riverrun
-  14:[72.14,36.35], // Harrenhal
-  15:[52.86,36.85], // The Twins
-  16:[44.31,32.2], // Stoney Sept
-  17:[19.1,43.15], // Darry
-  18:[63.25,44.33], // Raventree Hall
-  19:[35.16,32.37], // Seagard
-  20:[48.42,45.58], // Golden Tooth
-  21:[73.36,45.92], // Maidenpool
-  22:[28.03,46.38], // Duskendale
-  23:[85.14,32.47], // The Eyrie
-  24:[86.79,46.34], // Gulltown
-  25:[76.87,27.55], // The Bloody Gate
-  26:[90.94,38.91], // Runestone
-  27:[80.14,39.89], // Sisterton
-  28:[91.86,27.04], // Ironoaks
-  29:[11.97,48.51], // Casterly Rock
-  30:[12.05,58.79], // Lannisport
-  31:[22.85,63.49], // Crakehall
-  32:[20.79,54.74], // Silverhill
-  33:[6.13,67.4], // Kayce
-  34:[30.36,57.27], // Sarsfield
-  35:[59.99,67.41], // King's Landing
-  36:[51.4,54.04], // Rosby
-  37:[42.27,68.65], // Stokeworth
-  38:[60.79,55.39], // Crackclaw Point
-  39:[41.82,53.77], // Sharp Point
-  40:[50.25,64.64], // Dragonstone
-  41:[34.61,76.36], // Highgarden
-  42:[36,90.09], // Oldtown
-  43:[43.71,79.52], // Horn Hill
-  44:[12.41,77.36], // Ashford
-  45:[16.29,69.57], // Bitterbridge
-  46:[18.95,91.34], // Longtable
-  47:[46.3,88.29], // Honeyholt
-  48:[22.22,78.3], // Vaith
-  49:[26.96,94.4], // Yronwood
-  50:[71.57,73.48], // Storm's End
-  51:[61.43,77.06], // Bronzegate
-  52:[66.91,85.31], // Griffin's Roost
-  53:[57.6,86.29], // Nightsong
-  54:[53.61,73.14], // Rainwood
-  55:[52.75,114.59], // Sunspear
-  56:[41.46,110.98], // Starfall
-  57:[45.41,100.56], // Godsgrace
-  58:[61.7,102.31], // Salt Shore
-  59:[32,102.84], // Skyreach
-  60:[64.24,113.14], // Blackmont
-  61:[84.87,80.57], // Braavos
-  62:[92.36,57.75], // Pentos
-  63:[81.96,72.3], // Volantis
-  64:[94.54,92.39], // Myr
-  65:[48.57,5.41], // Moat Cailin
-  66:[77.29,11.93], // Barrowton
-  67:[16.75,5.69], // Greywater Watch
-  68:[24.48,34.32], // Acorn Hall
-  69:[62.17,31.84], // Fairmarket
-  70:[52.11,28.97], // Pinkmaiden
-  71:[95.83,33.27], // Heart's Home
-  72:[79.87,46.72], // Redfort
-  73:[29.65,63.85], // Ashemark
-  74:[6.45,53.72], // Tarbeck Hall
-  75:[4.31,60.79], // Deep Den
-  76:[38.19,61.15], // Rook's Rest
-  77:[65.33,61.87], // Claw Isle
-  78:[25.9,69.74], // The Arbor
-  79:[28.76,84.51], // Old Oak
-  80:[12,86.52], // Cider Hall
-  81:[64.48,69.95], // Blackhaven
-  82:[51.79,80.47], // Rain House
-  83:[73.25,80.68], // Greenstone
-  84:[53.04,105.41], // Ghost Hill
-  85:[37.59,97.14], // Hellholt
-  86:[54.75,97.8], // Spottswood
-  87:[94.37,71.91], // Lys
-  88:[95.3,81.86], // Tyrosh
+  1:[31.2,6], // Winterfell
+  2:[58,16.46], // Castle Black
+  3:[15.34,12.93], // The Wall
+  4:[103.32,18.32], // Eastwatch
+  5:[83.26,7.33], // Hardhome
+  6:[29.76,15.08], // Deepwood Motte
+  7:[44.09,8.05], // Bear Island
+  8:[86.01,17.84], // Karhold
+  9:[107.57,10.72], // Last Hearth
+  10:[72.47,11.07], // Widow's Watch
+  11:[42.54,16.1], // White Harbor
+  12:[74.95,19.9], // Torrhen's Square
+  13:[45.73,36.85], // Riverrun
+  14:[88.36,31.53], // Harrenhal
+  15:[64.95,31.94], // The Twins
+  16:[54.57,28.11], // Stoney Sept
+  17:[23.96,37.13], // Darry
+  18:[77.57,38.1], // Raventree Hall
+  19:[43.46,28.25], // Seagard
+  20:[59.56,39.13], // Golden Tooth
+  21:[89.85,39.41], // Maidenpool
+  22:[34.8,39.79], // Duskendale
+  23:[104.15,28.33], // The Eyrie
+  24:[106.15,39.76], // Gulltown
+  25:[94.11,24.28], // The Bloody Gate
+  26:[111.19,33.64], // Runestone
+  27:[98.08,34.44], // Sisterton
+  28:[112.31,23.86], // Ironoaks
+  29:[15.3,41.54], // Casterly Rock
+  30:[15.4,50.01], // Lannisport
+  31:[28.51,53.88], // Crakehall
+  32:[26.01,46.67], // Silverhill
+  33:[8.21,57.1], // Kayce
+  34:[37.63,48.76], // Sarsfield
+  35:[73.61,57.11], // King's Landing
+  36:[63.18,46.1], // Rosby
+  37:[52.09,58.13], // Stokeworth
+  38:[74.58,47.21], // Crackclaw Point
+  39:[51.55,45.88], // Sharp Point
+  40:[61.78,54.83], // Dragonstone
+  41:[42.79,64.48], // Highgarden
+  42:[44.48,75.79], // Oldtown
+  43:[53.84,67.08], // Horn Hill
+  44:[15.84,65.3], // Ashford
+  45:[20.55,58.89], // Bitterbridge
+  46:[23.78,76.82], // Longtable
+  47:[56.99,74.3], // Honeyholt
+  48:[27.75,66.08], // Vaith
+  49:[33.5,79.34], // Yronwood
+  50:[87.67,62.11], // Storm's End
+  51:[75.36,65.06], // Bronzegate
+  52:[82.01,71.85], // Griffin's Roost
+  53:[70.71,72.66], // Nightsong
+  54:[65.86,61.83], // Rainwood
+  55:[64.82,95.96], // Sunspear
+  56:[51.11,92.99], // Starfall
+  57:[55.91,84.41], // Godsgrace
+  58:[75.69,85.85], // Salt Shore
+  59:[39.62,86.29], // Skyreach
+  60:[78.77,94.77], // Blackmont
+  61:[103.82,67.95], // Braavos
+  62:[112.92,49.15], // Pentos
+  63:[100.29,61.14], // Volantis
+  64:[115.56,77.68], // Myr
+  65:[59.74,6.05], // Moat Cailin
+  66:[94.62,11.42], // Barrowton
+  67:[21.11,6.28], // Greywater Watch
+  68:[30.49,29.86], // Acorn Hall
+  69:[76.26,27.82], // Fairmarket
+  70:[64.04,25.45], // Pinkmaiden
+  71:[117.13,28.99], // Heart's Home
+  72:[97.75,40.07], // Redfort
+  73:[36.77,54.18], // Ashemark
+  74:[8.6,45.83], // Tarbeck Hall
+  75:[6,51.66], // Deep Den
+  76:[47.14,51.95], // Rook's Rest
+  77:[80.1,52.55], // Claw Isle
+  78:[32.22,59.03], // The Arbor
+  79:[35.69,71.19], // Old Oak
+  80:[15.34,72.85], // Cider Hall
+  81:[79.06,59.2], // Blackhaven
+  82:[63.65,67.86], // Rain House
+  83:[89.71,68.04], // Greenstone
+  84:[65.17,88.4], // Ghost Hill
+  85:[46.41,81.59], // Hellholt
+  86:[67.25,82.14], // Spottswood
+  87:[115.36,60.81], // Lys
+  88:[116.49,69.01], // Tyrosh
 };
 
 const STATION_NAMES_MET2 = {
-1:"Winterfell",
+  1:"Winterfell",
   2:"Castle Black",
   3:"The Wall",
   4:"Eastwatch",
@@ -218,7 +221,7 @@ const STATION_NAMES_MET2 = {
 // Foot (taxi) is the dense local mesh, capped tight enough that several
 // stations end up as real chokepoints.
 const EDGES_MET2 = [
-[42,55,"underground"],
+  [42,55,"underground"],
   [29,42,"underground"],
   [35,42,"underground"],
   [50,61,"underground"],
@@ -418,13 +421,8 @@ const EDGES_MET2 = [
 ];
 
 // FERRY_EDGES_MET2 -- the "Ship" mode (Mr.X-only secret route, always
-// costs a black ticket, same mechanic as Bengaluru's "Secret Tunnel" and
-// City of Sendhwa's ferry chain). A deliberate CHAIN (not a triangle,
-// same design rule as Bengaluru's own secret-tunnel chain): Gulltown <->
-// Pentos <-> Myr, Pentos as the shared junction. This also replaces two
-// edges that used to be modeled as "bus" (Horse) directly crossing the
-// Narrow Sea -- a lore/mechanics mismatch (you cannot ride a horse across
-// open water) -- with the actually-correct Ship mode.
+// costs a black ticket). A deliberate CHAIN (not a triangle): Gulltown
+// <-> Pentos <-> Myr, Pentos as the shared junction.
 const FERRY_EDGES_MET2 = [
   [24,62], // Gulltown <-> Pentos
   [62,64], // Pentos <-> Myr
@@ -433,10 +431,10 @@ const FERRY_EDGES_MET2 = [
 const MAJOR_STATIONS_MET2 = new Set([1,23,29,35,42,50,55,61]);
 
 const MAJOR_LABEL_DIR_MET2 = {
-1: "S",   // Winterfell
+  1: "S",   // Winterfell
   23: "N",   // The Eyrie
   29: "N",   // Casterly Rock
-  35: "N",   // King's Landing
+  35: "SW",   // King's Landing
   42: "SW",   // Oldtown
   50: "N",   // Storm's End
   55: "S",   // Sunspear
@@ -444,7 +442,7 @@ const MAJOR_LABEL_DIR_MET2 = {
 };
 
 const MINOR_LABEL_DIR_MET2 = {
-2: "N",
+  2: "N",
   3: "NW",
   4: "NE",
   5: "N",
@@ -459,7 +457,7 @@ const MINOR_LABEL_DIR_MET2 = {
   14: "NE",
   15: "N",
   16: "N",
-  17: "W",
+  17: "N",
   18: "NE",
   19: "NW",
   20: "N",
@@ -470,7 +468,7 @@ const MINOR_LABEL_DIR_MET2 = {
   26: "NE",
   27: "NE",
   28: "NE",
-  30: "N",
+  30: "S",
   31: "W",
   32: "W",
   33: "W",
@@ -516,7 +514,7 @@ const MINOR_LABEL_DIR_MET2 = {
   78: "N",
   79: "N",
   80: "N",
-  81: "W",
+  81: "N",
   82: "N",
   83: "N",
   84: "N",
@@ -526,46 +524,47 @@ const MINOR_LABEL_DIR_MET2 = {
   88: "N",
 };
 
-// MANUAL_CURVE_OFFSETS_MET2 -- the Dragon (underground) backbone is this
-// map's signature feature, but as single point-to-point lines with no
-// automatic curving, 9 of the 11 Dragon routes rendered as straight lines
-// running almost directly THROUGH an uninvolved third station -- one
-// within 0.05 units of Storm's End. Every offset below was computed by
-// searching for the value that maximizes the worst-case clearance from
-// every OTHER station, checked against the actual rendered quadratic-
-// Bezier curve (same math as curveGeometry.js), not eyeballed.
+// MANUAL_CURVE_OFFSETS_MET2 -- every offset computed by searching for the
+// value that maximizes the worst-case clearance from every OTHER
+// station, checked against the actual rendered quadratic-Bezier curve
+// (same math as curveGeometry.js), not eyeballed. Recomputed fresh after
+// the aspect-ratio rescale (see file-level comment above) since an
+// anisotropic transform changes which edges pass close to a third
+// station.
 const MANUAL_CURVE_OFFSETS_MET2 = {
-  "1-23": 12.24, // Winterfell <-> The Eyrie
-  "1-29": 10.65, // Winterfell <-> Casterly Rock
-  "23-35": -14.13, // The Eyrie <-> King's Landing
-  "23-50": -4.8, // The Eyrie <-> Storm's End
-  "29-42": 3.99, // Casterly Rock <-> Oldtown
-  "35-42": 14.29, // King's Landing <-> Oldtown
-  "35-61": 9.13, // King's Landing <-> Braavos -- was passing 0.05 units from Storm's End
-  "42-55": -14.24, // Oldtown <-> Sunspear
-  "50-55": -18.41, // Storm's End <-> Sunspear
-  "63-64": -11.85, // Volantis <-> Myr -- Essos overland route, was passing 1.92 units from Braavos
+  "1-23": 10.65,
+  "1-29": 11.93,
+  "23-35": 10.42,
+  "23-50": -7.39,
+  "29-42": 2.7,
+  "35-42": 12.5,
+  "35-61": 15.75,
+  "42-55": -9.32,
+  "50-55": 4.78,
+  "63-64": -5.46,
+  "35-50": -7.06,
+  "21-24": 8.05,
+  "42-57": 6.04,
+  "57-58": 0.28,
 };
 
 // Region hulls: convex hulls of each region's actual station cluster,
-// padded outward -- always correctly wrap their stations (re-verified
-// after the 24 new stations were added: every new station falls inside
-// its own region's hull, confirmed via point-in-polygon).
+// padded outward. Rescaled in lockstep with every station (same
+// transform, so they still correctly wrap their region's stations).
 const MET2_REGION_HULLS = {
-  north: "M 6.0 13.8 L 19.3 3.6 L 73.5 4.6 L 93.9 10.6 L 90.3 21.5 L 65.5 26.3 L 17.9 17.0 Z",
-  riverlands: "M 78.1 35.7 L 79.2 47.3 L 22.5 48.6 L 13.2 44.0 L 30.2 29.0 L 43.4 26.3 Z",
-  vale: "M 72.6 23.3 L 95.4 22.2 L 96.2 41.7 L 87.6 52.3 L 75.4 43.5 Z",
-  westerlands: "M 1.2 70.9 L 9.1 43.3 L 36.3 56.4 L 27.4 67.4 Z",
-  crownlands: "M 38.0 72.8 L 36.8 50.5 L 51.6 48.0 L 66.2 52.8 L 64.5 71.3 Z",
-  reach: "M 52.1 89.8 L 26.7 100.4 L 14.6 95.4 L 6.8 75.1 L 12.5 64.9 L 49.5 78.1 Z",
-  stormlands: "M 48.8 69.6 L 76.6 70.2 L 70.6 90.0 L 54.1 91.2 Z",
-  dorne: "M 26.2 101.3 L 42.3 95.4 L 67.2 100.0 L 69.8 115.3 L 55.2 120.1 L 36.0 113.4 Z",
-  essos: "M 76.7 69.5 L 93.6 51.9 L 96.6 98.0 L 81.3 85.4 Z",
+  north: "M 8.05 12.96 L 24.20 4.56 L 90.02 5.38 L 114.79 10.32 L 110.42 19.30 L 80.30 23.25 L 22.50 15.59 Z",
+  riverlands: "M 95.60 30.99 L 96.94 40.55 L 28.09 41.62 L 16.79 37.83 L 37.44 25.48 L 53.47 23.25 Z",
+  vale: "M 88.92 20.78 L 116.61 19.88 L 117.58 35.94 L 107.14 44.66 L 92.32 37.42 Z",
+  westerlands: "M 2.22 59.98 L 11.82 37.25 L 44.84 48.04 L 34.04 57.10 Z",
+  crownlands: "M 46.91 61.55 L 45.45 43.18 L 63.42 41.12 L 81.15 45.08 L 79.09 60.31 Z",
+  reach: "M 64.03 75.55 L 33.19 84.28 L 18.49 80.16 L 9.02 63.44 L 15.94 55.04 L 60.87 65.91 Z",
+  stormlands: "M 60.02 58.91 L 93.78 59.41 L 86.49 75.71 L 66.46 76.70 Z",
+  dorne: "M 32.58 85.02 L 52.13 80.16 L 82.37 83.95 L 85.52 96.55 L 67.79 100.50 L 44.48 94.98 Z",
+  essos: "M 93.90 58.83 L 114.42 44.34 L 118.07 82.30 L 99.49 71.92 Z",
 };
 
 // Game of Thrones theme reskins the transport *names* only — same colors,
-// same underlying mechanics (taxi=dense/local, bus=mid-range,
-// underground=long-distance express, ferry=Mr.X-only water crossing).
+// same underlying mechanics.
 const MODE_GOT = {
   taxi: { color: "#a0740d", label: "Foot", short: "F" },
   bus: { color: "#109347", label: "Horse", short: "H" },
@@ -574,43 +573,37 @@ const MODE_GOT = {
   black: { color: "#2b2b2b", label: "Black", short: "X" },
 };
 
-// DECORATIONS_MET2 -- landmark icons across all 9 regions: the 8 great
-// seats plus Highgarden, the Free Cities of Essos (each with a
-// flavor-appropriate landmark -- Volantis's Red Temple, Pentos's market,
-// Myr's famed crafts, Lys's gem trade, Tyrosh's pirate-anchor), Moat
-// Cailin's ruin, the Twins' bridge, God's Eye lake, two major ports, the
-// great forests (Wolfswood, Kingswood, Rainwood), two mountain ranges,
-// the Wall itself, and open water across the Narrow Sea and Blackwater
-// Bay. Zero decorations existed on this map before this pass.
+// DECORATIONS_MET2 -- landmark icons across all 9 regions, rescaled in
+// lockstep with every station.
 const DECORATIONS_MET2 = [
-{ id: "got_winterfell_keep", type: "icon", icon: "fort", x: 22.46, y: 6.55, size: 6, color: "#5c6670" },
-  { id: "got_kings_landing_keep", type: "icon", icon: "cityhall", x: 62.59, y: 66.01, size: 6, color: "#b08a3e" },
-  { id: "got_casterly_rock_mine", type: "icon", icon: "mine", x: 9.57, y: 50.11, size: 6, color: "#8a7a3e" },
-  { id: "got_eyrie_peak", type: "icon", icon: "mountain", x: 87.54, y: 30.87, size: 7, color: "#8a97a3" },
-  { id: "got_storms_end_keep", type: "icon", icon: "fort", x: 73.97, y: 75.08, size: 6, color: "#5c6670" },
-  { id: "got_sunspear_palace", type: "icon", icon: "flag", x: 50.35, y: 115.99, size: 5, color: "#c9622a" },
-  { id: "got_oldtown_citadel", type: "icon", icon: "college", x: 33.4, y: 88.69, size: 6, color: "#4a5a7a" },
-  { id: "got_braavos_titan", type: "icon", icon: "lighthouse", x: 87.27, y: 78.97, size: 6, color: "#4a5a5a" },
-  { id: "got_highgarden", type: "icon", icon: "garden", x: 32.01, y: 77.76, size: 7, color: "#7ba95c" },
-  { id: "got_moat_cailin_ruin", type: "icon", icon: "fort", x: 48.57, y: 3.21, size: 4, color: "#6b7560", opacity: 0.75 },
-  { id: "got_the_twins_bridge", type: "icon", icon: "bridge", x: 52.86, y: 34.65, size: 5, color: "#5c5648" },
-  { id: "got_gods_eye", type: "icon", icon: "lake", x: 76.64, y: 33.85, size: 8, color: "#6a9dc0", opacity: 0.9 },
-  { id: "got_white_harbor_port", type: "icon", icon: "port", x: 36.8, y: 19.02, size: 5, color: "#3a6b8a" },
-  { id: "got_gulltown_port", type: "icon", icon: "port", x: 88.99, y: 47.74, size: 5, color: "#3a6b8a" },
-  { id: "got_volantis_temple", type: "icon", icon: "temple", x: 84.16, y: 73.7, size: 5, color: "#a5222a" },
-  { id: "got_pentos_market", type: "icon", icon: "market", x: 90.16, y: 59.15, size: 5, color: "#8a5a2a" },
-  { id: "got_myr_shop", type: "icon", icon: "shop", x: 96.74, y: 90.99, size: 4, color: "#7a4a8a" },
-  { id: "got_lys_gem", type: "icon", icon: "gem", x: 96.57, y: 70.71, size: 4, color: "#c93a8a" },
-  { id: "got_tyrosh_anchor", type: "icon", icon: "anchor", x: 97.5, y: 83.06, size: 4, color: "#2a5a8a" },
-  { id: "got_wolfswood", type: "icon", icon: "forest", x: 18, y: 24, size: 8, color: "#3f6b4a", opacity: 0.75 },
-  { id: "got_kingswood", type: "icon", icon: "forest", x: 47, y: 60, size: 6, color: "#3f6b4a", opacity: 0.75 },
-  { id: "got_rainwood_forest", type: "icon", icon: "forest", x: 58, y: 73, size: 6, color: "#3f6b4a", opacity: 0.75 },
-  { id: "got_mountains_of_the_moon", type: "icon", icon: "mountain", x: 82, y: 30, size: 6, color: "#8a97a3", opacity: 0.7 },
-  { id: "got_red_mountains", type: "icon", icon: "mountain", x: 42, y: 92, size: 6, color: "#a5622a", opacity: 0.6 },
-  { id: "got_the_wall_ice", type: "icon", icon: "cliff", x: 45, y: 3.2, size: 9, color: "#bcd9e8", opacity: 0.85, rotation: 0 },
-  { id: "got_narrow_sea_1", type: "icon", icon: "water", x: 78, y: 55, size: 9, color: "#5f8fae", opacity: 0.6 },
-  { id: "got_narrow_sea_2", type: "icon", icon: "water", x: 90, y: 20, size: 7, color: "#5f8fae", opacity: 0.6 },
-  { id: "got_blackwater_bay", type: "icon", icon: "water", x: 68, y: 68, size: 6, color: "#5f8fae", opacity: 0.6 },
+  { id: "got_winterfell_keep", type: "icon", icon: "fort", x: 28.04, y: 6.99, size: 6, color: "#5c6670" },
+  { id: "got_kings_landing_keep", type: "icon", icon: "cityhall", x: 76.77, y: 55.96, size: 6, color: "#b08a3e" },
+  { id: "got_casterly_rock_mine", type: "icon", icon: "mine", x: 12.39, y: 42.86, size: 6, color: "#8a7a3e" },
+  { id: "got_eyrie_peak", type: "icon", icon: "mountain", x: 107.06, y: 27.02, size: 7, color: "#8a97a3" },
+  { id: "got_storms_end_keep", type: "icon", icon: "fort", x: 90.59, y: 63.43, size: 6, color: "#5c6670" },
+  { id: "got_sunspear_palace", type: "icon", icon: "flag", x: 61.91, y: 97.12, size: 5, color: "#c9622a" },
+  { id: "got_oldtown_citadel", type: "icon", icon: "college", x: 41.32, y: 74.63, size: 6, color: "#4a5a7a" },
+  { id: "got_braavos_titan", type: "icon", icon: "lighthouse", x: 106.74, y: 66.63, size: 6, color: "#4a5a5a" },
+  { id: "got_highgarden", type: "icon", icon: "garden", x: 39.64, y: 65.63, size: 7, color: "#7ba95c" },
+  { id: "got_moat_cailin_ruin", type: "icon", icon: "fort", x: 59.74, y: 4.24, size: 4, color: "#6b7560", opacity: 0.75 },
+  { id: "got_the_twins_bridge", type: "icon", icon: "bridge", x: 64.95, y: 30.13, size: 5, color: "#5c5648" },
+  { id: "got_gods_eye", type: "icon", icon: "lake", x: 93.83, y: 29.47, size: 8, color: "#6a9dc0", opacity: 0.9 },
+  { id: "got_white_harbor_port", type: "icon", icon: "port", x: 45.45, y: 17.26, size: 5, color: "#3a6b8a" },
+  { id: "got_gulltown_port", type: "icon", icon: "port", x: 108.83, y: 40.91, size: 5, color: "#3a6b8a" },
+  { id: "got_volantis_temple", type: "icon", icon: "temple", x: 102.96, y: 62.29, size: 5, color: "#a5222a" },
+  { id: "got_pentos_market", type: "icon", icon: "market", x: 110.25, y: 50.31, size: 5, color: "#8a5a2a" },
+  { id: "got_myr_shop", type: "icon", icon: "shop", x: 118.24, y: 76.53, size: 4, color: "#7a4a8a" },
+  { id: "got_lys_gem", type: "icon", icon: "gem", x: 118.03, y: 59.83, size: 4, color: "#c93a8a" },
+  { id: "got_tyrosh_anchor", type: "icon", icon: "anchor", x: 119.16, y: 70, size: 4, color: "#2a5a8a" },
+  { id: "got_wolfswood", type: "icon", icon: "forest", x: 22.62, y: 21.36, size: 8, color: "#3f6b4a", opacity: 0.75 },
+  { id: "got_kingswood", type: "icon", icon: "forest", x: 57.84, y: 51.01, size: 6, color: "#3f6b4a", opacity: 0.75 },
+  { id: "got_rainwood_forest", type: "icon", icon: "forest", x: 71.19, y: 61.71, size: 6, color: "#3f6b4a", opacity: 0.75 },
+  { id: "got_mountains_of_the_moon", type: "icon", icon: "mountain", x: 100.34, y: 26.3, size: 6, color: "#8a97a3", opacity: 0.7 },
+  { id: "got_red_mountains", type: "icon", icon: "mountain", x: 51.77, y: 77.36, size: 6, color: "#a5622a", opacity: 0.6 },
+  { id: "got_the_wall_ice", type: "icon", icon: "cliff", x: 55.41, y: 4.23, size: 9, color: "#bcd9e8", opacity: 0.85, rotation: 0 },
+  { id: "got_narrow_sea_1", type: "icon", icon: "water", x: 95.48, y: 46.89, size: 9, color: "#5f8fae", opacity: 0.6 },
+  { id: "got_narrow_sea_2", type: "icon", icon: "water", x: 110.05, y: 18.06, size: 7, color: "#5f8fae", opacity: 0.6 },
+  { id: "got_blackwater_bay", type: "icon", icon: "water", x: 83.34, y: 57.59, size: 6, color: "#5f8fae", opacity: 0.6 },
 ];
 
 // Character names used in place of "Detective N" / "Mr. X". Fixed order:

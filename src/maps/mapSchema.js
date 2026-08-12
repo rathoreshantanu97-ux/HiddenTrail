@@ -76,6 +76,28 @@ export const MODE_DEFAULT = {
   black: { color: "#2b2b2b", label: "Black", short: "X" },
 };
 
+// modeChipLetter -- the single-letter abbreviation shown on compact
+// ticket chips (e.g. "Everyone's tickets", travel log tags). Previously
+// every call site used activeMode[mode].short directly, which is a
+// FIXED per-mode letter (T/B/M/F) that a per-map Theme rename never
+// touches (modeLabelsOverride only rewrites .label, deliberately
+// leaving .short/.color alone -- see useMapWithOverrides.js) -- so a
+// map that renamed "Taxi" to "Cab" still showed a "T" chip, silently
+// contradicting its own renamed label shown everywhere else (legend,
+// explore buttons, this chip's own tooltip). Fixed by deriving the
+// letter from the ACTUAL current label's first character instead, so a
+// rename to "Cab" now shows "C", not the stale default "T". "double"
+// and "black" are Mr. X-only special tickets, not part of the
+// per-map-renameable 4 transport modes, so they keep their own fixed
+// short form rather than being derived from a label.
+export function modeChipLetter(mode, activeMode) {
+  if (mode === "double") return "2x";
+  if (mode === "black") return activeMode?.[mode]?.short || "Blk";
+  const label = activeMode?.[mode]?.label;
+  if (label) return label[0].toUpperCase();
+  return activeMode?.[mode]?.short || mode;
+}
+
 // Builds all derived/computed structures a map needs at runtime from its
 // raw config. This is the ONLY place that reads the raw stations/edges
 // arrays — every other module (rendering, game logic, multiplayer) reads

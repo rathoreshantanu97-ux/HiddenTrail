@@ -3216,7 +3216,17 @@ grant execute on function leave_room_permanently(uuid, uuid) to anon, authentica
 -- now-invalid detective slots -- per explicit design decision, a clear
 -- error is safer than silently removing someone from their seat.
 -- -----------------------------------------------------------------------------
+-- update_room_settings was previously a FOCUSED subset of create_room
+-- (map/detective count/turn timer only) -- deliberately left the wider
+-- feature-override surface (takeovers, highlight styles, route
+-- explorer, round scaling, public/room name) uneditable once a room
+-- existed. Expanded to the FULL surface create_room accepts, using the
+-- exact same "silently drop an override the admin hasn't marked
+-- overridable-by-host" re-check create_room already does -- a
+-- determined caller must not be able to flip a feature the admin
+-- locked just by calling this RPC directly instead of create_room.
 drop function if exists update_room_settings(uuid, uuid, text, int, int, int);
+drop function if exists update_room_settings(uuid, uuid, text, int, int, int, int);
 create or replace function update_room_settings(
   p_room_id uuid,
   p_caller_player_id uuid,
@@ -3224,7 +3234,18 @@ create or replace function update_room_settings(
   p_num_detectives int,
   p_total_players int,
   p_map_station_count int default null,
-  p_turn_timer_seconds int default null
+  p_turn_timer_seconds int default null,
+  p_takeovers_override boolean default null,
+  p_takeover_reversal_override boolean default null,
+  p_end_game_vote_override boolean default null,
+  p_pause_resume_override boolean default null,
+  p_redistribute_roles_override boolean default null,
+  p_position_highlight_style_override text default null,
+  p_destination_highlight_style_override text default null,
+  p_route_explorer_override boolean default null,
+  p_round_scaling_ratio_override numeric default null,
+  p_is_public boolean default false,
+  p_room_name text default null
 ) returns void
 language plpgsql
 security definer
@@ -3237,6 +3258,26 @@ declare
   v_seated_detective_count int;
   v_map_ratio numeric := 0.08;
   v_map_ratio_override numeric;
+  v_turn_min int := 30;
+  v_turn_max int := 300;
+  v_takeovers_overridable boolean := true;
+  v_reversal_overridable boolean := true;
+  v_endgame_overridable boolean := true;
+  v_pause_overridable boolean := true;
+  v_redistribute_overridable boolean := true;
+  v_position_highlight_overridable boolean := true;
+  v_destination_highlight_overridable boolean := true;
+  v_route_explorer_overridable boolean := true;
+  v_round_scaling_overridable boolean := true;
+  v_final_takeovers_override boolean;
+  v_final_reversal_override boolean;
+  v_final_endgame_override boolean;
+  v_final_pause_override boolean;
+  v_final_redistribute_override boolean;
+  v_final_position_highlight_override text;
+  v_final_destination_highlight_override text;
+  v_final_route_explorer_override boolean;
+  v_final_round_scaling_override numeric;
 begin
   select * into v_room from rooms r where r.id = p_room_id for update;
   if v_room.id is null then raise exception 'Room not found'; end if;
@@ -3249,7 +3290,18 @@ begin
 
   -- Same admin-global-bounds check as create_room, kept consistent
   if exists (select 1 from information_schema.tables where table_name = 'app_settings') then
-    select min_detectives, max_detectives into v_min_det, v_max_det from app_settings where id = 1;
+    select min_detectives, max_detectives, turn_timer_min_seconds, turn_timer_max_seconds,
+           takeovers_overridable_by_host, takeover_reversal_overridable_by_host,
+           end_game_vote_overridable_by_host, pause_resume_overridable_by_host,
+           redistribute_roles_overridable_by_host,
+           position_highlight_style_overridable_by_host, destination_highlight_style_overridable_by_host,
+           route_explorer_overridable_by_host, round_scaling_overridable_by_host
+      into v_min_det, v_max_det, v_turn_min, v_turn_max,
+           v_takeovers_overridable, v_reversal_overridable, v_endgame_overridable,
+           v_pause_overridable, v_redistribute_overridable,
+           v_position_highlight_overridable, v_destination_highlight_overridable,
+           v_route_explorer_overridable, v_round_scaling_overridable
+      from app_settings where id = 1;
   end if;
 
   -- Hard absolute cap -- see matching comment in create_room above.
@@ -3271,6 +3323,12 @@ begin
   if p_num_detectives < v_min_det or p_num_detectives > v_max_det then
     raise exception 'num_detectives must be between % and % for this map', v_min_det, v_max_det;
   end if;
+  if p_turn_timer_seconds is not null and (p_turn_timer_seconds < v_turn_min or p_turn_timer_seconds > v_turn_max) then
+    raise exception 'turn_timer_seconds must be between % and %, or null for no limit', v_turn_min, v_turn_max;
+  end if;
+  if p_is_public and (p_room_name is null or trim(p_room_name) = '') then
+    raise exception 'Public rooms need a name so others can find them';
+  end if;
 
   -- BLOCK (don't auto-kick) if reducing detective count would orphan an
   -- already-seated player -- count distinct detective seat indices
@@ -3284,11 +3342,34 @@ begin
     raise exception 'Cannot reduce to % detectives -- % player(s) are already seated in a detective slot that would no longer exist', p_num_detectives, v_seated_detective_count;
   end if;
 
+  -- Silently drop any override the admin hasn't permitted -- same
+  -- re-check reasoning as create_room's own version of this.
+  v_final_takeovers_override := case when v_takeovers_overridable then p_takeovers_override else null end;
+  v_final_reversal_override := case when v_reversal_overridable then p_takeover_reversal_override else null end;
+  v_final_endgame_override := case when v_endgame_overridable then p_end_game_vote_override else null end;
+  v_final_pause_override := case when v_pause_overridable then p_pause_resume_override else null end;
+  v_final_redistribute_override := case when v_redistribute_overridable then p_redistribute_roles_override else null end;
+  v_final_position_highlight_override := case when v_position_highlight_overridable then p_position_highlight_style_override else null end;
+  v_final_destination_highlight_override := case when v_destination_highlight_overridable then p_destination_highlight_style_override else null end;
+  v_final_route_explorer_override := case when v_route_explorer_overridable then p_route_explorer_override else null end;
+  v_final_round_scaling_override := case when v_round_scaling_overridable then p_round_scaling_ratio_override else null end;
+
   update rooms
   set map_id = p_map_id,
       num_detectives = p_num_detectives,
       total_players = p_total_players,
-      turn_timer_seconds = p_turn_timer_seconds
+      turn_timer_seconds = p_turn_timer_seconds,
+      takeovers_enabled_override = v_final_takeovers_override,
+      takeover_reversal_enabled_override = v_final_reversal_override,
+      end_game_vote_enabled_override = v_final_endgame_override,
+      pause_resume_enabled_override = v_final_pause_override,
+      redistribute_roles_enabled_override = v_final_redistribute_override,
+      position_highlight_style_override = v_final_position_highlight_override,
+      destination_highlight_style_override = v_final_destination_highlight_override,
+      route_explorer_enabled_override = v_final_route_explorer_override,
+      round_scaling_ratio_override = v_final_round_scaling_override,
+      is_public = p_is_public,
+      room_name = case when p_is_public then trim(p_room_name) else null end
   where id = p_room_id;
 end;
 $$;

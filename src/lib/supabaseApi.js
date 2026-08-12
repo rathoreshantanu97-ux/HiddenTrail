@@ -197,7 +197,22 @@ export async function reassignHost({ roomId, callerPlayerId, newHostPlayerId }) 
   await callRpc("reassign_host", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_new_host_player_id: newHostPlayerId });
 }
 
-export async function updateRoomSettings({ roomId, callerPlayerId, mapId, numDetectives, totalPlayers, mapStationCount, turnTimerSeconds }) {
+// Expanded to the full feature-override surface create_room accepts
+// (previously just map/detective count/turn timer) -- see
+// update_room_settings in functions.sql for the matching server-side
+// expansion and the overridable-by-host re-validation.
+export async function updateRoomSettings({
+  roomId,
+  callerPlayerId,
+  mapId,
+  numDetectives,
+  totalPlayers,
+  mapStationCount,
+  turnTimerSeconds,
+  featureOverrides = {},
+  isPublic = false,
+  roomName = null,
+}) {
   await callRpc("update_room_settings", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
@@ -206,6 +221,17 @@ export async function updateRoomSettings({ roomId, callerPlayerId, mapId, numDet
     p_total_players: totalPlayers,
     p_map_station_count: mapStationCount ?? null,
     p_turn_timer_seconds: turnTimerSeconds ?? null,
+    p_takeovers_override: featureOverrides.takeovers ?? null,
+    p_takeover_reversal_override: featureOverrides.takeoverReversal ?? null,
+    p_end_game_vote_override: featureOverrides.endGameVote ?? null,
+    p_pause_resume_override: featureOverrides.pauseResume ?? null,
+    p_redistribute_roles_override: featureOverrides.redistributeRoles ?? null,
+    p_position_highlight_style_override: featureOverrides.positionHighlightStyle ?? null,
+    p_destination_highlight_style_override: featureOverrides.destinationHighlightStyle ?? null,
+    p_route_explorer_override: featureOverrides.routeExplorer ?? null,
+    p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
+    p_is_public: isPublic,
+    p_room_name: roomName,
   });
 }
 

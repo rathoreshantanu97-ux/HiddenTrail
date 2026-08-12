@@ -5,7 +5,7 @@ import HighlightRing from "./HighlightRing.jsx";
 import MovePopup from "./MovePopup.jsx";
 import { useMoveAnimation } from "../lib/useMoveAnimation.js";
 import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
-import { MODE_DEFAULT } from "../maps/mapSchema.js";
+import { MODE_DEFAULT, modeChipLetter } from "../maps/mapSchema.js";
 import {
   currentActor,
   validMovesFor,
@@ -808,7 +808,7 @@ export default function GameBoard({
                     title={mode === "double" ? "Double move" : activeMode[mode]?.label}
                     style={{ ...styles.miniChip, color: activeMode[mode] ? activeMode[mode].color : "#666" }}
                   >
-                    {mode === "double" ? "2x" : activeMode[mode].short}
+                    {modeChipLetter(mode, activeMode)}
                     {count}
                   </span>
                 ))}
@@ -846,7 +846,7 @@ export default function GameBoard({
                     <span style={{ fontWeight: 700, marginRight: 4 }}>{label}</span>
                     {sortTicketEntries(d.tickets).map(([mode, count]) => (
                       <span key={mode} title={activeMode[mode]?.label} style={{ ...styles.miniChip, color: activeMode[mode].color }}>
-                        {activeMode[mode].short}
+                        {modeChipLetter(mode, activeMode)}
                         {count}
                       </span>
                     ))}
@@ -906,7 +906,7 @@ export default function GameBoard({
                             color: entry.mode === "black" ? "#fff" : "#1a1a1a",
                           }}
                         >
-                          {activeMode[entry.mode].short}
+                          {modeChipLetter(entry.mode, activeMode)}
                         </div>
                       ) : (
                         <div style={styles.logBoardModeTagEmpty}>·</div>
@@ -1674,11 +1674,12 @@ export default function GameBoard({
 }
 
 export function TicketChip({ mode, count, modeTheme }) {
-  const m = (modeTheme || MODE_DEFAULT)[mode];
+  const activeMode = modeTheme || MODE_DEFAULT;
+  const m = activeMode[mode];
   return (
-    <div style={{ ...styles.chip, borderColor: m.color }}>
+    <div style={{ ...styles.chip, borderColor: m.color }} title={m.label}>
       <span style={{ ...styles.chipDot, background: m.color }} />
-      {m.short} {count}
+      {modeChipLetter(mode, activeMode)} {count}
     </div>
   );
 }

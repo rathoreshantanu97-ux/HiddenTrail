@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { buildReplayTimeline } from "../lib/gameEngine.js";
-import { MODE_DEFAULT } from "../maps/mapSchema.js";
+import { MODE_DEFAULT, modeChipLetter } from "../maps/mapSchema.js";
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
 import { curvePathD, autoParallelOffset } from "../lib/curveGeometry.js";
 import DecorationsLayer from "./DecorationsLayer.jsx";
@@ -233,7 +233,7 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
                   title={mode === "double" ? "Double move" : mode === "black" ? "Black ticket" : activeMode[mode]?.label}
                   style={styles.miniChip}
                 >
-                  {mode === "double" ? "2x" : mode === "black" ? "Blk" : activeMode[mode]?.short || mode}
+                  {modeChipLetter(mode, activeMode)}
                   {count}
                 </span>
               ))}
@@ -246,7 +246,7 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
                 <div style={styles.ticketsRow}>
                   {Object.entries(step.detectiveTickets?.[d.id] || {}).map(([mode, count]) => (
                     <span key={mode} title={activeMode[mode]?.label} style={styles.miniChip}>
-                      {activeMode[mode]?.short || mode}
+                      {modeChipLetter(mode, activeMode)}
                       {count}
                     </span>
                   ))}

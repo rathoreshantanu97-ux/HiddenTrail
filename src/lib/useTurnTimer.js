@@ -53,6 +53,7 @@ export function useTurnTimer({
 }) {
   const [actSeconds, setActSeconds] = useState(null);
   const [extraDetectiveSeconds, setExtraDetectiveSeconds] = useState(null);
+  const [detectiveCapSecondsRaw, setDetectiveCapSecondsRaw] = useState(null); // rooms.detective_cap_seconds -- null means "same as the base act time"
   const [bufferSecondsInput, setBufferSecondsInput] = useState(null); // the host's OWN planning-time number (room.planning_time_seconds), before ratio/bounds are applied
   const [ratios, setRatios] = useState(null);
   const [bounds, setBounds] = useState(null);
@@ -69,6 +70,7 @@ export function useTurnTimer({
         setActSeconds(room?.turn_timer_seconds ?? null);
         setBufferSecondsInput(room?.planning_time_seconds ?? null);
         setExtraDetectiveSeconds(room?.extra_detective_seconds ?? null);
+        setDetectiveCapSecondsRaw(room?.detective_cap_seconds ?? null);
         setRatios({
           mrxTimeRatio: cfg.mrxTimeRatio,
           extraSeatTimeRatio: cfg.extraSeatTimeRatio,
@@ -179,7 +181,13 @@ export function useTurnTimer({
   // expiry still makes sense the same way it always did.
   function submitRandomMrxMove() {
     if (!map || !match) return;
-    const moves = validMovesFor(map, match.mrX.pos, match.mrX.tickets, true);
+    // v3.22: filter out detective-occupied stations. The server now
+    // REJECTS such a move outright (see make_mrx_move), so an unfiltered
+    // random pick could land on one, be refused, and leave Mr.X's turn
+    // stuck with the guard already consumed -- i.e. the round would
+    // stall. Same rule the human-facing legal-move ring uses.
+    const occupied = new Set((match.detectives || []).map((d) => d.pos));
+    const moves = validMovesFor(map, match.mrX.pos, match.mrX.tickets, true).filter((m) => !occupied.has(m.to));
     if (moves.length === 0) {
       if (onPassMrxTurn) onPassMrxTurn();
       return;
@@ -211,6 +219,15 @@ export function useTurnTimer({
     // counting down. The unscaled base is still available separately.
     actSeconds: actingTotalSeconds ?? null,
     baseActSeconds: schedule?.actSeconds ?? null,
+    // detectiveCapSeconds (v3.22) -- the per-SUB-TURN deadline. Defaults
+    // to the base act window when the room hasn't configured one, which
+    // is exactly the "one act window per detective" intuition the pooled
+    // window is already sized around. GameBoard runs this countdown
+    // itself (it's per-player state -- whose sub-turn it is differs per
+    // client -- so there's no single server-side anchor to read) and
+    // auto-passes through the ordinary pass_detective_turn RPC on expiry,
+    // which stays the authority for whether the pass is legal at all.
+    detectiveCapSeconds: detectiveCapSecondsRaw != null && detectiveCapSecondsRaw > 0 ? detectiveCapSecondsRaw : (schedule?.actSeconds ?? null),
     extraSeatSeconds: schedule?.extraSeatSeconds ?? null,
   };
 }

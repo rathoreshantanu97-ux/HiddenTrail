@@ -297,6 +297,7 @@ export default function App({ account, onLogout }) {
     mrxSeconds: mpMrxSeconds,
     bufferSeconds: mpBufferSeconds,
     actSeconds: mpActSeconds,
+    detectiveCapSeconds: mpDetectiveCapSeconds,
   } = useTurnTimer({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     map: getEffectiveMap(liveMapId),
@@ -341,6 +342,9 @@ export default function App({ account, onLogout }) {
     myToggledDetectiveIds: mpToggledDetectiveIds,
     myPeekable: mpPeekable,
     onRemoteStroke: (payload) => remoteStrokeHandlerRef.current && remoteStrokeHandlerRef.current(payload),
+    // A peek-draw aimed at a THIRD player -- relevant to me only if I'm
+    // peeking that same player (multi-peeker concurrent drawing, v3.22).
+    onPeerStroke: (payload) => peerEventHandlersRef.current.onPeerStroke && peerEventHandlersRef.current.onPeerStroke(payload),
     // Strokes and peek-revocation now arrive as explicit broadcasts
     // rather than being inferred from Presence state -- see the header
     // comment in usePresence.js for why.
@@ -1126,6 +1130,7 @@ export default function App({ account, onLogout }) {
         mrxSecondsForBar={mpMrxSeconds}
         bufferSecondsForBar={mpBufferSeconds}
         actSecondsForBar={mpActSeconds}
+        detectiveCapSeconds={mpDetectiveCapSeconds}
         roundPhase={supabaseStore.match?.roundPhase}
         detectivesActed={supabaseStore.match?.detectivesActed}
         onExploreModeChange={setMpToggledDetectiveIds}

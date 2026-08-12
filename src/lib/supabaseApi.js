@@ -250,6 +250,12 @@ export async function updateRoomSettings({
   turnTimerSeconds,
   planningTimeSeconds,
   extraDetectiveSeconds = null, // see createRoom above
+  // detectiveCapSeconds (v3.22) -- the per-SUB-TURN deadline for one
+  // detective inside the shared acting phase. Deliberately NOT the same
+  // thing as extraDetectiveSeconds (which sizes the pooled window):
+  // this one is "how long may this single detective sit on their move
+  // before it auto-passes." null => default to the base act time.
+  detectiveCapSeconds = null,
   featureOverrides = {},
   isPublic = false,
   roomName = null,
@@ -265,6 +271,7 @@ export async function updateRoomSettings({
     p_turn_timer_seconds: turnTimerSeconds ?? null,
     p_planning_time_seconds: planningTimeSeconds ?? null,
     p_extra_detective_seconds: extraDetectiveSeconds ?? null,
+    p_detective_cap_seconds: detectiveCapSeconds ?? null,
     p_takeovers_override: featureOverrides.takeovers ?? null,
     p_takeover_reversal_override: featureOverrides.takeoverReversal ?? null,
     p_end_game_vote_override: featureOverrides.endGameVote ?? null,

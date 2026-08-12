@@ -40,6 +40,9 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
   // act window per extra detective. Kept as a separate concept from 0
   // ("no extra time at all"), which is a legitimate deliberate choice.
   const [extraDetectiveSeconds, setExtraDetectiveSeconds] = useState(null);
+  // v3.22 -- per-detective sub-turn cap (rooms.detective_cap_seconds).
+  // null/blank means "same as the base act time."
+  const [detectiveCapSeconds, setDetectiveCapSeconds] = useState(null);
   const [publicConfig, setPublicConfig] = useState({
     turnTimerMin: 30,
     turnTimerMax: 300,
@@ -87,6 +90,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
         // window"), and pre-filling a number would silently bake in a
         // different, smaller value the host never chose.
         setExtraDetectiveSeconds(room.extra_detective_seconds ?? null);
+        setDetectiveCapSeconds(room.detective_cap_seconds ?? null);
         setIsPublic(!!room.is_public);
         setRoomName(room.room_name || "");
         setFeatureOverrides({
@@ -131,6 +135,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
         turnTimerSeconds,
         planningTimeSeconds,
         extraDetectiveSeconds: extraDetectiveSeconds === "" || extraDetectiveSeconds == null ? null : parseInt(extraDetectiveSeconds, 10),
+        detectiveCapSeconds: detectiveCapSeconds === "" || detectiveCapSeconds == null ? null : parseInt(detectiveCapSeconds, 10),
         featureOverrides,
         isPublic,
         roomName: isPublic ? roomName.trim() : null,
@@ -501,6 +506,70 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
                     const base = parseInt(turnTimerSeconds, 10) || 0;
                     const current = extraDetectiveSeconds === null || extraDetectiveSeconds === "" ? base : parseInt(extraDetectiveSeconds, 10) || 0;
                     setExtraDetectiveSeconds(Math.min(publicConfig.turnTimerMax, current + 5));
+                  }}
+                >
+                  +
+                </button>
+              </div>
+            </label>
+          )}
+
+          {/* v3.22 -- per-detective sub-turn cap. Distinct from the field
+              above: that one lengthens the POOLED acting window, this one
+              caps a single detective's own sub-turn inside it. It is the
+              number the acting player actually races against, so it's
+              also what the board shows as the primary countdown. */}
+          {publicConfig && turnTimerSeconds && (
+            <label style={styles.featureOverrideRow}>
+              <span>
+                Time limit per detective's own move (seconds) — during the acting phase, each detective gets at most this long before their move is
+                automatically passed and play moves on to that player's next detective. Blank means the same as the act time. Never exceeds the time
+                actually left in the round.
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  type="button"
+                  aria-label="Decrease per-detective cap by 5 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={() => {
+                    const base = parseInt(turnTimerSeconds, 10) || 0;
+                    const current = detectiveCapSeconds === null || detectiveCapSeconds === "" ? base : parseInt(detectiveCapSeconds, 10) || 0;
+                    setDetectiveCapSeconds(Math.max(5, current - 5));
+                  }}
+                >
+                  −
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder={`Same as act time (${parseInt(turnTimerSeconds, 10) || 0}s)`}
+                  style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+                  value={detectiveCapSeconds ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "" || /^\d*$/.test(v)) {
+                      setDetectiveCapSeconds(v === "" ? null : v);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (detectiveCapSeconds === null || detectiveCapSeconds === "") {
+                      setDetectiveCapSeconds(null);
+                      return;
+                    }
+                    // Server enforces the same 5..turnTimerMax range --
+                    // clamping here just avoids a pointless round trip.
+                    const n = Math.max(5, Math.min(publicConfig.turnTimerMax, parseInt(detectiveCapSeconds, 10) || 5));
+                    setDetectiveCapSeconds(n);
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Increase per-detective cap by 5 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={() => {
+                    const base = parseInt(turnTimerSeconds, 10) || 0;
+                    const current = detectiveCapSeconds === null || detectiveCapSeconds === "" ? base : parseInt(detectiveCapSeconds, 10) || 0;
+                    setDetectiveCapSeconds(Math.min(publicConfig.turnTimerMax, current + 5));
                   }}
                 >
                   +

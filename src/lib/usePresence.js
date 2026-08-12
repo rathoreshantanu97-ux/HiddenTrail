@@ -64,6 +64,17 @@ export function usePresence({
   myToggledDetectiveIds = [],
   myPeekable = true,
   onRemoteStroke,
+  // onPeerStroke (v3.22) -- fires for a "stroke" broadcast aimed at
+  // SOMEONE ELSE. Needed for multi-peeker concurrent drawing: if three
+  // players are all peeking player P and one of them draws on P's board,
+  // the other two must see that mark immediately, not only after P's own
+  // client has committed it and echoed a strokes_sync back. Without this,
+  // every peek-drawn mark was invisible to every peeker except the one
+  // whose hand drew it (and even for them only until pointerup, since the
+  // in-progress preview is all they had). The owner's strokes_sync is
+  // still the authority -- this is a fast, optimistic, self-healing
+  // overlay that the next snapshot overwrites wholesale.
+  onPeerStroke,
   onStrokesSync,
   onStrokesRequest,
   onPeekOff,
@@ -92,6 +103,8 @@ export function usePresence({
   // ref rather than closing over a stale copy.
   const onRemoteStrokeRef = useRef(onRemoteStroke);
   onRemoteStrokeRef.current = onRemoteStroke;
+  const onPeerStrokeRef = useRef(onPeerStroke);
+  onPeerStrokeRef.current = onPeerStroke;
   // Same ref-indirection reasoning as onRemoteStrokeRef above, for the
   // three new broadcast events (see the header comment).
   const onStrokesSyncRef = useRef(onStrokesSync);
@@ -116,8 +129,16 @@ export function usePresence({
     // I'm actually the intended target -- broadcast is room-wide, not
     // point-to-point, so every client in the room receives every event.
     channel.on("broadcast", { event: "stroke" }, ({ payload }) => {
-      if (payload?.targetPlayerId === myPlayerId && onRemoteStrokeRef.current) {
-        onRemoteStrokeRef.current(payload);
+      if (!payload?.targetPlayerId) return;
+      if (payload.targetPlayerId === myPlayerId) {
+        // I am the board being drawn on -> commit it to my canonical
+        // stroke state (which then re-broadcasts strokes_sync to every
+        // peeker, including the one who drew it).
+        if (onRemoteStrokeRef.current) onRemoteStrokeRef.current(payload);
+      } else if (onPeerStrokeRef.current) {
+        // Someone drew on a THIRD player's board. If that player is the
+        // one I'm currently peeking, I want to see it right now too.
+        onPeerStrokeRef.current(payload);
       }
     });
 

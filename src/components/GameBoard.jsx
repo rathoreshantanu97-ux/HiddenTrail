@@ -210,6 +210,16 @@ export default function GameBoard({
   // rendering over the newly-peeked one before their first sync lands.
   const [peekedStrokes, setPeekedStrokes] = useState([]);
   const [peekedStrokesOwnerId, setPeekedStrokesOwnerId] = useState(null);
+  // v3.23: every strokes_sync we ever see is cached by sender, whether
+  // or not we're peeking that player at the time. Starting a peek then
+  // renders the last known snapshot INSTANTLY out of this cache, with
+  // the request/reply round trip demoted to a refresh rather than being
+  // the only way to ever get a first frame.
+  const strokesSyncCacheRef = React.useRef(new Map());
+  // Action ids already applied, so a "stroke" payload delivered through
+  // BOTH broadcast callbacks (see usePresence.js v3.23) is applied once.
+  // Matters because "undo" and "erase" are not idempotent.
+  const appliedStrokeActionIdsRef = React.useRef(new Set());
   // The broadcast handlers below are installed once, so they must read
   // the CURRENT peek target through a ref rather than a stale closure.
   const peekedPlayerIdRef = React.useRef(peekedPlayerId);
@@ -243,10 +253,48 @@ export default function GameBoard({
   // immediately, then ask the new target to push theirs. Without this
   // request, a peeker starting mid-round would see a blank board until
   // the peeked player happened to draw something new.
+  //
+  // v3.23 FIX (peek-join snapshot). The old version fired exactly ONE
+  // strokes_request and then simply waited. A single unacknowledged
+  // request is fragile in both directions -- it can go out before the
+  // target has anything to answer with, the reply can cross a
+  // reconnect, or either leg can just be dropped -- and when it failed
+  // the peeker sat on a blank board until the peeked player happened to
+  // draw again, which is exactly the reported bug. Three changes:
+  //   1. Paint the cached last-known snapshot immediately (usually there
+  //      already IS one, from an earlier strokes_sync we merely ignored).
+  //   2. Re-send the request on a short backoff instead of once. The
+  //      reply is a full idempotent snapshot, so extra replies are free.
+  //   3. See the heartbeat effect further below -- a player holding
+  //      strokes re-announces them periodically, so convergence no
+  //      longer depends on the request/reply pair succeeding at all.
   useEffect(() => {
-    setPeekedStrokes([]);
-    setPeekedStrokesOwnerId(null);
-    if (peekedPlayerId && onRequestPeerStrokes) onRequestPeerStrokes(peekedPlayerId);
+    if (!peekedPlayerId) {
+      setPeekedStrokes([]);
+      setPeekedStrokesOwnerId(null);
+      return undefined;
+    }
+    const cached = strokesSyncCacheRef.current.get(peekedPlayerId);
+    if (cached && cached.length > 0) {
+      setPeekedStrokes(cached);
+      setPeekedStrokesOwnerId(peekedPlayerId);
+    } else {
+      setPeekedStrokes([]);
+      setPeekedStrokesOwnerId(null);
+    }
+    if (!onRequestPeerStrokes) return undefined;
+    let cancelled = false;
+    const timers = [];
+    const fire = () => {
+      if (cancelled || peekedPlayerIdRef.current !== peekedPlayerId) return;
+      onRequestPeerStrokes(peekedPlayerId);
+    };
+    fire();
+    for (const delay of [400, 1200, 2500, 5000]) timers.push(setTimeout(fire, delay));
+    return () => {
+      cancelled = true;
+      for (const t of timers) clearTimeout(t);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [peekedPlayerId]);
 
@@ -329,35 +377,57 @@ export default function GameBoard({
   // authority, a full idempotent snapshot) just confirms or corrects it.
   function applyStrokeAction(action) {
     if (peekedPlayerId) {
-      onRemoteDraw && onRemoteDraw(peekedPlayerId, action);
+      // actionId (v3.23): the receiving side may now be handed the same
+      // payload through two different broadcast callbacks, so every
+      // action carries a unique id it can de-duplicate on.
+      const stamped = { ...action, actionId: `${Date.now()}-${Math.random()}` };
+      onRemoteDraw && onRemoteDraw(peekedPlayerId, stamped);
       // Optimistic local echo onto the board I'm looking at. Guarded on
       // ownership so it can never land on a previously-peeked player's
       // leftover set.
       setPeekedStrokesOwnerId(peekedPlayerId);
-      setPeekedStrokes((prev) => applyActionToStrokes(peekedStrokesOwnerId === peekedPlayerId ? prev : [], action));
+      setPeekedStrokes((prev) => applyActionToStrokes(peekedStrokesOwnerId === peekedPlayerId ? prev : [], stamped));
       return;
     }
     setMyStrokes((prev) => applyActionToStrokes(prev, action));
   }
 
-  // Apply a stroke action that arrived FOR ME (someone peeking my screen
-  // drew on it) -- lands in the exact same myStrokes state my own
-  // drawing would, so it re-broadcasts to anyone ELSE peeking me too,
-  // and clears at the next round exactly like my own strokes would.
-  // THIS is what makes a peek-drawn stroke durable: it becomes an
-  // ordinary stroke of the peeked player's, covered by their own
-  // persistence, their round auto-clear, and "Recall last round".
-  function handleIncomingRemoteStroke(payload) {
-    setMyStrokes((prev) => applyActionToStrokes(prev, payload));
-  }
-
-  // A peek-draw aimed at a player OTHER than me. Only interesting if
-  // that's the player I'm currently peeking too -- then N peekers of the
-  // same board all see each other's marks live, rather than each one
-  // seeing only their own (item 2, v3.22).
-  function handleIncomingPeerStroke(payload) {
+  // routeIncomingStroke (v3.23) -- THE single entry point for every
+  // inbound peek-draw ("stroke") broadcast, replacing the old split
+  // between handleIncomingRemoteStroke ("it's for me") and
+  // handleIncomingPeerStroke ("it's for someone else"). That split used
+  // to be decided inside usePresence, against the player id captured by
+  // its channel effect, and only the "for me" half was ever wired to the
+  // board owner -- so a peeker's stroke reliably reached every OTHER
+  // peeker (the always-taken else branch) and never the owner, whose
+  // client is supposed to be the authority. Now usePresence forwards
+  // every stroke event through both callbacks and the decision is made
+  // right here, against this component's own myPlayerId prop, with the
+  // actionId guard below making the duplicate delivery harmless.
+  //
+  // Landing in myStrokes is what makes a peek-drawn stroke durable: it
+  // becomes an ordinary stroke of the peeked player's, re-broadcast to
+  // every other peeker via strokes_sync, and covered by their round
+  // auto-clear and "Recall last round" exactly like their own marks.
+  function routeIncomingStroke(payload) {
     const target = payload?.targetPlayerId;
-    if (!target || target !== peekedPlayerIdRef.current) return;
+    if (!target) return;
+    const actionId = payload.actionId;
+    if (actionId) {
+      if (appliedStrokeActionIdsRef.current.has(actionId)) return;
+      // Bounded: a round's worth of actions is a few dozen, and the set
+      // only exists to collapse the double delivery of the same payload.
+      if (appliedStrokeActionIdsRef.current.size > 500) appliedStrokeActionIdsRef.current.clear();
+      appliedStrokeActionIdsRef.current.add(actionId);
+    }
+    if (myPlayerId && target === myPlayerId) {
+      setMyStrokes((prev) => applyActionToStrokes(prev, payload));
+      return;
+    }
+    // A peek-draw aimed at a player OTHER than me. Only interesting if
+    // that's the player I'm currently peeking too -- then N peekers of
+    // the same board all see each other's marks live (v3.22).
+    if (target !== peekedPlayerIdRef.current) return;
     setPeekedStrokesOwnerId(target);
     setPeekedStrokes((prev) => applyActionToStrokes(prev, payload));
   }
@@ -365,12 +435,10 @@ export default function GameBoard({
   // onRemoteStroke callback -- App.jsx owns the Presence hook, GameBoard
   // owns the actual strokes state, so this ref is how the incoming event
   // reaches the right place without threading a second prop each render.
-  const handleIncomingRemoteStrokeRef = React.useRef(handleIncomingRemoteStroke);
-  handleIncomingRemoteStrokeRef.current = handleIncomingRemoteStroke;
-  const handleIncomingPeerStrokeRef = React.useRef(handleIncomingPeerStroke);
-  handleIncomingPeerStrokeRef.current = handleIncomingPeerStroke;
+  const routeIncomingStrokeRef = React.useRef(routeIncomingStroke);
+  routeIncomingStrokeRef.current = routeIncomingStroke;
   useEffect(() => {
-    onRegisterRemoteStrokeHandler && onRegisterRemoteStrokeHandler((payload) => handleIncomingRemoteStrokeRef.current(payload));
+    onRegisterRemoteStrokeHandler && onRegisterRemoteStrokeHandler((payload) => routeIncomingStrokeRef.current(payload));
     // The two broadcast-driven peek events. Both read the live peek
     // target through peekedPlayerIdRef, since these handlers are
     // installed exactly once and would otherwise capture the target
@@ -379,14 +447,21 @@ export default function GameBoard({
       onRegisterPeerEventHandlers({
         // A player pushed their current drawing. Apply it only if
         // they're the player I'm actually looking at right now.
+        // ALWAYS cached (v3.23), even for a player I'm not peeking --
+        // that cache is what lets a peek START show their drawing on the
+        // very first frame instead of waiting on a request/reply.
         onStrokesSync: (payload) => {
-          if (payload?.senderPlayerId && payload.senderPlayerId === peekedPlayerIdRef.current) {
+          if (!payload?.senderPlayerId) return;
+          strokesSyncCacheRef.current.set(payload.senderPlayerId, payload.strokes || []);
+          if (payload.senderPlayerId === peekedPlayerIdRef.current) {
             setPeekedStrokes(payload.strokes || []);
             setPeekedStrokesOwnerId(payload.senderPlayerId);
           }
         },
-        // Another peeker drew on the board I'm also peeking.
-        onPeerStroke: (payload) => handleIncomingPeerStrokeRef.current(payload),
+        // Second delivery path for peek-draws: usePresence now forwards
+        // EVERY "stroke" event through both callbacks and lets
+        // routeIncomingStroke decide who it's for (see there).
+        onPeerStroke: (payload) => routeIncomingStrokeRef.current(payload),
         // A player revoked peek permission. If that's who I'm peeking,
         // drop out immediately -- this is the PRIMARY release path (the
         // Presence-diff effect above is only a backup).
@@ -491,6 +566,24 @@ export default function GameBoard({
     onBroadcastStrokes && onBroadcastStrokes(myStrokes);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myStrokes]);
+
+  // HEARTBEAT (v3.23) -- re-announce my current drawing every few
+  // seconds while I actually have one. This is the safety net under the
+  // peek-join fix: even if a peeker's strokes_request and all its
+  // retries were lost, or they joined during a reconnect, their view
+  // converges within one heartbeat instead of hanging blank until my
+  // next pen stroke. Silent when there's nothing to send (the common
+  // case), and each message is one already-decimated snapshot, so the
+  // traffic cost is negligible.
+  const onBroadcastStrokesRef = React.useRef(onBroadcastStrokes);
+  onBroadcastStrokesRef.current = onBroadcastStrokes;
+  useEffect(() => {
+    const id = setInterval(() => {
+      const current = myStrokesRef.current;
+      if (current && current.length > 0 && onBroadcastStrokesRef.current) onBroadcastStrokesRef.current(current);
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   function toggleDetectiveHighlight(detId) {
     setToggledIds((prev) => {
@@ -1779,17 +1872,32 @@ export default function GameBoard({
                             timer wrap below), because two equally loud
                             countdowns is exactly the confusion this UX was
                             asked to avoid. */}
-                        {subTurnRemaining != null && (
-                          <span
-                            style={{
-                              ...styles.subTurnCapPill,
-                              background: timerBarColor(detectiveCapSeconds ? subTurnRemaining / detectiveCapSeconds : 0),
-                            }}
-                            title={`This detective's move auto-passes in ${subTurnRemaining}s`}
-                          >
-                            {subTurnRemaining}s
-                          </span>
-                        )}
+                        {subTurnRemaining != null && (() => {
+                          // v3.23: rendered as a BAR, using the exact same
+                          // track/fill/text markup and styles as the Mr.X
+                          // and planning-phase timers below, so every
+                          // countdown in the game looks like the same
+                          // object. It stays the PROMINENT one purely
+                          // through size/weight overrides (thicker track,
+                          // larger darker label) -- the demoted round
+                          // timer is still plain muted text.
+                          const capFrac = detectiveCapSeconds ? subTurnRemaining / detectiveCapSeconds : 0;
+                          return (
+                            <span style={styles.subTurnCapBarWrap} title={`This detective's move auto-passes in ${subTurnRemaining}s`}>
+                              <span style={{ ...styles.turnTimerBarTrack, ...styles.subTurnCapBarTrack }}>
+                                <span
+                                  style={{
+                                    ...styles.turnTimerBarFill,
+                                    display: "block",
+                                    width: `${Math.max(0, Math.min(100, capFrac * 100))}%`,
+                                    background: timerBarColor(capFrac),
+                                  }}
+                                />
+                              </span>
+                              <span style={{ ...styles.turnTimerBarText, ...styles.subTurnCapBarText }}>{subTurnRemaining}s</span>
+                            </span>
+                          );
+                        })()}
                       </>
                     ) : isMrXTurn ? (
                       <span>{mrxName()}'s Turn</span>
@@ -2805,21 +2913,33 @@ export const styles = {
   // The PRIMARY acting-phase countdown (v3.22): big, bold, colored,
   // sitting immediately beside the detective whose sub-turn it bounds.
   // Intentionally the loudest timing element on screen.
-  subTurnCapPill: {
+  // v3.23: the per-detective cap countdown is a BAR now, not a pill --
+  // same track/fill/text trio as every other timer in the game
+  // (turnTimerBar*), just sized up so it still reads as the primary
+  // countdown next to the detective it belongs to. Only these three
+  // overrides differ from the shared bar styles; everything else is
+  // spread in from turnTimerBarTrack/Fill/Text so the two can never
+  // visually drift apart.
+  subTurnCapBarWrap: {
     display: "inline-flex",
     alignItems: "center",
-    justifyContent: "center",
-    minWidth: 46,
-    padding: "2px 10px",
-    marginLeft: 8,
-    borderRadius: 999,
-    color: "#fff",
-    fontWeight: 800,
-    fontSize: 17,
-    lineHeight: 1.35,
-    letterSpacing: 0.2,
-    boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+    gap: 8,
+    marginLeft: 10,
     flexShrink: 0,
+    verticalAlign: "middle",
+  },
+  subTurnCapBarTrack: {
+    flex: "none",
+    width: 90,
+    height: 11,
+    borderRadius: 6,
+  },
+  subTurnCapBarText: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#333",
+    minWidth: 34,
+    textAlign: "left",
   },
   // The DEMOTED round-level pooled countdown: plain, small, grey, no
   // track, no fill, no color shift. Deliberately reads as a status line.

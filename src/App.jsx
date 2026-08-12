@@ -332,6 +332,13 @@ export default function App({ account, onLogout }) {
   // re-renders on. Same pattern for the two new broadcast handlers.
   const remoteStrokeHandlerRef = useRef(null);
   const peerEventHandlersRef = useRef({});
+  // Our own player id, read through a ref by the broadcast handlers so
+  // they always compare against the CURRENT value rather than whatever
+  // the Realtime channel effect happened to capture when it subscribed
+  // (v3.23 -- see the "stroke"/"strokes_request" comments in
+  // usePresence.js for why that indirection now exists).
+  const mpPlayerIdRef = useRef(mpPlayerId);
+  mpPlayerIdRef.current = mpPlayerId;
 
   const { onlinePlayerIds, isInactive, presenceState, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff } = usePresence({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
@@ -349,7 +356,14 @@ export default function App({ account, onLogout }) {
     // rather than being inferred from Presence state -- see the header
     // comment in usePresence.js for why.
     onStrokesSync: (payload) => peerEventHandlersRef.current.onStrokesSync && peerEventHandlersRef.current.onStrokesSync(payload),
-    onStrokesRequest: () => sendStrokesSyncRef.current && sendStrokesSyncRef.current(mpStrokesRef.current),
+    // Someone asked a player for their current drawing. Answer only if
+    // that player is me -- the targeting test lives here now (v3.23), so
+    // it runs against the live mpPlayerId rather than a value captured
+    // inside the Realtime channel effect.
+    onStrokesRequest: (payload) => {
+      if (!payload || payload.targetPlayerId !== mpPlayerIdRef.current) return;
+      if (sendStrokesSyncRef.current) sendStrokesSyncRef.current(mpStrokesRef.current);
+    },
     onPeekOff: (payload) => peerEventHandlersRef.current.onPeekOff && peerEventHandlersRef.current.onPeekOff(payload),
   });
 

@@ -128,18 +128,23 @@ export function usePresence({
     // action, not "current status" to keep syncing). Only apply it if
     // I'm actually the intended target -- broadcast is room-wide, not
     // point-to-point, so every client in the room receives every event.
+    // v3.23 DELIVERY FIX. This used to be an if/ELSE on
+    // `payload.targetPlayerId === myPlayerId`, using the `myPlayerId`
+    // captured by THIS effect's closure. That made the peeked player's
+    // own delivery (the `onRemoteStroke` branch) depend on a single
+    // identity comparison made inside the hook, while every OTHER
+    // client's delivery went down the always-true `else` branch -- which
+    // is exactly the observed failure signature: a peeker's stroke
+    // reached every other peeker but never the owner of the board.
+    // Both callbacks now fire for every stroke event, unconditionally.
+    // The consumer (GameBoard) does the routing itself, against its own
+    // `myPlayerId` prop, and de-duplicates on `actionId` so a payload
+    // arriving through both callbacks is only ever applied once (which
+    // matters for the non-idempotent "undo"/"erase" actions).
     channel.on("broadcast", { event: "stroke" }, ({ payload }) => {
       if (!payload?.targetPlayerId) return;
-      if (payload.targetPlayerId === myPlayerId) {
-        // I am the board being drawn on -> commit it to my canonical
-        // stroke state (which then re-broadcasts strokes_sync to every
-        // peeker, including the one who drew it).
-        if (onRemoteStrokeRef.current) onRemoteStrokeRef.current(payload);
-      } else if (onPeerStrokeRef.current) {
-        // Someone drew on a THIRD player's board. If that player is the
-        // one I'm currently peeking, I want to see it right now too.
-        onPeerStrokeRef.current(payload);
-      }
+      if (onRemoteStrokeRef.current) onRemoteStrokeRef.current(payload);
+      if (onPeerStrokeRef.current) onPeerStrokeRef.current(payload);
     });
 
     // strokes_sync -- a player pushing their CURRENT full stroke set to
@@ -154,8 +159,13 @@ export function usePresence({
 
     // strokes_request -- someone just STARTED peeking me and wants my
     // current drawing right now, rather than waiting for my next edit.
+    // Same v3.23 reasoning as the "stroke" handler above: the
+    // "am I the target?" test is no longer made against this effect's
+    // captured `myPlayerId`. The full payload is handed to the consumer,
+    // which compares it against its own live player id and answers with
+    // a strokes_sync only if it really is the target.
     channel.on("broadcast", { event: "strokes_request" }, ({ payload }) => {
-      if (payload?.targetPlayerId === myPlayerId && onStrokesRequestRef.current) {
+      if (payload?.targetPlayerId && onStrokesRequestRef.current) {
         onStrokesRequestRef.current(payload);
       }
     });

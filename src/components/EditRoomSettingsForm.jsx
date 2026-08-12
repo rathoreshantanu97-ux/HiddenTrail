@@ -70,14 +70,12 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
     Promise.all([api.fetchRoom(roomId), auth.getPublicConfig()])
       .then(([room, cfg]) => {
         if (!room) return;
-        setTurnTimerSeconds(room.turn_timer_seconds ?? null);
-        // REGRESSION FIX: a null planning_time_seconds is ambiguous --
-        // either this room predates the field, or a host genuinely left
-        // it blank. Since the field used to be automatic (derived from
-        // the turn timer, no separate step required), treat null the
-        // same way as a first-time create: default it ON rather than
-        // silently keeping the buffer off. A host can still explicitly
-        // clear it afterward to opt out.
+        // Both timer fields treat a null DB value the same way: default
+        // it ON with a real number rather than leaving it blank, matching
+        // CreateRoomForm's own default and keeping the two fields
+        // consistent with each other. A host can still explicitly clear
+        // either field afterward to opt out.
+        setTurnTimerSeconds(room.turn_timer_seconds ?? cfg.turnTimerMin);
         setPlanningTimeSeconds(room.planning_time_seconds ?? cfg.planningTimeMin);
         setIsPublic(!!room.is_public);
         setRoomName(room.room_name || "");

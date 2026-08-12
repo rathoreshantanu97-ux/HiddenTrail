@@ -25,6 +25,15 @@
 //     The clamp is a safety net requested explicitly, since a large ratio
 //     times a large buffer could otherwise produce an unreasonable turn
 //     length.
+//     IF NO BUFFER IS CONFIGURED (host runs act-time-only, "each player
+//     just gets their own turn timer, no shared thinking window"), there's
+//     no buffer to multiply -- and multiplying actSeconds by mrxTimeRatio
+//     instead would silently hand Mr.X a LONGER turn than everyone else
+//     for no stated reason, which doesn't match that host's own intent (a
+//     flat, equal-length turn for every seat). Per explicit design
+//     decision, mrxSeconds in this mode is simply actSeconds itself --
+//     same length as everyone else's turn, still clamped to the admin
+//     bounds as a safety net.
 //   - extraSeatSeconds = ceil(actSeconds * extraSeatTimeRatio) -- a
 //     player's SECOND (and further) detective seat this round only gets
 //     this smaller top-up, not another full act window, since the actual
@@ -63,7 +72,10 @@ export function computeTurnSchedule(actSeconds, bufferSeconds, ratios = {}, boun
   // shared planning window (mirrors the existing "blank = no limit"
   // pattern for act time, applied here to mean "no buffer phase").
   const effectiveBuffer = bufferSeconds && bufferSeconds > 0 ? bufferSeconds : null;
-  const mrxSecondsRaw = effectiveBuffer ? Math.ceil(effectiveBuffer * r.mrxTimeRatio) : Math.ceil(actSeconds * r.mrxTimeRatio);
+  // No buffer configured -> Mr.X's turn is simply the same length as
+  // everyone else's (actSeconds), not a ratio multiple of it -- see the
+  // comment on mrxSeconds above for why.
+  const mrxSecondsRaw = effectiveBuffer ? Math.ceil(effectiveBuffer * r.mrxTimeRatio) : actSeconds;
   const mrxSeconds = clamp(mrxSecondsRaw, b.mrxSecondsMin, b.mrxSecondsMax);
   const extraSeatSeconds = Math.ceil(actSeconds * r.extraSeatTimeRatio);
   return { actSeconds, bufferSeconds: effectiveBuffer, mrxSeconds, extraSeatSeconds };

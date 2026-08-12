@@ -151,14 +151,14 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
       .getPublicConfig()
       .then((cfg) => {
         setPublicConfig(cfg);
-        // REGRESSION FIX: planning time used to be automatic (derived
-        // from the turn timer) -- splitting it into its own host field
-        // means a host who doesn't touch it now silently gets NO shared
-        // buffer at all, which is what actually happened in testing (Mr.X
-        // moves went straight to individual detective turns). Pre-fill a
-        // sensible default here so the buffer stays on by default, same
-        // as before -- a host now has to explicitly BLANK this field to
-        // opt OUT of a buffer, rather than opt in to get one.
+        // Both timer fields default ON with a real number, not blank --
+        // consistent behavior for the two host inputs that make up the
+        // same turn schedule (previously turn timer defaulted to "no
+        // limit" while planning time defaulted to a real value, which
+        // read as inconsistent even though both fields work the same
+        // way). A host still opts OUT of either by explicitly blanking
+        // it -- this just makes "on" the shared default, not "off."
+        setTurnTimerSecondsState((prev) => (prev === null ? cfg.turnTimerMin : prev));
         setPlanningTimeSecondsState((prev) => (prev === null ? cfg.planningTimeMin : prev));
       })
       .catch((e) => console.error("Failed to fetch public config:", e));

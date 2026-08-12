@@ -356,22 +356,6 @@ export default function GameBoard({
     });
   }
 
-  // Seed toggledIds with your own detectives ONCE they're known -- gives
-  // the "shown by default" behavior without making own detectives a
-  // special non-togglable case; after this one seed, it's entirely
-  // player-controlled (including deselecting your own).
-  useEffect(() => {
-    if (seededOwnRef.current) return;
-    if (myRole === null && match.detectives.length > 0) {
-      setToggledIds(new Set(match.detectives.map((d) => d.id)));
-      seededOwnRef.current = true;
-    } else if (myOwnDetectives.length > 0) {
-      setToggledIds(new Set(myOwnDetectives.map((d) => d.id)));
-      seededOwnRef.current = true;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myOwnDetectives.length, match.detectives.length, myRole]);
-
   // Report our FULL toggled set upward so App.jsx can broadcast it via
   // Presence -- other players' "peek" views mirror this exactly, and it
   // correctly reflects the moment we untoggle anything (including our own
@@ -563,6 +547,32 @@ export default function GameBoard({
     iAmDetective && myRoleSeats.length > 0
       ? match.detectives.filter((d) => myRoleSeats.includes(`d${d.id}`))
       : [];
+
+  // Seed toggledIds with your own detectives ONCE they're known -- gives
+  // the "shown by default" behavior without making own detectives a
+  // special non-togglable case; after this one seed, it's entirely
+  // player-controlled (including deselecting your own).
+  // MOVED HERE, below myOwnDetectives' own declaration -- it used to sit
+  // much earlier in the component (right after toggledIds' own useState),
+  // but its dependency array read `myOwnDetectives.length`, which was a
+  // genuine temporal-dead-zone bug: a dependency array is evaluated
+  // eagerly, during render, at the exact line the useEffect call sits on
+  // -- not deferred to when the effect callback actually runs -- so
+  // referencing a `const` declared further down the SAME function scope
+  // threw "Cannot access 'myOwnDetectives' before initialization" on
+  // every single render, crashing the whole board. Confirmed via a live
+  // repro before fixing.
+  useEffect(() => {
+    if (seededOwnRef.current) return;
+    if (myRole === null && match.detectives.length > 0) {
+      setToggledIds(new Set(match.detectives.map((d) => d.id)));
+      seededOwnRef.current = true;
+    } else if (myOwnDetectives.length > 0) {
+      setToggledIds(new Set(myOwnDetectives.map((d) => d.id)));
+      seededOwnRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myOwnDetectives.length, match.detectives.length, myRole]);
 
   const MIN_ZOOM = 1;
   const MAX_ZOOM = 4;

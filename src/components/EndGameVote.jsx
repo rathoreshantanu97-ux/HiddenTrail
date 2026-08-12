@@ -15,7 +15,7 @@ import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 // full reasoning (admin-disabled features must be invisible, not just
 // non-functional).
 // ---------------------------------------------------------------------------
-export default function EndGameVote({ roomId, myPlayerId }) {
+export default function EndGameVote({ roomId, myPlayerId, resolveLabel }) {
   const enabled = useFeatureEnabled("end_game_vote_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = useEndGameVote({ roomId, myPlayerId });
 
@@ -48,7 +48,7 @@ export default function EndGameVote({ roomId, myPlayerId }) {
         </div>
         <div style={styles.timer}>Expires in {secondsLeft}s if not everyone responds</div>
         {err && <div style={styles.err}>{err}</div>}
-        <VoteStatusList statusList={statusList} />
+        <VoteStatusList statusList={statusList} resolveLabel={resolveLabel} />
         {iHaveVoted ? (
           <div style={styles.waitingNote}>Waiting for other players to respond...</div>
         ) : (

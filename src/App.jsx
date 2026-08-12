@@ -840,6 +840,44 @@ export default function App({ account, onLogout }) {
       detectivePlayerNames[id] ||
       detectiveLabel(map, id + 1);
 
+    // resolveSenderLabel -- per explicit decision, a chat message's
+    // sender should be shown by their CURRENT effective name everywhere,
+    // not whatever name was stored on the message row when it was sent
+    // (messages.sender_name is a denormalized snapshot -- see
+    // send_chat_message in functions.sql -- so it can't retroactively
+    // reflect a character name picked/changed afterward). Resolves LIVE
+    // instead: mrx -> mrxName(), a detective seat -> detectiveName(),
+    // which already has the full real-name/character-name precedence
+    // sorted out above. Multi-detective seats (comma-joined role, e.g.
+    // "d0,d1") resolve via their FIRST detective id -- one seat is one
+    // person, so any id in that seat resolves to the same name anyway.
+    const resolveSenderLabel = (m) => {
+      if (!m.senderRole) return m.senderName;
+      if (m.senderRole === "mrx") return mrxName();
+      const firstId = parseInt(m.senderRole.split(",")[0].slice(1), 10);
+      return Number.isNaN(firstId) ? m.senderName : detectiveName(firstId);
+    };
+
+    // resolveVoterLabel -- same "current effective name everywhere" rule,
+    // applied to vote modals (pause/resume, end-game, takeover-reversal,
+    // redistribute-roles). Vote RPCs (get_vote_status_list) return each
+    // voter as { playerId, displayName, status } with displayName being
+    // the real player name from the players table -- doesn't know about
+    // character-name picks at all. Resolve it live here instead, the same
+    // way resolveSenderLabel does for chat: look up the voter's role from
+    // mpPlayersList (playerId -> role), then run it through
+    // mrxName()/detectiveName() which already have the full precedence
+    // (lobby-picked character name > map default roster > real name).
+    // Falls back to the RPC's own displayName if the player's role can't
+    // be found (e.g. they've since left/been replaced).
+    const resolveVoterLabel = (p) => {
+      const player = mpPlayersList.find((pl) => pl.id === p.playerId);
+      if (!player || !player.role) return p.displayName;
+      if (player.role === "mrx") return mrxName();
+      const firstId = parseInt(player.role.split(",")[0].slice(1), 10);
+      return Number.isNaN(firstId) ? p.displayName : detectiveName(firstId);
+    };
+
     if (mpRoomNotFound) {
       return (
         <LoadingOrDeadRoom
@@ -933,7 +971,7 @@ export default function App({ account, onLogout }) {
     }
 
     if (match.phase === "paused") {
-      return withRulebook(<PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} />);
+      return withRulebook(<PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} resolveLabel={resolveVoterLabel} />);
     }
 
     // Derive the huddle-panel data from Presence: every OTHER detective
@@ -956,7 +994,7 @@ export default function App({ account, onLogout }) {
       anyDetectiveExploring = true;
       teammatesExploring.push({
         playerId: p.id,
-        displayName: p.display_name,
+        displayName: detectiveName(theirDetective.id),
         color: theirDetective.color,
         exploreMode: payload.exploreMode,
         detectiveSeat: firstSeat,
@@ -988,8 +1026,8 @@ export default function App({ account, onLogout }) {
         extraHeaderContent={
           <>
             <RulebookButton compact onClick={() => setShowRulebook(true)} />
-            <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
-            <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} />
+            <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} resolveLabel={resolveVoterLabel} />
+            <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} resolveLabel={resolveVoterLabel} />
           </>
         }
         extraHeaderContentBelow={
@@ -1006,6 +1044,7 @@ export default function App({ account, onLogout }) {
                 myPlayerId={mpPlayerId}
                 completedTakeoverEventId={mpSpectatorInfo?.takeoverEventId || null}
                 theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }}
+                resolveLabel={resolveVoterLabel}
               />
               <RedistributeRolesVote
                 roomId={mpRoomId}
@@ -1014,13 +1053,21 @@ export default function App({ account, onLogout }) {
                 numDetectives={liveNumDetectives}
                 totalPlayers={liveTotalPlayers}
                 theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }}
+                resolveLabel={resolveVoterLabel}
               />
             </div>
             <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={liveIsHost} theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }} />
           </div>
         }
         belowTicketsContent={
-          <ChatPanel roomId={mpRoomId} myPlayerId={mpPlayerId} myRole={mpRole} myDisplayName={mpDisplayName} detectiveTeamName={map.detectiveTeamName} />
+          <ChatPanel
+            roomId={mpRoomId}
+            myPlayerId={mpPlayerId}
+            myRole={mpRole}
+            myDisplayName={mpDisplayName}
+            detectiveTeamName={map.detectiveTeamName}
+            resolveSenderLabel={resolveSenderLabel}
+          />
         }
       />
     );

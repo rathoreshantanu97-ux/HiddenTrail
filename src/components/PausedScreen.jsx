@@ -11,7 +11,7 @@ import { useResumeVote } from "../lib/useResumeVote.js";
 // a real, confirmed gap: resuming previously required no agreement at
 // all, unlike every other consequential group action in this game.
 // ---------------------------------------------------------------------------
-export default function PausedScreen({ roomId, myPlayerId, onResumed }) {
+export default function PausedScreen({ roomId, myPlayerId, onResumed, resolveLabel }) {
   const [pauseInfo, setPauseInfo] = useState(null);
   const [, forceTick] = useState(0);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = useResumeVote({ roomId, myPlayerId });
@@ -93,7 +93,7 @@ export default function PausedScreen({ roomId, myPlayerId, onResumed }) {
               {proposal.yesVotes} of {proposal.totalPlayers} players have agreed
             </div>
             <div style={styles.timer}>Expires in {secondsLeft}s if not everyone responds</div>
-            <VoteStatusList statusList={statusList} />
+            <VoteStatusList statusList={statusList} resolveLabel={resolveLabel} />
             {iHaveVoted ? (
               <div style={styles.waitingNote}>Waiting for other players to respond...</div>
             ) : (

@@ -4,15 +4,21 @@ import React from "react";
 // VOTE STATUS LIST — shared by every vote modal (end-game, pause,
 // reversal, redistribute). Shows each currently-active player by name
 // with their live status: agreed / declined / not yet responded.
+//
+// resolveLabel, when provided, resolves each voter's CURRENT effective
+// name (character name on rostered maps, else real display name) live,
+// via playerId -- mirrors resolveSenderLabel in App.jsx/ChatPanel.jsx.
+// Falls back to p.displayName (the raw name the vote RPC returned) when
+// no resolver is passed, so this stays a drop-in-compatible prop.
 // ---------------------------------------------------------------------------
-export default function VoteStatusList({ statusList }) {
+export default function VoteStatusList({ statusList, resolveLabel }) {
   if (!statusList || statusList.length === 0) return null;
 
   return (
     <div style={styles.list}>
       {statusList.map((p) => (
         <div key={p.playerId} style={styles.row}>
-          <span style={styles.name}>{p.displayName}</span>
+          <span style={styles.name}>{resolveLabel ? resolveLabel(p) : p.displayName}</span>
           <span
             style={{
               ...styles.badge,

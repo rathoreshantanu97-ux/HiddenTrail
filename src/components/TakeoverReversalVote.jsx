@@ -17,7 +17,7 @@ import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 //   2. The vote modal itself, shown to EVERYONE once a proposal exists
 //      (unlike the request button, which only the replaced player sees).
 // ---------------------------------------------------------------------------
-export default function TakeoverReversalVote({ roomId, myPlayerId, completedTakeoverEventId, theme }) {
+export default function TakeoverReversalVote({ roomId, myPlayerId, completedTakeoverEventId, theme, resolveLabel }) {
   const enabled = useFeatureEnabled("takeover_reversal_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = useTakeoverReversalVote({ roomId, myPlayerId });
 
@@ -56,7 +56,7 @@ export default function TakeoverReversalVote({ roomId, myPlayerId, completedTake
         </div>
         <div style={styles.timer}>Expires in {secondsLeft}s if not everyone responds</div>
         {err && <div style={styles.err}>{err}</div>}
-        <VoteStatusList statusList={statusList} />
+        <VoteStatusList statusList={statusList} resolveLabel={resolveLabel} />
         {iHaveVoted ? (
           <div style={styles.waitingNote}>Waiting for other players to respond...</div>
         ) : (

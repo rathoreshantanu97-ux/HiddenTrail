@@ -13,7 +13,7 @@ import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 // clicked), so this component renders nothing whatsoever if the feature
 // is off, rather than showing a button that would just fail server-side.
 // ---------------------------------------------------------------------------
-export default function PauseVote({ roomId, myPlayerId }) {
+export default function PauseVote({ roomId, myPlayerId, resolveLabel }) {
   const enabled = useFeatureEnabled("pause_resume_enabled", roomId);
   const { proposal, statusList, err, propose, vote, iHaveVoted } = usePauseVote({ roomId, myPlayerId });
 
@@ -46,7 +46,7 @@ export default function PauseVote({ roomId, myPlayerId }) {
         </div>
         <div style={styles.timer}>Expires in {secondsLeft}s if not everyone responds</div>
         {err && <div style={styles.err}>{err}</div>}
-        <VoteStatusList statusList={statusList} />
+        <VoteStatusList statusList={statusList} resolveLabel={resolveLabel} />
         {iHaveVoted ? (
           <div style={styles.waitingNote}>Waiting for other players to respond...</div>
         ) : (

@@ -121,8 +121,11 @@ export default function GameBoard({
   belowTicketsContent, // e.g. chat in multiplayer -- renders AFTER the log/tickets panels, per the agreed sidebar order (votes -> huddle -> explorer -> log -> tickets -> chat)
   onExploreModeChange, // (detectiveIds: number[]) => void -- reports this client's own EXTRA toggled-on detective ids (beyond their own, which are always shown by default) upward, so App.jsx can broadcast them via Presence
   onPeekableChange, // (peekable: boolean) => void -- reports this client's own "let teammates peek at my screen" preference upward, for the same Presence broadcast
+  onStrokesChange, // (strokes: Stroke[]) => void -- reports this client's own drawing strokes upward, broadcast via Presence, so a peeking teammate can see them live
+  onRemoteDraw, // (targetPlayerId, action) => void -- fires a draw action AT a specific other player's board (used while peeking them), via a one-off Presence broadcast rather than persistent state
+  onRegisterRemoteStrokeHandler, // (handler: (payload) => void) => void -- called once on mount so App.jsx can wire incoming remote-draw events (from a teammate peeking ME) into this component's own stroke state
   detectivePlayersRoster = [], // [{playerId, displayName, detectiveIds: number[]}] -- every detective-seat player (not Mr.X), multiplayer only, used for the "peek into a player's screen" panel and for showing a peeked player's OWN highlights (which aren't separately broadcast, since they're deterministic from this same roster)
-  presenceState = {}, // playerId -> {displayName, role, toggledDetectiveIds} -- live Presence payloads (multiplayer only), used to read a peeked player's EXTRA toggles
+  presenceState = {}, // playerId -> {displayName, role, toggledDetectiveIds, strokes} -- live Presence payloads (multiplayer only), used to read a peeked player's EXTRA toggles and strokes
   myPlayerId = null, // this client's own player id (multiplayer only) -- used to exclude yourself from the peek list
   detectivePlayerNames = {}, // detectiveId -> player display name (multiplayer only) -- for the ticket counter's "Priya — D1" labeling
   secondsRemaining = null, // null (no timer set for this room) | number of seconds left in the current turn/phase -- shown to EVERYONE regardless of whose turn it is
@@ -176,6 +179,143 @@ export default function GameBoard({
   const [mrxSelfExplore, setMrxSelfExplore] = useState(false); // Mr.X clicking his OWN token toggles his own reachable-station highlight -- no teammates to coordinate with, so this stays purely local, never broadcast
   const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
   const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
+
+  // ---------------------------------------------------------------------
+  // FREEHAND DRAWING -- a quick, disposable "let me show you my
+  // reasoning" sketch layer, like circling a region on a real paper board
+  // while thinking. NEVER shown to Mr.X (detectives-only, same boundary
+  // as the route explorer). Strokes are in MAP-SPACE coordinates (SVG
+  // viewBox units, via screenPointToSvgPoint), so a stroke lands in the
+  // same place for a peeking teammate regardless of either client's own
+  // zoom/pan. Auto-clears at the start of every new round (see the
+  // useEffect below) -- a real player wouldn't keep last round's
+  // scribbles around either. Broadcast via the SAME Presence payload as
+  // the route-explorer toggles, on stroke COMPLETION only (not live per-
+  // point), to keep Presence traffic reasonable.
+  // ---------------------------------------------------------------------
+  const [drawMode, setDrawMode] = useState(null); // null | "pen" | "eraser"
+  const [myStrokes, setMyStrokes] = useState([]); // [{id, points: [{x,y}, ...]}]
+  const [liveStrokePoints, setLiveStrokePoints] = useState(null); // points of the stroke currently being drawn (not yet committed to myStrokes)
+  const [lastRoundStrokes, setLastRoundStrokes] = useState([]); // whatever myStrokes held right before the most recent auto-clear -- default behavior stays "blank," this is purely an opt-in recall
+  const lastClearedRoundRef = React.useRef(null);
+  const myStrokesRef = React.useRef(myStrokes); // lets the round-clear effect read the CURRENT strokes without depending on them (avoiding a clear-triggers-effect loop)
+  myStrokesRef.current = myStrokes;
+
+  // Auto-clear MY OWN strokes at the start of every new round -- default
+  // is blank, per the real-board precedent (nobody keeps last round's
+  // scribbles visible), but the just-cleared strokes are stashed so the
+  // explicit "Recall last round" button (see toolbar below) can bring
+  // them back if you actually wanted to keep looking at them.
+  useEffect(() => {
+    if (match?.round == null) return;
+    if (lastClearedRoundRef.current === match.round) return;
+    lastClearedRoundRef.current = match.round;
+    if (myStrokesRef.current.length > 0) setLastRoundStrokes(myStrokesRef.current);
+    setMyStrokes([]);
+    setLiveStrokePoints(null);
+  }, [match?.round]);
+
+  function recallLastRoundStrokes() {
+    if (lastRoundStrokes.length === 0) return;
+    setMyStrokes(lastRoundStrokes);
+  }
+
+  function pointFromEvent(e) {
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return screenPointToSvgPoint(clientX, clientY);
+  }
+
+  // While peeking, drawing actions are redirected to the PEEKED player's
+  // board instead of your own -- "reaching over and drawing on their
+  // sheet while looking at it" (explicit design decision), rather than
+  // silently accumulating on a board of yours that isn't even visible
+  // right now. Local strokes and remote-targeted strokes never mix.
+  function applyStrokeAction(action) {
+    if (peekedPlayerId) {
+      onRemoteDraw && onRemoteDraw(peekedPlayerId, action);
+      return;
+    }
+    if (action.kind === "add") {
+      setMyStrokes((prev) => [...prev, action.stroke]);
+    } else if (action.kind === "undo") {
+      setMyStrokes((prev) => prev.slice(0, -1));
+    } else if (action.kind === "erase") {
+      setMyStrokes((prev) => prev.filter((s) => !s.points.some((pt) => Math.hypot(pt.x - action.point.x, pt.y - action.point.y) < ERASE_RADIUS)));
+    }
+  }
+
+  // Apply a stroke action that arrived FOR ME (someone peeking my screen
+  // drew on it) -- lands in the exact same myStrokes state my own
+  // drawing would, so it re-broadcasts to anyone ELSE peeking me too,
+  // and clears at the next round exactly like my own strokes would.
+  function handleIncomingRemoteStroke(payload) {
+    if (payload.kind === "add") {
+      setMyStrokes((prev) => [...prev, payload.stroke]);
+    } else if (payload.kind === "undo") {
+      setMyStrokes((prev) => prev.slice(0, -1));
+    } else if (payload.kind === "erase") {
+      setMyStrokes((prev) => prev.filter((s) => !s.points.some((pt) => Math.hypot(pt.x - payload.point.x, pt.y - payload.point.y) < ERASE_RADIUS)));
+    }
+  }
+  // Expose this to App.jsx so it can wire it into usePresence's
+  // onRemoteStroke callback -- App.jsx owns the Presence hook, GameBoard
+  // owns the actual strokes state, so this ref is how the incoming event
+  // reaches the right place without threading a second prop each render.
+  const handleIncomingRemoteStrokeRef = React.useRef(handleIncomingRemoteStroke);
+  handleIncomingRemoteStrokeRef.current = handleIncomingRemoteStroke;
+  useEffect(() => {
+    onRegisterRemoteStrokeHandler && onRegisterRemoteStrokeHandler((payload) => handleIncomingRemoteStrokeRef.current(payload));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const ERASE_RADIUS = 2.5; // map-space units, shared by local + remote erase
+
+  function handleDrawPointerDown(e) {
+    if (!drawMode) return;
+    const p = pointFromEvent(e);
+    if (!p) return;
+    if (drawMode === "pen") {
+      setLiveStrokePoints([p]);
+    } else if (drawMode === "eraser") {
+      applyStrokeAction({ kind: "erase", point: p });
+    }
+  }
+
+  function handleDrawPointerMove(e) {
+    if (!drawMode) return;
+    const p = pointFromEvent(e);
+    if (!p) return;
+    if (drawMode === "pen" && liveStrokePoints) {
+      setLiveStrokePoints((prev) => [...prev, p]);
+    } else if (drawMode === "eraser" && e.buttons === 1) {
+      applyStrokeAction({ kind: "erase", point: p });
+    }
+  }
+
+  function handleDrawPointerUp() {
+    if (drawMode === "pen" && liveStrokePoints && liveStrokePoints.length > 1) {
+      applyStrokeAction({ kind: "add", stroke: { id: `${Date.now()}-${Math.random()}`, points: liveStrokePoints } });
+    }
+    setLiveStrokePoints(null);
+  }
+
+  function undoLastStroke() {
+    applyStrokeAction({ kind: "undo" });
+  }
+
+  function pointsToPath(points) {
+    if (!points || points.length === 0) return "";
+    return `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)} ` + points.slice(1).map((p) => `L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+  }
+
+  // Report our own strokes upward the same way as the explore toggles --
+  // only on stroke COMPLETION (myStrokes changes), never on every
+  // in-progress point, to keep Presence broadcast traffic reasonable.
+  useEffect(() => {
+    onStrokesChange && onStrokesChange(myStrokes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myStrokes]);
 
   function toggleDetectiveHighlight(detId) {
     setExtraToggledIds((prev) => {
@@ -304,6 +444,20 @@ export default function GameBoard({
             ? "left"
             : "above";
     return { x: px, y: py, fallback: false, openDirection };
+  }
+
+  // Inverse of svgPointToScreenPoint above -- converts a pointer event's
+  // SCREEN coordinates into the SVG's own viewBox coordinate space, so a
+  // freehand stroke lands at the same MAP position for a peeking teammate
+  // regardless of either client's own zoom/pan state.
+  function screenPointToSvgPoint(clientX, clientY) {
+    if (!svgRef.current) return null;
+    const rect = svgRef.current.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: pan.x + ((clientX - rect.left) / rect.width) * viewSizeW,
+      y: pan.y + ((clientY - rect.top) / rect.height) * viewSizeH,
+    };
   }
 
   const activeMode = map.modeTheme || MODE_DEFAULT;
@@ -516,6 +670,11 @@ export default function GameBoard({
   const peekedOwnIds = showDetectiveHighlights && peekedPlayerIsPeekable && peekedPlayerRosterEntry ? peekedPlayerRosterEntry.detectiveIds : [];
   const peekedExtraIds = showDetectiveHighlights && peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.toggledDetectiveIds || [] : [];
 
+  // strokesToRender: whichever board is actually "in view" right now --
+  // your own strokes normally, or the peeked player's live strokes while
+  // peeking (never both, since you're looking at one board at a time).
+  const strokesToRender = peekedPlayerId ? (peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.strokes || [] : []) : myStrokes;
+
   // The final set of detectives whose highlight is currently shown to
   // THIS client: mine (always), whatever I've clicked on beyond that,
   // and -- while peeking -- everything the peeked player currently has
@@ -561,6 +720,13 @@ export default function GameBoard({
   const showMrXPos = myRole === null ? isMrXTurn : iAmMrX;
 
   function handleStationClick(station) {
+    // While peeking a teammate's screen, the board is READ-ONLY -- you're
+    // looking at THEIR board, not yours, so a click here has no
+    // unambiguous meaning (whose piece would it move? whose highlight
+    // would it toggle?). Drawing is the one exception (see the pen/eraser
+    // handlers, which route around this function entirely via the SVG's
+    // own pointer handlers, gated separately on drawMode).
+    if (peekedPlayerId) return;
     // --- Route explorer v2: clicking a station where a PIECE currently
     // stands toggles that piece's highlight, independent of whose turn
     // it is -- available any time, exactly like the old explorer. This
@@ -808,6 +974,39 @@ export default function GameBoard({
                 Let teammates peek into my screen
               </label>
             </>
+          )}
+
+          {/* Freehand drawing -- pen/eraser/undo only, no color picker (a
+              single fixed graphite color for everyone, see styles.strokeColor
+              below), never visible to Mr.X. While peeking a teammate's
+              screen, these three buttons draw on THEIR board instead of
+              yours (see applyStrokeAction) -- the label reflects that. */}
+          {iAmDetective && (
+            <div style={styles.drawToolbar}>
+              <button
+                type="button"
+                style={{ ...styles.drawToolBtn, ...(drawMode === "pen" ? styles.drawToolBtnActive : {}) }}
+                onClick={() => setDrawMode(drawMode === "pen" ? null : "pen")}
+              >
+                ✏️ Pen
+              </button>
+              <button
+                type="button"
+                style={{ ...styles.drawToolBtn, ...(drawMode === "eraser" ? styles.drawToolBtnActive : {}) }}
+                onClick={() => setDrawMode(drawMode === "eraser" ? null : "eraser")}
+              >
+                🧹 Eraser
+              </button>
+              <button type="button" style={styles.drawToolBtn} onClick={undoLastStroke}>
+                ↩️ Undo
+              </button>
+              {!peekedPlayerId && lastRoundStrokes.length > 0 && (
+                <button type="button" style={styles.drawToolBtn} onClick={recallLastRoundStrokes}>
+                  🕓 Recall last round
+                </button>
+              )}
+              {peekedPlayerId && drawMode && <span style={styles.exploreHint}>Drawing on their board</span>}
+            </div>
           )}
 
           {/* Pass Turn moved here (previously sat at the very BOTTOM of
@@ -1140,10 +1339,12 @@ export default function GameBoard({
                 touchAction: "none",
               }}
               onWheel={handleWheel}
-              onMouseDown={handlePointerDown}
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={() => (dragState.current = null)}
+              onMouseDown={drawMode ? handleDrawPointerDown : handlePointerDown}
+              onMouseMove={drawMode ? handleDrawPointerMove : undefined}
+              onMouseUp={drawMode ? handleDrawPointerUp : undefined}
+              onTouchStart={drawMode ? handleDrawPointerDown : handleTouchStart}
+              onTouchMove={drawMode ? handleDrawPointerMove : handleTouchMove}
+              onTouchEnd={drawMode ? handleDrawPointerUp : () => (dragState.current = null)}
             >
               <defs>
                 <linearGradient id="riverGrad" x1="0" y1="0" x2="1" y2="1">
@@ -1652,6 +1853,26 @@ export default function GameBoard({
                       </>
                     );
                   })()}
+                </g>
+              )}
+              {/* Freehand drawing layer -- ALWAYS on top of everything
+                  else on the map, since it's an annotation over the
+                  board, not part of it. Never rendered for Mr.X (see
+                  iAmDetective gate). Shows whichever board is currently
+                  "in view": your own strokes normally, or the peeked
+                  player's strokes while peeking -- never both, matching
+                  the same board you're actually looking at. The
+                  in-progress stroke (liveStrokePoints) renders regardless
+                  of peek state, since that's immediate feedback for the
+                  hand currently drawing. */}
+              {iAmDetective && (
+                <g style={{ pointerEvents: "none" }}>
+                  {strokesToRender.map((s) => (
+                    <path key={s.id} d={pointsToPath(s.points)} fill="none" stroke={styles.strokeColor} strokeWidth={0.35} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
+                  ))}
+                  {liveStrokePoints && liveStrokePoints.length > 1 && (
+                    <path d={pointsToPath(liveStrokePoints)} fill="none" stroke={styles.strokeColor} strokeWidth={0.35} strokeLinecap="round" strokeLinejoin="round" opacity={0.6} />
+                  )}
                 </g>
               )}
             </svg>
@@ -2254,6 +2475,23 @@ export const styles = {
     fontSize: 12,
   },
   exploreLabel: { color: "#777" },
+  drawToolbar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+    padding: "4px 2px",
+  },
+  drawToolBtn: {
+    padding: "5px 10px",
+    borderRadius: 8,
+    border: "1.5px solid #ddd",
+    background: "#fff",
+    fontSize: 12.5,
+    cursor: "pointer",
+  },
+  drawToolBtnActive: { borderColor: "#4a4a45", background: "#f4f2ec", fontWeight: 700 },
+  strokeColor: "#4a4a45", // fixed graphite grey -- same for every player, see drawing-feature design comment above
   peekToggleRow: {
     display: "flex",
     alignItems: "center",

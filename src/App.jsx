@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { MAPS } from "./maps/index.js";
 import { detectiveLabel } from "./maps/mapSchema.js";
 import { applyMapOverride } from "./lib/useMapWithOverrides.js";
@@ -298,8 +298,14 @@ export default function App({ account, onLogout }) {
 
   const [mpToggledDetectiveIds, setMpToggledDetectiveIds] = useState([]); // this client's own EXTRA (non-own) route-explorer toggles, reported up from GameBoard so they can be broadcast via Presence
   const [mpPeekable, setMpPeekable] = useState(true); // this client's own "let teammates peek at my screen" preference, reported up from GameBoard
+  const [mpStrokes, setMpStrokes] = useState([]); // this client's own drawing strokes, reported up from GameBoard so they can be broadcast via Presence (for a peeking teammate)
+  // GameBoard registers its own stroke-applying function here on mount
+  // (see onRegisterRemoteStrokeHandler) -- a ref, not state, since this
+  // is a plain function handoff, not a value the rest of App.jsx reads or
+  // re-renders on.
+  const remoteStrokeHandlerRef = useRef(null);
 
-  const { onlinePlayerIds, isInactive, presenceState } = usePresence({
+  const { onlinePlayerIds, isInactive, presenceState, sendRemoteStroke } = usePresence({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     myPlayerId: mpPlayerId,
     myDisplayName: mpDisplayName,
@@ -307,6 +313,8 @@ export default function App({ account, onLogout }) {
     gracePeriodSeconds: 25, // TODO: read from admin config once wired through App-level state
     myToggledDetectiveIds: mpToggledDetectiveIds,
     myPeekable: mpPeekable,
+    myStrokes: mpStrokes,
+    onRemoteStroke: (payload) => remoteStrokeHandlerRef.current && remoteStrokeHandlerRef.current(payload),
   });
 
   useEffect(() => {
@@ -1070,8 +1078,11 @@ export default function App({ account, onLogout }) {
         bufferSecondsForBar={mpBufferSeconds}
         onExploreModeChange={setMpToggledDetectiveIds}
         onPeekableChange={setMpPeekable}
-        detectivePlayersRoster={detectivePlayersRoster}
+        onStrokesChange={setMpStrokes}
+        onRemoteDraw={(targetPlayerId, action) => sendRemoteStroke(targetPlayerId, action)}
+        onRegisterRemoteStrokeHandler={(handler) => (remoteStrokeHandlerRef.current = handler)}
         presenceState={presenceState}
+        detectivePlayersRoster={detectivePlayersRoster}
         myPlayerId={mpPlayerId}
         onDetectiveMove={(detId, to, mode) => supabaseStore.submitDetectiveMove(map, detId, to, mode)}
         onMrXMove={(to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(map, to, edgeMode, ticketUsed)}

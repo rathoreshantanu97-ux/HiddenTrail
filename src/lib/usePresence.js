@@ -27,7 +27,7 @@ import { supabase } from "./supabaseClient.js";
 // same as "actually disconnected," rather than sitting in a false
 // "still here" status indefinitely.
 // ---------------------------------------------------------------------------
-export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePeriodSeconds = 25, myToggledDetectiveIds = [], myPeekable = true }) {
+export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePeriodSeconds = 25, myToggledDetectiveIds = [], myPeekable = true, myStrokes = [], onRemoteStroke }) {
   const [onlinePlayerIds, setOnlinePlayerIds] = useState(new Set());
   // playerId -> their full tracked presence payload (displayName, role,
   // and now toggledDetectiveIds) -- exposed so consumers (like the "peek
@@ -45,6 +45,13 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
   const [, forceTick] = useState(0); // re-render periodically so grace-period expiry gets reflected in UI
   const channelRef = useRef(null);
   const backgroundTimeoutRef = useRef(null);
+  // Ref holding the LATEST onRemoteStroke callback -- the broadcast
+  // listener is attached once per channel (channel setup only re-runs on
+  // room/player/role changes, not every render), but GameBoard passes a
+  // fresh inline function each render, so the listener reads through this
+  // ref rather than closing over a stale copy.
+  const onRemoteStrokeRef = useRef(onRemoteStroke);
+  onRemoteStrokeRef.current = onRemoteStroke;
 
   useEffect(() => {
     if (!supabase || !roomId || !myPlayerId) return;
@@ -53,6 +60,18 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
       config: { presence: { key: myPlayerId } },
     });
     channelRef.current = channel;
+
+    // Peek-and-draw: a player peeking into MY screen can draw directly
+    // onto it (see GameBoard.jsx) -- this arrives here as a targeted
+    // broadcast event (NOT Presence state, since this is a one-off
+    // action, not "current status" to keep syncing). Only apply it if
+    // I'm actually the intended target -- broadcast is room-wide, not
+    // point-to-point, so every client in the room receives every event.
+    channel.on("broadcast", { event: "stroke" }, ({ payload }) => {
+      if (payload?.targetPlayerId === myPlayerId && onRemoteStrokeRef.current) {
+        onRemoteStrokeRef.current(payload);
+      }
+    });
 
     channel.on("presence", { event: "sync" }, () => {
       const state = channel.presenceState();
@@ -80,7 +99,7 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
 
     channel.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await channel.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable });
+        await channel.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable, strokes: myStrokes });
       }
     });
 
@@ -97,13 +116,13 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
   // changes, not on every explore-mode click).
   useEffect(() => {
     if (!channelRef.current) return;
-    channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable }).catch(() => {});
-    // Depend on the SERIALIZED array, not the array reference -- the
-    // caller reasonably passes a freshly-built array each render (e.g.
+    channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable, strokes: myStrokes }).catch(() => {});
+    // Depend on the SERIALIZED array/objects, not their references -- the
+    // caller reasonably passes freshly-built arrays each render (e.g.
     // Array.from(aSet)), which would otherwise re-track on every render
-    // even when the actual toggled set hasn't changed.
+    // even when nothing actually changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(myToggledDetectiveIds), myDisplayName, myRole, myPeekable]);
+  }, [JSON.stringify(myToggledDetectiveIds), myDisplayName, myRole, myPeekable, JSON.stringify(myStrokes)]);
 
   useEffect(() => {
     const id = setInterval(() => forceTick((t) => t + 1), 1000);
@@ -144,5 +163,15 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
     [onlinePlayerIds, gracePeriodSeconds]
   );
 
-  return { onlinePlayerIds, presenceState, isInactive };
+  // sendRemoteStroke -- fire a one-off draw action at a SPECIFIC other
+  // player (used while peeking their screen: your pen/eraser/undo
+  // actions land on THEIR board, not yours). A plain broadcast, not
+  // Presence state -- there's nothing to "currently be," it's a single
+  // event the target applies once and moves on.
+  const sendRemoteStroke = useCallback((targetPlayerId, action) => {
+    if (!channelRef.current) return;
+    channelRef.current.send({ type: "broadcast", event: "stroke", payload: { targetPlayerId, ...action } }).catch(() => {});
+  }, []);
+
+  return { onlinePlayerIds, presenceState, isInactive, sendRemoteStroke };
 }

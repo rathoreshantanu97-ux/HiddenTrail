@@ -149,7 +149,18 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
       .catch((e) => console.error("Failed to fetch timing config:", e));
     auth
       .getPublicConfig()
-      .then(setPublicConfig)
+      .then((cfg) => {
+        setPublicConfig(cfg);
+        // REGRESSION FIX: planning time used to be automatic (derived
+        // from the turn timer) -- splitting it into its own host field
+        // means a host who doesn't touch it now silently gets NO shared
+        // buffer at all, which is what actually happened in testing (Mr.X
+        // moves went straight to individual detective turns). Pre-fill a
+        // sensible default here so the buffer stays on by default, same
+        // as before -- a host now has to explicitly BLANK this field to
+        // opt OUT of a buffer, rather than opt in to get one.
+        setPlanningTimeSecondsState((prev) => (prev === null ? cfg.planningTimeMin : prev));
+      })
       .catch((e) => console.error("Failed to fetch public config:", e));
   }, []);
   const [isPublic, setIsPublic] = useState(false);

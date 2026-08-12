@@ -171,11 +171,15 @@ export default function GameBoard({
   const EDGE_MARGIN_TOP = EDGE_MARGIN_TOP_BY_MAP[map?.id] ?? EDGE_MARGIN_TOP_DEFAULT;
   const [pan, setPan] = useState({ x: -EDGE_MARGIN_OTHER, y: -EDGE_MARGIN_TOP });
   const [pendingMove, setPendingMove] = useState(null);
-  // extraToggledIds: OTHER detectives (not your own) this client has
-  // clicked on to add their reachable-station highlight to the board.
-  // Your OWN detectives are always shown by default (see
-  // defaultOwnDetectiveIds below) and never need to appear here.
-  const [extraToggledIds, setExtraToggledIds] = useState(() => new Set());
+  // toggledIds: the FULL set of detectives currently highlighted on this
+  // client's board -- own AND others', all equally togglable by clicking
+  // their token (see handleStationClick). Seeded with your own
+  // detectives once they're known (see the seeding effect below) so
+  // "shown by default" still holds without making own detectives a
+  // special un-toggleable case -- a real complaint with the earlier
+  // version, where clicking your own piece did nothing.
+  const [toggledIds, setToggledIds] = useState(() => new Set());
+  const seededOwnRef = React.useRef(false);
   const [mrxSelfExplore, setMrxSelfExplore] = useState(false); // Mr.X clicking his OWN token toggles his own reachable-station highlight -- no teammates to coordinate with, so this stays purely local, never broadcast
   const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
   const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
@@ -318,7 +322,7 @@ export default function GameBoard({
   }, [myStrokes]);
 
   function toggleDetectiveHighlight(detId) {
-    setExtraToggledIds((prev) => {
+    setToggledIds((prev) => {
       const next = new Set(prev);
       if (next.has(detId)) next.delete(detId);
       else next.add(detId);
@@ -326,14 +330,30 @@ export default function GameBoard({
     });
   }
 
-  // Report our own EXTRA toggles upward so App.jsx can broadcast them via
-  // Presence -- other players' "peek" views update live off this, and it
-  // correctly clears the moment we untoggle everything, so nothing lingers
-  // stale for others.
+  // Seed toggledIds with your own detectives ONCE they're known -- gives
+  // the "shown by default" behavior without making own detectives a
+  // special non-togglable case; after this one seed, it's entirely
+  // player-controlled (including deselecting your own).
   useEffect(() => {
-    onExploreModeChange && onExploreModeChange(Array.from(extraToggledIds));
+    if (seededOwnRef.current) return;
+    if (myRole === null && match.detectives.length > 0) {
+      setToggledIds(new Set(match.detectives.map((d) => d.id)));
+      seededOwnRef.current = true;
+    } else if (myOwnDetectives.length > 0) {
+      setToggledIds(new Set(myOwnDetectives.map((d) => d.id)));
+      seededOwnRef.current = true;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extraToggledIds]);
+  }, [myOwnDetectives.length, match.detectives.length, myRole]);
+
+  // Report our FULL toggled set upward so App.jsx can broadcast it via
+  // Presence -- other players' "peek" views mirror this exactly, and it
+  // correctly reflects the moment we untoggle anything (including our own
+  // detectives now), so nothing lingers stale for others.
+  useEffect(() => {
+    onExploreModeChange && onExploreModeChange(Array.from(toggledIds));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toggledIds]);
 
   // Report our own peek-privacy preference upward the same way -- default
   // ON (matches the old always-visible behavior), but a player can turn
@@ -645,43 +665,34 @@ export default function GameBoard({
     return reachable;
   }
 
-  // defaultOwnDetectiveIds: MY OWN detectives' highlights are always ON
-  // by default while it's appropriate for me to see them -- never
-  // require a click. Pass-and-play (myRole === null, one shared device)
-  // treats "own" as "every detective," since the same person plays the
-  // whole team -- but only while it ISN'T Mr.X's own private turn, to
-  // avoid handing Mr.X free intel about detective destinations on the
-  // same device.
+  // showDetectiveHighlights: whether explore highlights are appropriate
+  // for THIS client to see at all. Pass-and-play (myRole === null, one
+  // shared device) only while it ISN'T Mr.X's own private turn, to avoid
+  // handing Mr.X free intel about detective destinations on the same
+  // device.
   const showDetectiveHighlights = iAmDetective || isSpectator || (myRole === null && !isMrXTurn);
-  const defaultOwnDetectiveIds = showDetectiveHighlights
-    ? myRole === null
-      ? match.detectives.map((d) => d.id)
-      : myOwnDetectives.map((d) => d.id)
-    : [];
 
-  // The PEEKED player's own detectives aren't separately broadcast --
-  // they're fully deterministic from the roster App.jsx already builds
-  // from room roles, so we just recompute them locally the same way.
   // If the peeked player turns their privacy toggle off WHILE being
   // peeked, this immediately stops surfacing their data (presenceState
   // updates live) -- no separate "kick out the peeker" step needed.
   const peekedPlayerIsPeekable = presenceState[peekedPlayerId]?.peekable !== false;
-  const peekedPlayerRosterEntry = detectivePlayersRoster.find((p) => p.playerId === peekedPlayerId);
-  const peekedOwnIds = showDetectiveHighlights && peekedPlayerIsPeekable && peekedPlayerRosterEntry ? peekedPlayerRosterEntry.detectiveIds : [];
-  const peekedExtraIds = showDetectiveHighlights && peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.toggledDetectiveIds || [] : [];
 
   // strokesToRender: whichever board is actually "in view" right now --
   // your own strokes normally, or the peeked player's live strokes while
   // peeking (never both, since you're looking at one board at a time).
   const strokesToRender = peekedPlayerId ? (peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.strokes || [] : []) : myStrokes;
 
-  // The final set of detectives whose highlight is currently shown to
-  // THIS client: mine (always), whatever I've clicked on beyond that,
-  // and -- while peeking -- everything the peeked player currently has
-  // showing on THEIR screen too.
-  const highlightedDetectiveIds = showDetectiveHighlights
-    ? new Set([...defaultOwnDetectiveIds, ...extraToggledIds, ...peekedOwnIds, ...peekedExtraIds])
-    : new Set();
+  // The set of detectives currently highlighted on THIS client's board:
+  // your own full toggled set normally, or -- while peeking -- EXACTLY
+  // the peeked player's toggled set, REPLACING yours rather than merging
+  // with it. This is "look at their screen," not "look at both at once"
+  // -- merging was the source of the reported visual clutter (your own
+  // highlights stacking on top of theirs with no way to tell them apart).
+  const highlightedDetectiveIds = !showDetectiveHighlights
+    ? new Set()
+    : peekedPlayerId
+      ? new Set(peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.toggledDetectiveIds || [] : [])
+      : toggledIds;
 
   // reachableByDetectiveId: stationId -> [{detId, color}] for every
   // currently-highlighted detective that can reach it -- built once so
@@ -739,9 +750,12 @@ export default function GameBoard({
     const detOnStation = match.detectives.find((d) => d.pos === station);
     const mrxCaptureClickInProgress = isMrXTurn && isMyTurnToAct && !preThinkActive && (myRole === null || myRole === "mrx");
     if (detOnStation && !mrxCaptureClickInProgress) {
+      if (!showDetectiveHighlights) return; // not a detective-perspective viewer (e.g. Mr.X's own client)
       const isOwn = myRole === null || myOwnDetectives.some((d) => d.id === detOnStation.id);
-      if (isOwn) return; // your own detectives are ALWAYS shown by default -- nothing to toggle
-      if (!showDetectiveHighlights || !routeExplorerEnabled) return; // not a detective-perspective viewer, or admin has disabled cross-player exploring
+      // Your OWN detectives are always yours to show/hide, no admin gate
+      // needed -- it's your own information. Toggling a TEAMMATE's
+      // detective is the part the admin's explore toggle controls.
+      if (!isOwn && !routeExplorerEnabled) return;
       toggleDetectiveHighlight(detOnStation.id);
       return;
     }
@@ -915,12 +929,12 @@ export default function GameBoard({
           {extraHeaderContentBelow}
 
           {/* Route explorer v2: no separate mode-picker control anymore --
-              your own detectives' reachable stations are always shown by
-              default (see defaultOwnDetectiveIds), and clicking any OTHER
-              detective's token on the map toggles theirs on/off too. This
-              short hint replaces the old control row, so the mechanic is
-              still discoverable without cluttering the sidebar with
-              buttons. */}
+              your own detectives' reachable stations are shown by default
+              (seeded once, then fully toggle-controlled -- clicking any
+              detective's token, including your own, turns its highlight
+              on/off). This short hint replaces the old control row, so
+              the mechanic is still discoverable without cluttering the
+              sidebar with buttons. */}
           {iAmDetective && routeExplorerEnabled && match.detectives.some((d) => !myOwnDetectives.some((md) => md.id === d.id)) && (
             <div style={styles.exploreHint}>💡 Click any teammate's piece on the map to see their reachable stations too.</div>
           )}
@@ -1508,8 +1522,16 @@ export default function GameBoard({
                 // Every currently-highlighted detective that can reach
                 // THIS station (all-modes-at-once, ticket-aware -- see
                 // reachableByDetectiveId above), plus Mr.X's own
-                // self-explore highlight if he's toggled it on.
-                const reachingDetectives = reachableByDetectiveId.get(numId) || [];
+                // self-explore highlight if he's toggled it on. The
+                // active mover's OWN entry is dropped whenever this
+                // station is already one of their real legal moves
+                // (isLegal, below) -- that ring already shows the exact
+                // same information (and more precisely, ticket- and
+                // occupancy-checked), so keeping both was pure visual
+                // redundancy, not two different facts.
+                const reachingDetectives = (reachableByDetectiveId.get(numId) || []).filter(
+                  (rd) => !(isLegal && activeDetective && rd.detId === activeDetective.id && isMyTurnToAct && !preThinkActive)
+                );
                 const isMrxReachable = mrxReachable.has(numId);
                 // Whether THIS station is a highlighted detective's
                 // CURRENT position (its "origin" for the explore

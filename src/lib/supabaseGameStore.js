@@ -116,6 +116,17 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
         const seatColorOverrides = room?.seat_colors || {};
         const detectiveColors = DETECTIVE_COLORS.map((defaultColor, i) => seatColorOverrides[String(i)] || defaultColor);
 
+        // Same pattern for names -- only meaningful for maps that ship a
+        // character roster (map.characterNames, e.g. Westeros); other
+        // maps get `undefined`, which startGameRpc correctly omits
+        // entirely rather than sending an empty/null array. room.num_detectives
+        // (not map data) is the actual seat count for THIS room.
+        const seatNameOverrides = room?.seat_names || {};
+        const numDetectivesInRoom = room?.num_detectives || 0;
+        const detectiveNames = map.characterNames
+          ? Array.from({ length: numDetectivesInRoom }, (_, i) => seatNameOverrides[String(i)] || map.characterNames[i] || null)
+          : undefined;
+
         await api.startGameRpc({
           roomId,
           callerPlayerId: myPlayerId,
@@ -123,6 +134,7 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
           mrxStartingTickets: ticketCounts.mrx,
           detectiveStartingTickets: ticketCounts.detective,
           detectiveColors,
+          detectiveNames,
           maxRounds: roundsAndReveal?.totalRounds,
           revealRounds: roundsAndReveal?.revealRounds,
         });

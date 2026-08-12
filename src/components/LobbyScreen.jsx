@@ -61,6 +61,12 @@ export default function LobbyScreen({
   const [seatColors, setSeatColors] = useState({});
   const [colorPicking, setColorPicking] = useState(null); // detective id (number) currently being set, or null
   const [colorPickErr, setColorPickErr] = useState("");
+  // seatNames: room.seat_names, same shape/reasoning as seatColors above
+  // but for character-name picks on maps with a fixed roster (e.g.
+  // Westeros) -- only ever rendered/used when map.characterNames exists.
+  const [seatNames, setSeatNames] = useState({});
+  const [namePicking, setNamePicking] = useState(null);
+  const [namePickErr, setNamePickErr] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -84,6 +90,7 @@ export default function LobbyScreen({
       const room = await api.fetchRoom(roomId);
       setHostPlayerId(room?.host_player_id ?? null);
       setSeatColors(room?.seat_colors || {});
+      setSeatNames(room?.seat_names || {});
       const activeIds = await api.getActivePlayerIds(roomId);
       setActivePlayerIds(new Set(activeIds));
       if (room?.host_player_id) {
@@ -193,6 +200,19 @@ export default function LobbyScreen({
       setColorPickErr(e.message || "Failed to set color.");
     } finally {
       setColorPicking(null);
+    }
+  }
+
+  async function handlePickName(detectiveId, name) {
+    setNamePicking(detectiveId);
+    setNamePickErr("");
+    try {
+      await api.setSeatName({ roomId, callerPlayerId: myPlayerId, detectiveId, name, mapCharacterNames: map?.characterNames || null });
+      await refresh();
+    } catch (e) {
+      setNamePickErr(e.message || "Failed to set character name.");
+    } finally {
+      setNamePicking(null);
     }
   }
 
@@ -400,11 +420,58 @@ export default function LobbyScreen({
                     })}
                   </div>
                 )}
+                {/* Character-name picker -- only for maps that ship a fixed
+                    roster (map.characterNames, e.g. Westeros). Mirrors the
+                    color picker's "effective value = explicit pick or
+                    default" / "block collisions with every OTHER seat's
+                    effective value" logic exactly, just keyed by name
+                    instead of color and rendered as a dropdown per the
+                    explicit request (a full list of names doesn't fit as
+                    inline buttons the way 8 color swatches did). */}
+                {p && detectiveIds.length > 0 && map?.characterNames && map.characterNames.length > 0 && (
+                  <div style={styles.colorPickerRow} onClick={(e) => e.stopPropagation()}>
+                    {detectiveIds.map((detId) => {
+                      const currentName = seatNames[String(detId)] || map.characterNames[detId] || `Detective ${detId + 1}`;
+                      const takenNames = new Set();
+                      for (let d = 0; d < numDetectives; d++) {
+                        if (d === detId) continue;
+                        takenNames.add(seatNames[String(d)] || map.characterNames[d]);
+                      }
+                      const disabled = !isMine || namePicking !== null;
+                      return (
+                        <div key={detId} style={styles.colorPickerGroup}>
+                          {detectiveIds.length > 1 && <span style={styles.colorSwatchLabel}>D{detId + 1}</span>}
+                          {isMine ? (
+                            <select
+                              value={currentName}
+                              disabled={disabled}
+                              onChange={(e) => handlePickName(detId, e.target.value)}
+                              style={styles.colorSelect}
+                            >
+                              {map.characterNames.map((charName) => {
+                                const isTaken = takenNames.has(charName) && charName !== currentName;
+                                return (
+                                  <option key={charName} value={charName} disabled={isTaken}>
+                                    {charName}
+                                    {isTaken ? " (taken)" : ""}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          ) : (
+                            <span style={styles.colorReadOnlyLabel}>{currentName}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
         {colorPickErr && <div style={styles.errText}>{colorPickErr}</div>}
+        {namePickErr && <div style={styles.errText}>{namePickErr}</div>}
 
         {err && <div style={styles.errText}>{err}</div>}
 

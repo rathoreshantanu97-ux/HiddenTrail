@@ -73,6 +73,13 @@ create table if not exists rooms (
   -- supabaseGameStore.js) -- this column is purely an OVERRIDE layer,
   -- same pattern as map_settings' overrides, not a replacement.
   seat_colors jsonb,
+  -- seat_names: { "0": "Jon Snow", ... } -- same seat-indexed override
+  -- pattern as seat_colors, for maps that ship a fixed character
+  -- roster (map.characterNames, e.g. Westeros) -- lets a player pick
+  -- WHICH character their detective seat plays as in the lobby, same
+  -- way they pick a color. Only meaningful for maps with characterNames
+  -- defined; ignored entirely for maps without one.
+  seat_names jsonb,
   created_at timestamptz not null default now()
 );
 -- IMPORTANT: `create table if not exists` above does NOTHING if the table
@@ -98,6 +105,7 @@ alter table rooms add column if not exists round_scaling_ratio_override numeric;
 alter table rooms add column if not exists is_public boolean not null default false;
 alter table rooms add column if not exists room_name text;
 alter table rooms add column if not exists seat_colors jsonb;
+alter table rooms add column if not exists seat_names jsonb;
 
 -- -----------------------------------------------------------------------------
 -- PLAYERS — one row per connected participant (detective slot or Mr. X).

@@ -622,7 +622,15 @@ create or replace function start_game(
   p_detective_starting_tickets jsonb,
   p_detective_colors text[],
   p_max_rounds int default 22,
-  p_reveal_rounds int[] default array[3,8,13,18,22]
+  p_reveal_rounds int[] default array[3,8,13,18,22],
+  -- p_detective_names: the FINAL per-seat character name array (lobby
+  -- picks already merged with each map's default roster on the client,
+  -- same "resolve overrides into a plain array before calling this RPC"
+  -- pattern as p_detective_colors) -- null for maps with no character
+  -- roster, in which case each detective's stored 'name' key is null
+  -- and detectiveName() falls back to the static map/generic label the
+  -- same way it always has.
+  p_detective_names text[] default null
 ) returns void
 language plpgsql
 security definer
@@ -699,6 +707,7 @@ begin
     v_detectives := v_detectives || jsonb_build_array(jsonb_build_object(
       'id', i,
       'color', p_detective_colors[i + 1],
+      'name', case when p_detective_names is not null then p_detective_names[i + 1] else null end,
       'pos', v_picked[i + 2],
       'startPos', v_picked[i + 2],
       'tickets', p_detective_starting_tickets,
@@ -3467,7 +3476,101 @@ begin
   end if;
 end;
 $$;
-grant execute on function update_room_settings(uuid, uuid, text, int, int, int, int) to anon, authenticated;
+
+
+-- -----------------------------------------------------------------------------
+-- set_seat_name -- lets a player pick WHICH character their detective
+-- seat plays as, for maps that ship a fixed character roster
+-- (map.characterNames, e.g. Westeros's "Jon Snow"/"Arya Stark"/...) --
+-- mirrors set_seat_color exactly (seat-indexed, ownership-checked,
+-- lobby-only, blocks collisions with every OTHER seat's EFFECTIVE name
+-- whether explicitly picked or still on its default).
+--
+-- Unlike colors, the valid-name list and default-per-seat assignment
+-- are NOT a fixed global constant -- they're per-MAP data
+-- (map.characterNames), and map data lives client-side only (see the
+-- same reasoning on p_map_station_count in create_room). So the caller
+-- passes p_map_character_names -- the full roster for whichever map
+-- this room is using -- on every call, and this function validates
+-- against THAT rather than a hardcoded array. p_map_character_names =
+-- null (a map with no roster) means "no valid names to check against",
+-- in which case any non-empty name is accepted after sanitizing --
+-- this keeps the function generically usable for a future non-Westeros
+-- themed map without a code change here.
+-- -----------------------------------------------------------------------------
+drop function if exists set_seat_name(uuid, uuid, int, text, text[]);
+create or replace function set_seat_name(
+  p_room_id uuid,
+  p_caller_player_id uuid,
+  p_detective_id int,
+  p_name text default null,
+  p_map_character_names text[] default null
+) returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_room rooms%rowtype;
+  v_owns_seat boolean;
+  v_clean_name text;
+  v_i int;
+  v_effective_name text;
+  v_default_name text;
+begin
+  select * into v_room from rooms r where r.id = p_room_id for update;
+  if v_room.id is null then raise exception 'Room not found'; end if;
+  if v_room.status <> 'lobby' then
+    raise exception 'Character names can only be changed before the game starts';
+  end if;
+  if p_detective_id < 0 or p_detective_id >= v_room.num_detectives then
+    raise exception 'Invalid detective seat: %', p_detective_id;
+  end if;
+
+  select exists(
+    select 1 from players p, unnest(string_to_array(p.role, ',')) as seat(d)
+    where p.room_id = p_room_id and p.id = p_caller_player_id and seat.d = 'd' || p_detective_id
+  ) into v_owns_seat;
+  if not v_owns_seat then
+    raise exception 'You do not control detective seat %', p_detective_id;
+  end if;
+
+  if p_name is not null then
+    -- Same trim/strip-control-chars/length-cap pattern as every other
+    -- admin/host-editable free-text field in this project (see
+    -- set_map_visual_overrides).
+    v_clean_name := left(regexp_replace(trim(p_name), '[\r\n\t]', ' ', 'g'), 40);
+    if v_clean_name = '' then
+      raise exception 'Character name cannot be empty';
+    end if;
+    if p_map_character_names is not null and array_length(p_map_character_names, 1) > 0
+       and not (v_clean_name = any(p_map_character_names)) then
+      raise exception 'Invalid character name for this map: %', v_clean_name;
+    end if;
+
+    for v_i in 0 .. (v_room.num_detectives - 1) loop
+      if v_i <> p_detective_id then
+        v_default_name := case
+          when p_map_character_names is not null and array_length(p_map_character_names, 1) > v_i
+            then p_map_character_names[v_i + 1]
+          else null
+        end;
+        v_effective_name := coalesce(v_room.seat_names ->> v_i::text, v_default_name);
+        if v_effective_name is not null and v_effective_name = v_clean_name then
+          raise exception 'That character is already taken by detective seat %', v_i;
+        end if;
+      end if;
+    end loop;
+
+    update rooms
+    set seat_names = coalesce(seat_names, '{}'::jsonb) || jsonb_build_object(p_detective_id::text, v_clean_name)
+    where id = p_room_id;
+  else
+    update rooms
+    set seat_names = coalesce(seat_names, '{}'::jsonb) - p_detective_id::text
+    where id = p_room_id;
+  end if;
+end;
+$$;
 
 
 -- -----------------------------------------------------------------------------

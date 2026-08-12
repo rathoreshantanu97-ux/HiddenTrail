@@ -98,6 +98,7 @@ export async function startGameRpc({
   detectiveColors,
   maxRounds,
   revealRounds,
+  detectiveNames,
 }) {
   const args = {
     p_room_id: roomId,
@@ -107,6 +108,9 @@ export async function startGameRpc({
     p_detective_starting_tickets: detectiveStartingTickets,
     p_detective_colors: detectiveColors,
   };
+  // Same omit-rather-than-null reasoning as maxRounds/revealRounds below
+  // -- only send it when there's actually a roster to send.
+  if (detectiveNames != null) args.p_detective_names = detectiveNames;
   // Only include these when actually provided -- explicitly passing null
   // would OVERRIDE the SQL function's defaults (22 / [3,8,13,18,22])
   // with null, not fall back to them; Postgres only applies a parameter
@@ -246,6 +250,23 @@ export async function setSeatColor({ roomId, callerPlayerId, detectiveId, color 
     p_caller_player_id: callerPlayerId,
     p_detective_id: detectiveId,
     p_color: color ?? null,
+  });
+}
+
+// setSeatName -- pass name: null to clear a seat's override back to its
+// default map.characterNames[seatIndex] assignment. mapCharacterNames
+// is the FULL roster for whichever map this room uses -- the server
+// can't look this up itself (map data is client-side only), so it's
+// passed on every call for validation/default-collision checking, same
+// reasoning as p_map_station_count elsewhere. See set_seat_name in
+// functions.sql for the full validation.
+export async function setSeatName({ roomId, callerPlayerId, detectiveId, name, mapCharacterNames }) {
+  await callRpc("set_seat_name", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_detective_id: detectiveId,
+    p_name: name ?? null,
+    p_map_character_names: mapCharacterNames ?? null,
   });
 }
 

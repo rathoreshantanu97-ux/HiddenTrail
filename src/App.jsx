@@ -793,6 +793,13 @@ export default function App({ account, onLogout }) {
     // exception here crashes the entire React render tree, producing
     // exactly a blank/black screen. Confirmed via a direct Node.js test
     // before fixing.
+    // MOVED HERE for the same reason detectivePlayerNames was moved here
+    // (see comment above) -- detectiveName below now also reads `match`,
+    // so it must be declared before detectiveName, not after (the old
+    // location, further down past several early-returns, would be a
+    // repeat of the exact temporal-dead-zone crash already fixed once).
+    const match = supabaseStore.match;
+
     const detectivePlayerNames = {};
     for (const p of mpPlayersList) {
       // Defensive: p.role should always be a real string ("mrx" or a
@@ -812,17 +819,26 @@ export default function App({ account, onLogout }) {
 
     // detectiveName precedence, per explicit decision: on maps with a
     // themed character roster (e.g. Westeros -- Jon Snow, Arya Stark),
-    // ALWAYS show the character name, even when a real player display
-    // name is also known -- the character roster is a deliberate
-    // role-play feature for those maps, not just a fallback label. On
-    // maps with no themed roster, use the real player's entered display
-    // name when known (this is the actual fix for the request: turn
-    // banners and other detectiveName() call sites previously only ever
-    // showed "Detective N", never the name a player actually typed in),
-    // falling back to "Detective N" only if neither is available (e.g.
-    // player data hasn't loaded yet).
+    // ALWAYS show a character name, even when a real player display name
+    // is also known -- the character roster is a deliberate role-play
+    // feature for those maps, not just a fallback label. On maps with no
+    // themed roster, use the real player's entered display name when
+    // known, falling back to "Detective N" only if neither is available.
+    //
+    // WITHIN "show a character name", the actual name shown now prefers
+    // match.detectives[id].name -- the per-seat character PICKED in the
+    // lobby (see LobbyScreen's character picker / set_seat_name), baked
+    // into game state at start_game time -- over map.characterNames[id]
+    // (that map's static default roster order). This is the actual fix
+    // for the new lobby character picker: without this, a player could
+    // pick "Arya Stark" for their seat in the lobby and still see the
+    // OLD default name in-game, since the static map array never
+    // reflected what was actually chosen.
     const detectiveName = (id) =>
-      (map.characterNames && map.characterNames[id]) || detectivePlayerNames[id] || detectiveLabel(map, id + 1);
+      match?.detectives?.[id]?.name ||
+      (map.characterNames && map.characterNames[id]) ||
+      detectivePlayerNames[id] ||
+      detectiveLabel(map, id + 1);
 
     if (mpRoomNotFound) {
       return (
@@ -861,7 +877,6 @@ export default function App({ account, onLogout }) {
       );
     }
 
-    const match = supabaseStore.match;
     if (!match) {
       return (
         <LoadingOrDeadRoom

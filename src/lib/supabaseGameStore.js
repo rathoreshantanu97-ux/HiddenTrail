@@ -162,11 +162,28 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     [roomId, myPlayerId, myPlayerSecret, refreshMatch]
   );
 
-  const passTurn = useCallback(
-    async (actor) => {
+  // passMrxTurn -- mrx-only (see supabaseApi.js's own comment). Used for
+  // both the manual "Pass Turn" button (Mr.X side) and useTurnTimer's
+  // auto-fallback when Mr.X genuinely has zero legal moves left.
+  const passMrxTurn = useCallback(async () => {
+    if (!roomId || !myPlayerId) return;
+    try {
+      await api.passMrxTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
+      await refreshMatch();
+    } catch (e) {
+      setError(e.message);
+      throw e;
+    }
+  }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
+
+  // passDetectiveTurn -- a detective marks themselves done for this
+  // round's acting phase without moving (zero legal moves, or simply
+  // choosing not to act).
+  const passDetectiveTurn = useCallback(
+    async (detId) => {
       if (!roomId || !myPlayerId) return;
       try {
-        await api.passTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, actor });
+        await api.passDetectiveTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, detId });
         await refreshMatch();
       } catch (e) {
         setError(e.message);
@@ -201,6 +218,31 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     }
   }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
 
+  const beginActingPhase = useCallback(async () => {
+    if (!roomId || !myPlayerId) return;
+    try {
+      await api.beginActingPhase({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
+      await refreshMatch();
+    } catch (e) {
+      // Deliberately not surfaced via setError -- this races benignly
+      // (e.g. two ready detectives both trigger it, or the planning
+      // window already ended naturally a moment earlier) and isn't worth
+      // showing the player an error banner for a no-op.
+      console.error("beginActingPhase failed:", e);
+    }
+  }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
+
+  const forceEndActingPhase = useCallback(async () => {
+    if (!roomId || !myPlayerId) return;
+    try {
+      await api.forceEndActingPhase({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
+      await refreshMatch();
+    } catch (e) {
+      // Same reasoning as beginActingPhase -- benign races, not worth an error banner.
+      console.error("forceEndActingPhase failed:", e);
+    }
+  }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
+
   // No-op: online multiplayer has no "pass the device" handoff screen --
   // each player has their own device, so there's no local phase
   // transition to trigger the way localGameStore's beginTurnScreen() does.
@@ -219,7 +261,10 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     submitDetectiveMove,
     submitMrXMove,
     activateDoubleMove,
-    passTurn,
+    passMrxTurn,
+    passDetectiveTurn,
+    beginActingPhase,
+    forceEndActingPhase,
     beginTurnScreen,
     resetToSetup,
   };

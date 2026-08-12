@@ -438,14 +438,13 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
             return (
               <div style={styles.timerSchedulePreview}>
                 <div style={styles.timerSchedulePreviewTitle}>How this plays out each round</div>
-                <div>Mr. X's turn: up to {schedule.mrxSeconds}s to move</div>
+                <div>1. Mr. X's turn: up to {schedule.mrxSeconds}s to move</div>
                 {schedule.bufferSeconds ? (
-                  <div>Detectives' planning time (shared, right after Mr. X moves): up to {schedule.bufferSeconds}s — no one can move yet, but everyone can preview routes</div>
+                  <div>2. Detectives' shared planning time: up to {schedule.bufferSeconds}s — no one can move yet, but everyone can preview routes and discuss</div>
                 ) : (
-                  <div>No shared planning window — detectives go straight to their own turn to act.</div>
+                  <div>2. No shared planning window — detectives go straight to the acting phase.</div>
                 )}
-                <div>Each detective's turn to act: up to {schedule.actSeconds}s</div>
-                <div>A player controlling more than one detective: +{schedule.extraSeatSeconds}s for each detective beyond their first, that same round</div>
+                <div>3. Detectives' acting phase: up to {schedule.actSeconds}s, shared by the WHOLE team — every detective may move independently, in any order, as soon as this phase opens (no more waiting for teammates to go one at a time). A player controlling several detectives simply moves each of theirs within this same window.</div>
               </div>
             );
           })()}

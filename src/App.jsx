@@ -280,20 +280,26 @@ export default function App({ account, onLogout }) {
     turnTimerSeconds: mpTurnTimerSeconds,
     phaseLabel: mpPhaseLabel,
     preThinkActive: mpPreThinkActive,
+    actingActive: mpActingActive,
     mrxSeconds: mpMrxSeconds,
     bufferSeconds: mpBufferSeconds,
+    actSeconds: mpActSeconds,
   } = useTurnTimer({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     map: getEffectiveMap(liveMapId),
     match: supabaseStore.match,
-    players: mpPlayersList,
-    onDetectiveMove: (detId, to, mode) => supabaseStore.submitDetectiveMove(getEffectiveMap(liveMapId), detId, to, mode),
     onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(getEffectiveMap(liveMapId), to, edgeMode, ticketUsed),
-    // BUG FIX: without this, a player whose timer expired with genuinely
-    // zero legal moves left the game stalled forever (see useTurnTimer.js
-    // for the full reasoning) -- wired to the same passTurn the manual
-    // "Pass Turn" button already uses.
-    onPassTurn: (actor) => supabaseStore.passTurn(actor),
+    // BUG FIX (unchanged reasoning from before): without this, Mr.X's
+    // timer expiring with genuinely zero legal moves left the game
+    // stalled forever -- wired to the same passMrxTurn the manual "Pass
+    // Turn" button already uses.
+    onPassMrxTurn: () => supabaseStore.passMrxTurn(),
+    // NEW for the 3-phase model: the planning window's own natural
+    // expiry now calls the exact same RPC as the team's "ready" button
+    // (see GameBoard.jsx), and the acting window's expiry hands control
+    // back to Mr.X, leaving any un-acted detectives in place.
+    onBeginActingPhase: () => supabaseStore.beginActingPhase(),
+    onForceEndActingPhase: () => supabaseStore.forceEndActingPhase(),
   });
 
   const [mpToggledDetectiveIds, setMpToggledDetectiveIds] = useState([]); // this client's own EXTRA (non-own) route-explorer toggles, reported up from GameBoard so they can be broadcast via Presence
@@ -1075,8 +1081,12 @@ export default function App({ account, onLogout }) {
         turnTimerSeconds={mpTurnTimerSeconds}
         timerPhase={mpPhaseLabel}
         preThinkActive={mpPreThinkActive}
+        actingActive={mpActingActive}
         mrxSecondsForBar={mpMrxSeconds}
         bufferSecondsForBar={mpBufferSeconds}
+        actSecondsForBar={mpActSeconds}
+        roundPhase={supabaseStore.match?.roundPhase}
+        detectivesActed={supabaseStore.match?.detectivesActed}
         onExploreModeChange={setMpToggledDetectiveIds}
         onPeekableChange={setMpPeekable}
         onStrokesChange={setMpStrokes}
@@ -1088,7 +1098,9 @@ export default function App({ account, onLogout }) {
         onDetectiveMove={(detId, to, mode) => supabaseStore.submitDetectiveMove(map, detId, to, mode)}
         onMrXMove={(to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => supabaseStore.activateDoubleMove()}
-        onPassTurn={(actor) => supabaseStore.passTurn(actor)}
+        onPassMrxTurn={() => supabaseStore.passMrxTurn()}
+        onPassDetectiveTurn={(detId) => supabaseStore.passDetectiveTurn(detId)}
+        onBeginActingPhase={() => supabaseStore.beginActingPhase()}
         extraHeaderContent={
           <>
             <RulebookButton compact onClick={() => setShowRulebook(true)} />

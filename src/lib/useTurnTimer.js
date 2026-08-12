@@ -1,56 +1,48 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import * as api from "./supabaseApi.js";
 import * as auth from "./accessControlApi.js";
-import { currentActor, validMovesFor, occupiedByDetective } from "./gameEngine.js";
-import { computeTurnSchedule, actSecondsForSeatIndex } from "./turnSchedule.js";
+import { validMovesFor } from "./gameEngine.js";
+import { computeTurnSchedule } from "./turnSchedule.js";
 
 // ---------------------------------------------------------------------------
 // useTurnTimer — for multiplayer games with a per-room turn timer set.
-// Three responsibilities:
-//   1. Compute the LIVE countdown (seconds remaining) AND which phase the
-//      game is currently in (buffer / mrx / detective), shown to every
-//      player regardless of whose turn it is.
-//   2. Detect when the current turn has genuinely expired and, if so,
-//      submit a RANDOM legal move on the active player's behalf.
-//   3. Expose `preThinkActive` so GameBoard.jsx can block move submission
-//      (while still allowing the existing explore/huddle preview system)
-//      during the shared pre-think buffer.
-//
-// SCHEDULE: see turnSchedule.js for the full reasoning. In short, the
-// host sets TWO independent numbers (turn_timer_seconds = the act window,
-// planning_time_seconds = the shared buffer), which become:
-//   - Mr. X's own turn window (mrxSeconds, admin ratio OF THE BUFFER, clamped)
-//   - a ONE-TIME shared pre-think buffer, prepended to the FIRST
-//     detective seat's turn only (right after Mr. X moves) -- during
-//     this window nobody can move, and no auto-move fallback can fire
-//   - each detective seat's own act window, shorter for every seat past
-//     a given player's FIRST seat this round (seatOwnership below)
-//
-// SEAT OWNERSHIP: knowing "is this the 1st or 2nd seat THIS PLAYER is
-// moving this round" requires knowing which player controls which seat,
-// not just the local viewer's own role -- every client running this hook
-// needs to compute the IDENTICAL duration for whatever seat is currently
-// active (since any client can submit the auto-move fallback). `players`
-// (passed in, already polled by App.jsx for presence/inactivity checks --
-// reused here rather than adding a second poll) supplies this: each row's
-// `role` is a comma-separated seat list like "d0,d1".
+// THREE-PHASE MODEL (mrx -> planning -> acting), replacing the old
+// per-seat sequential walk:
+//   - 'mrx': Mr.X's own turn, unchanged in spirit -- single actor, auto-
+//     random-move fallback on expiry, same as before.
+//   - 'planning': the shared buffer, unchanged in spirit -- nobody may
+//     move yet. On expiry (or when the team signals ready early, see
+//     GameBoard.jsx), any connected client calls begin_acting_phase.
+//   - 'acting': NEW -- every detective may move independently, in any
+//     order, as soon as this phase starts, for as long as the ONE shared
+//     acting window lasts. There's no more "whose turn is it" for
+//     detectives, so there's no more per-seat auto-move fallback either
+//     -- on expiry, any connected client calls force_end_acting_phase,
+//     which simply leaves whichever detectives never moved in place and
+//     hands control back to Mr.X. This is actually simpler than the old
+//     per-seat model, not just different: no seat-ownership bookkeeping
+//     needed anymore (the old seatIndexWithinPlayer/extraSeatSeconds
+//     machinery is gone entirely -- one shared clock for the whole team).
 //
 // IMPORTANT ARCHITECTURAL NOTE (unchanged from before): the server has NO
-// independent knowledge of the map's graph -- this hook has ANY currently-
-// connected client compute the random move locally and submit it through
-// the EXACT SAME move RPCs a normal move would use, so the server's own
-// validation still fully applies. Multiple clients detecting the same
-// expiry simultaneously is safe -- only the first RPC to actually land
-// succeeds, others harmlessly fail their turn-order check.
+// independent knowledge of the map's graph -- for Mr.X's own auto-move
+// fallback, this hook has ANY currently-connected client compute the
+// random move locally and submit it through the EXACT SAME move RPC a
+// normal move would use, so the server's own validation still fully
+// applies. Multiple clients detecting the same expiry simultaneously is
+// safe -- only the first RPC to actually land succeeds, the RPCs used for
+// the planning->acting and acting->mrx transitions (begin_acting_phase,
+// force_end_acting_phase) are BOTH explicitly written as idempotent no-ops
+// if the phase has already moved on by the time they run.
 // ---------------------------------------------------------------------------
-export function useTurnTimer({ roomId, map, match, players, onDetectiveMove, onMrXMove, onPassTurn }) {
+export function useTurnTimer({ roomId, myPlayerId, myPlayerSecret, map, match, onMrXMove, onPassMrxTurn, onBeginActingPhase, onForceEndActingPhase }) {
   const [actSeconds, setActSeconds] = useState(null);
   const [bufferSecondsInput, setBufferSecondsInput] = useState(null); // the host's OWN planning-time number (room.planning_time_seconds), before ratio/bounds are applied
   const [ratios, setRatios] = useState(null);
   const [bounds, setBounds] = useState(null);
   const [secondsRemaining, setSecondsRemaining] = useState(null);
-  const [phaseLabel, setPhaseLabel] = useState(null); // "buffer" | "mrx" | "detective" | null
-  const attemptedForRef = useRef(null); // guards against submitting more than once for the same turn+phase
+  const [phaseLabel, setPhaseLabel] = useState(null); // "planning" | "mrx" | "acting" | null
+  const attemptedForRef = useRef(null); // guards against submitting more than once for the same phase
 
   useEffect(() => {
     if (!roomId) return;
@@ -80,150 +72,112 @@ export function useTurnTimer({ roomId, map, match, players, onDetectiveMove, onM
     [actSeconds, bufferSecondsInput, ratios, bounds]
   );
 
-  // seatIndexWithinPlayer -- for each detective seat in turn_order, its
-  // 0-based ordinal among THAT SEAT'S OWN player's seats, walked in
-  // turn_order's own sequence. Recomputed only when turnOrder or the
-  // players list itself changes (seat ownership doesn't change mid-game
-  // outside a takeover, which already goes through its own reassignment
-  // flow and will simply update `players`, naturally recomputing this).
-  const seatIndexWithinPlayer = useMemo(() => {
-    if (!match?.turnOrder || !players || players.length === 0) return {};
-    const seatToPlayer = {};
-    for (const p of players) {
-      for (const seat of (p.role || "").split(",")) {
-        if (seat && seat !== "mrx") seatToPlayer[seat] = p.id;
-      }
-    }
-    const seenCountByPlayer = {};
-    const result = {};
-    for (const seat of match.turnOrder) {
-      if (seat === "mrx") continue;
-      const pid = seatToPlayer[seat];
-      const idx = seenCountByPlayer[pid] || 0;
-      result[seat] = idx;
-      seenCountByPlayer[pid] = idx + 1;
-    }
-    return result;
-  }, [match?.turnOrder, players]);
-
   useEffect(() => {
-    if (!schedule || !match?.turnStartedAt) {
+    if (!schedule || !match?.roundPhase) {
       setSecondsRemaining(null);
       setPhaseLabel(null);
       return;
     }
 
-    // Reset the "already attempted an auto-move" guard whenever the turn
-    // genuinely changes -- otherwise a stale guard from a PREVIOUS turn
-    // could suppress a legitimate auto-move on a later one. Keyed on
-    // BOTH turnStartedAt and detectivePhaseStartedAt so a fresh buffer
-    // (which doesn't change turnStartedAt on later seats) still gets its
-    // own guard state where relevant.
-    const guardKey = `${match.turnStartedAt}|${match.detectivePhaseStartedAt || ""}`;
+    // Reset the "already attempted an auto-transition" guard whenever the
+    // phase genuinely changes, keyed on whichever timestamp anchors the
+    // CURRENT phase -- so a stale guard from a previous phase can never
+    // suppress a legitimate one on a later phase.
+    const anchor =
+      match.roundPhase === "mrx" ? match.turnStartedAt : match.roundPhase === "planning" ? match.detectivePhaseStartedAt : match.actingPhaseStartedAt;
+    const guardKey = `${match.roundPhase}|${anchor || ""}`;
     if (attemptedForRef.current !== guardKey) {
       attemptedForRef.current = null;
     }
 
-    const actor = currentActor(match);
-    const isMrx = actor === "mrx";
-    const firstDetectiveSeat = match.turnOrder?.[1];
-    const isFirstDetectiveSeat = !isMrx && actor === firstDetectiveSeat;
-
-    const tryExpire = (remaining) => {
+    const tryExpire = (remaining, action) => {
       if (remaining <= 0 && attemptedForRef.current !== guardKey && match.phase === "playing") {
-        attemptedForRef.current = guardKey; // mark BEFORE attempting, so overlapping ticks don't double-submit
-        submitRandomMove();
+        attemptedForRef.current = guardKey; // mark BEFORE attempting, so overlapping ticks don't double-fire
+        action();
       }
     };
 
     const tick = () => {
       const now = Date.now();
 
-      if (isMrx) {
+      if (match.roundPhase === "mrx") {
+        if (!match.turnStartedAt) return;
         const elapsed = (now - new Date(match.turnStartedAt).getTime()) / 1000;
         const remaining = Math.max(0, Math.ceil(schedule.mrxSeconds - elapsed));
         setSecondsRemaining(remaining);
         setPhaseLabel("mrx");
-        tryExpire(remaining);
+        tryExpire(remaining, submitRandomMrxMove);
         return;
       }
 
-      const seatIdx = seatIndexWithinPlayer[actor] ?? 0;
-      const actDuration = actSecondsForSeatIndex(schedule, seatIdx);
-
-      if (isFirstDetectiveSeat && match.detectivePhaseStartedAt && schedule.bufferSeconds) {
-        // The shared pre-think buffer is anchored on detectivePhaseStartedAt
-        // (stamped server-side exactly once per round, on the mrx ->
-        // first-detective-seat transition) rather than turnStartedAt --
-        // those two values are equal right when the buffer starts, but
-        // the buffer must NOT reset if this same seat's turn_started_at
-        // ever gets touched again for an unrelated reason.
-        const sinceBufferStart = (now - new Date(match.detectivePhaseStartedAt).getTime()) / 1000;
-        if (sinceBufferStart < schedule.bufferSeconds) {
-          setSecondsRemaining(Math.max(0, Math.ceil(schedule.bufferSeconds - sinceBufferStart)));
-          setPhaseLabel("buffer");
-          return; // nobody can move yet -- no expiry/auto-move during the buffer
+      if (match.roundPhase === "planning") {
+        if (!schedule.bufferSeconds) {
+          // No planning window configured for this room -- begin_acting_phase
+          // already gets called immediately server-side in that case is NOT
+          // true (the server still parks in 'planning' until told to move
+          // on) -- so the client itself is what skips straight through here.
+          setSecondsRemaining(null);
+          setPhaseLabel("planning");
+          tryExpire(0, submitBeginActingPhase);
+          return;
         }
-        // Buffer just elapsed -- the act window counts from the END of
-        // the buffer, not from turnStartedAt (which is the SAME moment
-        // the buffer started, for this one seat).
-        const actElapsed = sinceBufferStart - schedule.bufferSeconds;
-        const remaining = Math.max(0, Math.ceil(actDuration - actElapsed));
+        if (!match.detectivePhaseStartedAt) return;
+        const elapsed = (now - new Date(match.detectivePhaseStartedAt).getTime()) / 1000;
+        const remaining = Math.max(0, Math.ceil(schedule.bufferSeconds - elapsed));
         setSecondsRemaining(remaining);
-        setPhaseLabel("detective");
-        tryExpire(remaining);
+        setPhaseLabel("planning");
+        tryExpire(remaining, submitBeginActingPhase);
         return;
       }
 
-      // Every other detective seat: no buffer, just its own act window
-      // starting fresh at turnStartedAt.
-      const elapsed = (now - new Date(match.turnStartedAt).getTime()) / 1000;
-      const remaining = Math.max(0, Math.ceil(actDuration - elapsed));
-      setSecondsRemaining(remaining);
-      setPhaseLabel("detective");
-      tryExpire(remaining);
+      if (match.roundPhase === "acting") {
+        if (!match.actingPhaseStartedAt || !schedule.actSeconds) return;
+        const elapsed = (now - new Date(match.actingPhaseStartedAt).getTime()) / 1000;
+        const remaining = Math.max(0, Math.ceil(schedule.actSeconds - elapsed));
+        setSecondsRemaining(remaining);
+        setPhaseLabel("acting");
+        tryExpire(remaining, submitForceEndActingPhase);
+        return;
+      }
     };
 
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule, match?.turnStartedAt, match?.detectivePhaseStartedAt, match?.phase, seatIndexWithinPlayer]);
+  }, [schedule, match?.roundPhase, match?.turnStartedAt, match?.detectivePhaseStartedAt, match?.actingPhaseStartedAt, match?.phase]);
 
-  function submitRandomMove() {
+  // submitRandomMrxMove -- unchanged in spirit from before: Mr.X's own
+  // turn still has exactly one actor, so a random-legal-move fallback on
+  // expiry still makes sense the same way it always did.
+  function submitRandomMrxMove() {
     if (!map || !match) return;
-    const actor = currentActor(match);
-    if (actor === "mrx") {
-      const moves = validMovesFor(map, match.mrX.pos, match.mrX.tickets, true);
-      if (moves.length === 0) {
-        if (onPassTurn) onPassTurn(actor);
-        return;
-      }
-      const pick = moves[Math.floor(Math.random() * moves.length)];
-      const ticketToUse = match.mrX.tickets[pick.mode] > 0 ? pick.mode : "black";
-      onMrXMove(pick.to, pick.mode, ticketToUse);
-    } else {
-      const detId = parseInt(actor.slice(1), 10);
-      const detective = match.detectives.find((d) => d.id === detId);
-      if (!detective) return;
-      const moves = validMovesFor(map, detective.pos, detective.tickets, false).filter(
-        (m) => !occupiedByDetective(match.detectives, m.to)
-      );
-      if (moves.length === 0) {
-        if (onPassTurn) onPassTurn(actor);
-        return;
-      }
-      const pick = moves[Math.floor(Math.random() * moves.length)];
-      onDetectiveMove(detId, pick.to, pick.mode);
+    const moves = validMovesFor(map, match.mrX.pos, match.mrX.tickets, true);
+    if (moves.length === 0) {
+      if (onPassMrxTurn) onPassMrxTurn();
+      return;
     }
+    const pick = moves[Math.floor(Math.random() * moves.length)];
+    const ticketToUse = match.mrX.tickets[pick.mode] > 0 ? pick.mode : "black";
+    onMrXMove(pick.to, pick.mode, ticketToUse);
+  }
+
+  function submitBeginActingPhase() {
+    if (onBeginActingPhase) onBeginActingPhase();
+  }
+
+  function submitForceEndActingPhase() {
+    if (onForceEndActingPhase) onForceEndActingPhase();
   }
 
   return {
     turnTimerSeconds: schedule?.actSeconds ?? null,
     secondsRemaining,
-    phaseLabel,
-    preThinkActive: phaseLabel === "buffer",
+    phaseLabel, // "mrx" | "planning" | "acting" | null
+    preThinkActive: phaseLabel === "planning",
+    actingActive: phaseLabel === "acting",
     bufferSeconds: schedule?.bufferSeconds ?? null,
     mrxSeconds: schedule?.mrxSeconds ?? null,
+    actSeconds: schedule?.actSeconds ?? null,
   };
 }

@@ -63,6 +63,15 @@ export function rowToMatch(gsRow, myMrxPosition) {
     // turnSchedule.js / useTurnTimer.js for how this anchors the buffer
     // countdown.
     detectivePhaseStartedAt: gsRow.detective_phase_started_at,
+    // roundPhase / actingPhaseStartedAt / detectivesActed -- the NEW
+    // 3-phase model (mrx -> planning -> acting), multiplayer only. Local
+    // pass-and-play never sets these (single shared device, still fully
+    // sequential -- simultaneous action makes no sense with one device),
+    // so GameBoard.jsx branches its interaction model on myRole === null
+    // vs not, not on the presence of these fields alone.
+    roundPhase: gsRow.round_phase,
+    actingPhaseStartedAt: gsRow.acting_phase_started_at,
+    detectivesActed: gsRow.detectives_acted || [],
   };
 }
 

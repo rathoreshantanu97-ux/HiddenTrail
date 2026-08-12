@@ -302,12 +302,52 @@ export async function setSeatName({ roomId, callerPlayerId, callerSecret, detect
   });
 }
 
-export async function passTurn({ roomId, callerPlayerId, callerSecret, actor }) {
+// passMrxTurn -- mrx-only now (see pass_turn's own comment server-side).
+// Detectives use passDetectiveTurn instead, since the acting phase has no
+// single "current actor" to pass anymore.
+export async function passMrxTurn({ roomId, callerPlayerId, callerSecret }) {
   await callRpc("pass_turn", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
     p_caller_secret: callerSecret,
-    p_actor: actor,
+    p_actor: "mrx",
+  });
+}
+
+// passDetectiveTurn -- a detective with genuinely zero legal moves (or
+// who simply doesn't want to move) marks themselves done for this
+// round's acting phase, independent of everyone else.
+export async function passDetectiveTurn({ roomId, callerPlayerId, callerSecret, detId }) {
+  await callRpc("pass_detective_turn", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+    p_det_id: detId,
+  });
+}
+
+// beginActingPhase -- called once every detective player has signaled
+// "ready" (see GameBoard.jsx's readiness UI), OR automatically when the
+// planning countdown reaches zero (see useTurnTimer.js) -- ends the
+// shared planning window and opens the simultaneous acting phase, where
+// every detective may move independently.
+export async function beginActingPhase({ roomId, callerPlayerId, callerSecret }) {
+  await callRpc("begin_acting_phase", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+  });
+}
+
+// forceEndActingPhase -- called by any connected client when the shared
+// acting-phase timer reaches zero, so the round doesn't hang forever
+// waiting on a detective who never acted. Un-acted detectives simply
+// stay where they are for this round.
+export async function forceEndActingPhase({ roomId, callerPlayerId, callerSecret }) {
+  await callRpc("force_end_acting_phase", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
   });
 }
 

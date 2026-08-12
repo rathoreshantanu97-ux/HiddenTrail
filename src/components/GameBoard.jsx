@@ -115,7 +115,10 @@ export default function GameBoard({
   onDetectiveMove,
   onMrXMove,
   onActivateDoubleMove,
-  onPassTurn, // (actor) => void -- called when the current actor genuinely has zero legal moves; fixes the real bug where this situation permanently soft-locked the game
+  onPassTurn, // (actor) => void -- PASS-AND-PLAY ONLY (single shared device, still fully sequential turnIdx-walking). Multiplayer uses onPassMrxTurn/onPassDetectiveTurn instead (see the 3-phase acting model below).
+  onPassMrxTurn, // () => void -- multiplayer only: Mr.X genuinely has zero legal moves
+  onPassDetectiveTurn, // (detId) => void -- multiplayer only: a specific detective genuinely has zero legal moves (or chooses not to move) during the acting phase
+  onBeginActingPhase, // () => void -- multiplayer only: ends the shared planning window early (any detective may trigger it -- see the "Begin acting phase" button)
   extraHeaderContent, // shares a row with the "Play 2x card" button (e.g. Pause/End Game in multiplayer, End Game in pass-and-play) -- kept small/short controls only, since it's meant to sit alongside the 2x button without wrapping badly
   extraHeaderContentBelow, // renders as its OWN row, below the 2x/Pause/End-Game row -- for bulkier controls that shouldn't crowd that first row (e.g. multiplayer's Takeover Reversal / Redistribute Roles votes, and the TakeoverPanel)
   belowTicketsContent, // e.g. chat in multiplayer -- renders AFTER the log/tickets panels, per the agreed sidebar order (votes -> huddle -> explorer -> log -> tickets -> chat)
@@ -130,10 +133,12 @@ export default function GameBoard({
   detectivePlayerNames = {}, // detectiveId -> player display name (multiplayer only) -- for the ticket counter's "Priya — D1" labeling
   secondsRemaining = null, // null (no timer set for this room) | number of seconds left in the current turn/phase -- shown to EVERYONE regardless of whose turn it is
   turnTimerSeconds = null, // the room's configured timer length (the detective act window), for showing "12 / 60s" style displays
-  timerPhase = null, // null | "mrx" | "buffer" | "detective" -- which segment of the turn schedule is currently counting down (see useTurnTimer.js)
+  timerPhase = null, // null | "mrx" | "planning" | "acting" -- which segment of the turn schedule is currently counting down (see useTurnTimer.js)
   preThinkActive = false, // true during the shared detective pre-think buffer -- no one may COMMIT a move, though everyone may still preview reachable stations via the explore/huddle system
+  actingActive = false, // true during the shared simultaneous acting phase -- any of your not-yet-acted detectives may be selected and moved
   mrxSecondsForBar = null, // Mr. X's full turn window (schedule.mrxSeconds) -- the denominator for the timer bar while timerPhase === "mrx"
-  bufferSecondsForBar = null, // the shared pre-think buffer's full length (schedule.bufferSeconds) -- the denominator while timerPhase === "buffer"
+  bufferSecondsForBar = null, // the shared pre-think buffer's full length (schedule.bufferSeconds) -- the denominator while timerPhase === "planning"
+  actSecondsForBar = null, // the shared acting phase's full length (schedule.actSeconds) -- the denominator while timerPhase === "acting"
   roomCode = null, // multiplayer only -- shown persistently so a disconnected player can be told the code to rejoin
 }) {
   const { positionStyle: highlightPositionStyle, destinationStyle: highlightDestinationStyle } = useHighlightStyles(roomId); // each independently 'ring' | 'rotating' | 'blink' | 'static' | 'none'
@@ -171,6 +176,13 @@ export default function GameBoard({
   const EDGE_MARGIN_TOP = EDGE_MARGIN_TOP_BY_MAP[map?.id] ?? EDGE_MARGIN_TOP_DEFAULT;
   const [pan, setPan] = useState({ x: -EDGE_MARGIN_OTHER, y: -EDGE_MARGIN_TOP });
   const [pendingMove, setPendingMove] = useState(null);
+  // selectedActingDetId -- multiplayer's 3-phase acting model only: which
+  // of MY OWN not-yet-acted detectives I've currently selected as "the
+  // piece I'm about to move" (click its token to select, click again to
+  // deselect). Several of my own pieces can be genuinely available to
+  // move at once during the acting phase, so there's no single implicit
+  // "active" one the way pass-and-play's turnIdx-walking model has.
+  const [selectedActingDetId, setSelectedActingDetId] = useState(null);
   // toggledIds: the FULL set of detectives currently highlighted on this
   // client's board -- own AND others', all equally togglable by clicking
   // their token (see handleStationClick). Seeded with your own
@@ -523,9 +535,73 @@ export default function GameBoard({
   const activeMode = map.modeTheme || MODE_DEFAULT;
   const stationLabel = (id) => (map.names ? `${map.names[id]} (#${id})` : `station ${id}`);
 
-  const actor = currentActor(match); // whose turn is it, regardless of who's viewing
-  const isMrXTurn = actor === "mrx";
-  const activeDetective = actor && actor !== "mrx" ? match.detectives[parseInt(actor.slice(1))] : null;
+  // In pass-and-play, myRole is null, so "it's my turn to act" collapses
+  // to "it's this device's turn" (== whoever the current actor is, since
+  // the device controls everyone). In multiplayer, only the player whose
+  // role CONTAINS the relevant seat can act -- myRole can be a
+  // comma-joined list for a multi-detective seat (e.g. "d0,d1,d2"), so
+  // this must be a membership check, not exact string equality. A third
+  // case, isSpectator, means "no role at all, and no permission to act
+  // as anyone" -- unlike pass-and-play's myRole===null (which means
+  // "this device controls everyone"), a spectator controls nobody.
+  const isSpectator = myRole === "__spectator__";
+  const myRoleSeats = !isSpectator && myRole ? myRole.split(",") : [];
+  const controlsSeat = (seat) => myRole === null || myRoleSeats.includes(seat);
+  const iAmMrX = !isSpectator && myRole === "mrx";
+  const iAmDetective = !isSpectator && myRole && myRole !== "mrx";
+  // myOwnDetectives: EVERY detective this player controls, regardless of
+  // the current phase -- used by the route explorer (available anytime
+  // during the buffer, per project design) AND by the acting-phase
+  // detective-selection logic below. Pass-and-play (myRole===null) has
+  // no real "own detective" concept here since the device controls
+  // everyone.
+  const myOwnDetectives =
+    iAmDetective && myRoleSeats.length > 0
+      ? match.detectives.filter((d) => myRoleSeats.includes(`d${d.id}`))
+      : [];
+
+  // ---------------------------------------------------------------------
+  // TURN MODEL -- pass-and-play (single shared device) stays fully
+  // sequential, walking match.turnOrder/turnIdx exactly as it always has
+  // (see gameEngine.js/localGameStore.js, UNCHANGED -- simultaneous
+  // action makes no sense on one shared device anyway). Multiplayer now
+  // runs the 3-phase model instead (mrx -> planning -> acting), read off
+  // match.roundPhase (see matchStateAdapter.js), where the 'acting' phase
+  // has NO single current actor -- any of a player's own not-yet-acted
+  // detectives (match.detectivesActed) may be individually SELECTED (see
+  // selectedActingDetId below, set by clicking your own token) and then
+  // moved, independent of what any other player is doing at the same
+  // moment.
+  // ---------------------------------------------------------------------
+  const isPassAndPlay = myRole === null;
+  const roundPhaseMp = !isPassAndPlay ? match.roundPhase : null;
+  const detectivesActedSet = new Set((match.detectivesActed || []).map(Number));
+  // myActingDetectiveIds -- multiplayer only, only meaningful during
+  // 'acting': which of MY OWN detectives haven't moved (or passed) yet
+  // this round, i.e. which of my pieces are actually selectable right now.
+  const myActingDetectiveIds =
+    !isPassAndPlay && iAmDetective && roundPhaseMp === "acting"
+      ? myOwnDetectives.map((d) => d.id).filter((id) => !detectivesActedSet.has(id))
+      : [];
+
+  const actor = isPassAndPlay ? currentActor(match) : roundPhaseMp === "mrx" ? "mrx" : null;
+  const isMrXTurn = isPassAndPlay ? actor === "mrx" : roundPhaseMp === "mrx";
+  // activeDetective: pass-and-play keeps its old meaning (whoever's turn
+  // it literally is, per turnOrder). Multiplayer's acting phase has no
+  // single "whose turn" -- this becomes "whichever of MY OWN not-yet-
+  // acted detectives I've currently SELECTED to move" (selectedActingDetId,
+  // set by clicking that piece's own token -- see handleStationClick).
+  // Every downstream consumer of activeDetective (legalTargets, the turn
+  // indicator ring, the Pass Turn button, etc.) keeps working unmodified
+  // either way, since both cases resolve to exactly "the one piece that's
+  // currently valid to click-and-move."
+  const activeDetective = isPassAndPlay
+    ? actor && actor !== "mrx"
+      ? match.detectives[parseInt(actor.slice(1), 10)]
+      : null
+    : myActingDetectiveIds.includes(selectedActingDetId)
+      ? match.detectives.find((d) => d.id === selectedActingDetId)
+      : null;
 
   // Defensive safeguard: clear any leftover "Selected [station]..."
   // message and pending-move state whenever the actual active turn
@@ -539,44 +615,21 @@ export default function GameBoard({
     setMessage("");
     setPendingMove(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actor, match.round]);
+  }, [actor, activeDetective?.id, match.round]);
 
-  // In pass-and-play, myRole is null, so "it's my turn to act" collapses
-  // to "it's this device's turn" (== whoever the current actor is, since
-  // the device controls everyone). In multiplayer, only the player whose
-  // role CONTAINS the current actor can act -- myRole can be a
-  // comma-joined list for a multi-detective seat (e.g. "d0,d1,d2"), so
-  // this must be a membership check, not exact string equality (a plain
-  // === here was a real bug: a player controlling multiple detectives
-  // could never act on any of their seats except via exact single-role
-  // match, which never happens once a role is comma-joined). A third
-  // case, isSpectator, means "no role at all, and no permission to act
-  // as anyone" -- unlike pass-and-play's myRole===null (which means
-  // "this device controls everyone"), a spectator controls nobody.
-  const isSpectator = myRole === "__spectator__";
-  const myRoleSeats = !isSpectator && myRole ? myRole.split(",") : [];
-  const controlsSeat = (seat) => myRole === null || myRoleSeats.includes(seat);
-  const isMyTurnToAct = !isSpectator && controlsSeat(actor);
-  const iAmMrX = !isSpectator && myRole === "mrx";
-  const iAmDetective = !isSpectator && myRole && myRole !== "mrx";
-  // myDetective is "whichever of my detectives currently has the turn" --
-  // only meaningful during that detective's own turn; a multi-detective
-  // player's "my detective" is whoever the CURRENT ACTOR is among their
-  // seats, not a single fixed detective (they might control several).
-  const myDetective = iAmDetective && activeDetective && controlsSeat(actor) ? activeDetective : null;
-  // myOwnDetectives: EVERY detective this player controls, regardless of
-  // whose turn it currently is -- used by the route explorer, which (per
-  // project design) is available anytime, not just on your own turn, so
-  // detectives can coordinate continuously rather than only in the
-  // narrow window of their own move. Pass-and-play (myRole===null) has
-  // no real "own detective" concept here since the device controls
-  // everyone -- the explorer stays turn-gated in that mode (see
-  // isMyTurnToAct usage below), since there's no multiplayer
-  // coordination to enable in the first place.
-  const myOwnDetectives =
-    iAmDetective && myRoleSeats.length > 0
-      ? match.detectives.filter((d) => myRoleSeats.includes(`d${d.id}`))
-      : [];
+  // Selection resets whenever we leave the acting phase (planning starts
+  // a fresh round, or the round ends) -- a stale selection from a
+  // previous round's acting phase should never carry forward.
+  useEffect(() => {
+    if (roundPhaseMp !== "acting") setSelectedActingDetId(null);
+  }, [roundPhaseMp, match.round]);
+
+  const isMyTurnToAct = isPassAndPlay ? !isSpectator && controlsSeat(actor) : isMrXTurn ? iAmMrX : !!activeDetective;
+  // myDetective is "whichever of my detectives is currently the relevant
+  // one to act with" -- pass-and-play: whoever's turn it literally is;
+  // multiplayer: whichever own detective I've selected (see activeDetective
+  // above -- already guaranteed to be mine by construction in both cases).
+  const myDetective = iAmDetective && activeDetective ? activeDetective : null;
 
   // Seed toggledIds with your own detectives ONCE they're known -- gives
   // the "shown by default" behavior without making own detectives a
@@ -694,7 +747,12 @@ export default function GameBoard({
     if (isMrXTurn && iAmMrX0(myRole)) {
       return new Set(validMovesFor(map, match.mrX.pos, match.mrX.tickets, true).map((m) => m.to));
     }
-    if (activeDetective && controlsSeat(actor)) {
+    if (activeDetective) {
+      // No controlsSeat(actor) check needed here anymore -- activeDetective
+      // is already guaranteed to be MINE by construction in both modes
+      // (pass-and-play: whoever's turn it is on the one shared device;
+      // multiplayer: only ever set to one of my own selected, not-yet-
+      // acted detectives -- see its definition above).
       return new Set(
         validMovesFor(map, activeDetective.pos, activeDetective.tickets, false)
           .filter((m) => !occupiedByDetective(match.detectives, m.to))
@@ -707,7 +765,7 @@ export default function GameBoard({
       // it is; multiplayer only allows it if this client IS Mr. X
       return role === null || role === "mrx";
     }
-  }, [isMyTurnToAct, isMrXTurn, activeDetective, match, map, myRole, actor]);
+  }, [isMyTurnToAct, isMrXTurn, activeDetective, match, map, myRole]);
 
   // ---------------------------------------------------------------------
   // ROUTE EXPLORER v2 -- redesigned around "click a piece on the map to
@@ -805,6 +863,20 @@ export default function GameBoard({
     // handlers, which route around this function entirely via the SVG's
     // own pointer handlers, gated separately on drawMode).
     if (peekedPlayerId) return;
+    // --- Simultaneous acting phase (multiplayer only): clicking one of
+    // YOUR OWN not-yet-acted detectives SELECTS it as the piece you're
+    // about to move -- click it again (or click a different own piece)
+    // to change your mind. Takes priority over the explore-toggle block
+    // below since, during 'acting', showDetectiveHighlights is already
+    // false anyway (the explorer is buffer-only -- see v3.18), so without
+    // this branch a click here would otherwise silently do nothing.
+    if (!isPassAndPlay && iAmDetective && roundPhaseMp === "acting") {
+      const detForSelect = match.detectives.find((d) => d.pos === station);
+      if (detForSelect && myActingDetectiveIds.includes(detForSelect.id)) {
+        setSelectedActingDetId((prev) => (prev === detForSelect.id ? null : detForSelect.id));
+        return;
+      }
+    }
     // --- Route explorer v2: clicking a station where a PIECE currently
     // stands toggles that piece's highlight, independent of whose turn
     // it is -- available any time, exactly like the old explorer. This
@@ -874,7 +946,10 @@ export default function GameBoard({
         setMessage(`Selected ${stationLabel(station)}. Choose which ticket to spend.`);
       }
     } else {
-      if (!controlsSeat(actor)) return; // multiplayer: not your role
+      // No controlsSeat(actor) check needed here anymore -- activeDetective
+      // (== d below) is already guaranteed to be mine by construction (see
+      // its definition above), in both pass-and-play and multiplayer.
+      if (!activeDetective) return;
       const d = activeDetective;
       if (occupiedByDetective(match.detectives, station)) {
         setMessage("Another detective already occupies that station.");
@@ -906,6 +981,7 @@ export default function GameBoard({
   function commitDetectiveMove(detId, to, mode) {
     setPendingMove(null);
     setMessage("");
+    setSelectedActingDetId(null); // that piece has now acted -- clear the selection so nothing stays "armed" against a piece that's already moved
     onDetectiveMove(detId, to, mode);
   }
 
@@ -1115,10 +1191,31 @@ export default function GameBoard({
               <button
                 style={styles.primaryBtn}
                 onClick={() => {
-                  if (onPassTurn) onPassTurn(actor);
+                  if (isPassAndPlay) {
+                    if (onPassTurn) onPassTurn(actor);
+                  } else if (isMrXTurn) {
+                    if (onPassMrxTurn) onPassMrxTurn();
+                  } else if (activeDetective) {
+                    if (onPassDetectiveTurn) onPassDetectiveTurn(activeDetective.id);
+                  }
                 }}
               >
                 Pass Turn
+              </button>
+            </div>
+          )}
+
+          {/* Begin acting phase early -- multiplayer only, shown during
+              the shared planning window. Per explicit design decision,
+              ANY detective may trigger this (no unanimous-consent
+              tracking) -- this is a purely cooperative, no-stakes
+              convenience for a team that's genuinely done thinking early,
+              same trust level already extended to the rest of the
+              explorer/peek/draw features in this room. */}
+          {!isPassAndPlay && iAmDetective && preThinkActive && (
+            <div style={styles.rowCenter}>
+              <button style={styles.primaryBtn} onClick={() => onBeginActingPhase && onBeginActingPhase()}>
+                Begin acting phase now
               </button>
             </div>
           )}
@@ -1348,28 +1445,40 @@ export default function GameBoard({
                     the map cannot. */}
                 <div ref={topBarRef} style={{ ...styles.mapTopBar, width: fittedWidth }}>
                   <div style={styles.mapTopBarTurn}>
-                    {!isMrXTurn && <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />}
+                    {!isMrXTurn && activeDetective && <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />}
                     <span style={styles.mapTopBarRound}>Round {match.round}/{match.maxRounds}</span>
                     <span style={styles.mapTopBarDivider}>—</span>
                     {preThinkActive ? (
-                      // Pre-think buffer: framed as a TEAM moment, not any
-                      // one seat's turn -- nobody can move yet, so naming
-                      // a single "X's Turn" here would be misleading.
+                      // Shared planning window: framed as a TEAM moment,
+                      // not any one seat's turn -- nobody can move yet, so
+                      // naming a single "X's Turn" here would be misleading.
                       <span style={styles.mapTopBarBufferLabel}>
                         🕵️ Detectives are planning their move…
                       </span>
+                    ) : !isPassAndPlay && actingActive ? (
+                      // Simultaneous acting phase: everyone's up at once,
+                      // same "team moment" framing as planning, just
+                      // labeled for the doing rather than the thinking.
+                      <span style={styles.mapTopBarBufferLabel}>
+                        🏃 Detectives are moving — everyone may act now
+                      </span>
+                    ) : isMrXTurn ? (
+                      <span>{mrxName()}'s Turn</span>
+                    ) : activeDetective ? (
+                      <span>{detectiveName(activeDetective.id)}'s Turn</span>
                     ) : (
-                      <span>{isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}</span>
+                      <span>Waiting…</span>
                     )}
                   </div>
-                  {secondsRemaining != null && (preThinkActive || turnTimerSeconds) && (
+                  {secondsRemaining != null && (preThinkActive || actingActive || turnTimerSeconds) && (
                     <div style={styles.mapTopBarTimerWrap}>
                       {(() => {
                         // The bar's denominator changes with the phase --
-                        // full turnTimerSeconds only applies to a plain
-                        // detective act window; Mr.X's window and the
-                        // buffer each have their own (longer) total.
-                        const denom = timerPhase === "mrx" ? mrxSecondsForBar : timerPhase === "buffer" ? bufferSecondsForBar : turnTimerSeconds;
+                        // Mr.X's window, the shared planning window, and
+                        // the shared acting window each have their own
+                        // (independently configured) total.
+                        const denom =
+                          timerPhase === "mrx" ? mrxSecondsForBar : timerPhase === "planning" ? bufferSecondsForBar : actSecondsForBar ?? turnTimerSeconds;
                         const frac = denom ? secondsRemaining / denom : 0;
                         return (
                           <>

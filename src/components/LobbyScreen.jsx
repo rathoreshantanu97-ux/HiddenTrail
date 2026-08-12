@@ -204,6 +204,19 @@ export default function LobbyScreen({
     }
   }
 
+  // RELEASE_NAME_SENTINEL -- the <select> below needs a way to represent
+  // "give up my current character without claiming a different one",
+  // distinct from every real character-name option. Without this, if two
+  // players want to SWAP characters (both real names already taken), the
+  // one holding the name the other wants had no way to let go of it
+  // except by first claiming some unrelated third name -- awkward, and
+  // actually reveals nothing new is claim-only vs release-only.
+  // setSeatName already fully supports name:null (clears the seat's
+  // override back to its default, no uniqueness check needed since
+  // releasing can never collide) -- this sentinel just gives that
+  // existing capability a UI affordance.
+  const RELEASE_NAME_SENTINEL = "__release__";
+
   async function handlePickName(detectiveId, name) {
     setNamePicking(detectiveId);
     setNamePickErr("");
@@ -213,7 +226,7 @@ export default function LobbyScreen({
         callerPlayerId: myPlayerId,
         callerSecret: mySecret,
         detectiveId,
-        name,
+        name: name === RELEASE_NAME_SENTINEL ? null : name,
         mapCharacterNames: map?.characterNames || null,
       });
       await refresh();
@@ -457,6 +470,13 @@ export default function LobbyScreen({
                               onChange={(e) => handlePickName(detId, e.target.value)}
                               style={styles.colorSelect}
                             >
+                              {/* Lets this seat give up its current character without
+                                  having to claim a different one first -- see the
+                                  RELEASE_NAME_SENTINEL comment above handlePickName
+                                  for why this matters (two players swapping characters
+                                  would otherwise be stuck, since neither can claim the
+                                  other's name while it's still held). */}
+                              <option value={RELEASE_NAME_SENTINEL}>— Release this character —</option>
                               {map.characterNames.map((charName) => {
                                 const isTaken = takenNames.has(charName) && charName !== currentName;
                                 return (

@@ -115,14 +115,17 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
 
   if (!loaded) {
     return (
-      <div style={styles.setupCard}>
-        <h2 style={{ margin: "0 0 4px" }}>Edit Room Settings</h2>
-        <p style={{ color: "#777", fontSize: 13 }}>Loading current settings...</p>
+      <div style={styles.page}>
+        <div style={styles.setupCard}>
+          <h2 style={{ margin: "0 0 4px" }}>Edit Room Settings</h2>
+          <p style={{ color: "#777", fontSize: 13 }}>Loading current settings...</p>
+        </div>
       </div>
     );
   }
 
   return (
+    <div style={styles.page}>
     <div style={styles.setupCard}>
       <h2 style={{ margin: "0 0 4px" }}>Edit Room Settings</h2>
       <p style={{ color: "#777", fontSize: 13, marginBottom: 20 }}>Changes apply to everyone currently in the lobby.</p>
@@ -357,6 +360,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
           {busy ? "Saving..." : "Save & Return to Lobby"}
         </button>
       </div>
+    </div>
     </div>
   );
 }

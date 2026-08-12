@@ -36,10 +36,11 @@ const NEAR_BOTTOM_PX = 24;
 // tradeoff once the sidebar itself is shorter.
 const CHAT_HEIGHT = 270;
 
-export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName, detectiveTeamName }) {
+export default function ChatPanel({ roomId, myPlayerId, mySecret, myRole, myDisplayName, detectiveTeamName, resolveSenderLabel }) {
   const { allMessages, detectiveMessages, canUseDetectiveChannel, sendToAll, sendToDetectives } = useChat({
     roomId,
     myPlayerId,
+    mySecret,
     myRole,
   });
   const [activeTab, setActiveTab] = useState("all");
@@ -164,7 +165,16 @@ export default function ChatPanel({ roomId, myPlayerId, myRole, myDisplayName, d
         {messages.map((m) => (
           <div key={m.id} style={styles.messageRow}>
             <span style={{ ...styles.sender, color: m.senderRole === "mrx" ? "#c0392b" : "#333" }}>
-              {m.senderName}:
+              {/* resolveSenderLabel, when provided, resolves LIVE to the
+                  sender's CURRENT effective name (character name if the
+                  map has a roster and one's picked/defaulted, otherwise
+                  the real display name) -- not the name stored on the
+                  message row at send time. This is deliberate: per
+                  explicit decision, a player should be referred to by
+                  their chosen character name EVERYWHERE, consistently,
+                  including in messages sent before they picked one --
+                  not have old messages "frozen" under a stale name. */}
+              {resolveSenderLabel ? resolveSenderLabel(m) : m.senderName}:
             </span>{" "}
             <span style={styles.body}>{m.body}</span>
           </div>

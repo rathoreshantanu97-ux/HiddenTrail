@@ -7,7 +7,7 @@ import * as api from "./supabaseApi.js";
 // just a simple action -- server-side validation (propose_redistribute_roles)
 // enforces it covers every player and every seat exactly once.
 // ---------------------------------------------------------------------------
-export function useRedistributeVote({ roomId, myPlayerId }) {
+export function useRedistributeVote({ roomId, myPlayerId, mySecret }) {
   const [proposal, setProposal] = useState(null);
   const [statusList, setStatusList] = useState([]);
   const [err, setErr] = useState("");
@@ -39,14 +39,14 @@ export function useRedistributeVote({ roomId, myPlayerId }) {
     async (newAssignments) => {
       setErr("");
       try {
-        await api.proposeRedistributeRoles({ roomId, callerPlayerId: myPlayerId, newAssignments });
+        await api.proposeRedistributeRoles({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, newAssignments });
         await refresh();
       } catch (e) {
         setErr(e.message || "Failed to propose redistributing roles.");
         throw e;
       }
     },
-    [roomId, myPlayerId, refresh]
+    [roomId, myPlayerId, mySecret, refresh]
   );
 
   const vote = useCallback(
@@ -54,14 +54,20 @@ export function useRedistributeVote({ roomId, myPlayerId }) {
       if (!proposal) return;
       setErr("");
       try {
-        await api.voteRedistributeRoles({ roomId, callerPlayerId: myPlayerId, proposalId: proposal.proposalId, vote: voteValue });
+        await api.voteRedistributeRoles({
+          roomId,
+          callerPlayerId: myPlayerId,
+          callerSecret: mySecret,
+          proposalId: proposal.proposalId,
+          vote: voteValue,
+        });
         await refresh();
       } catch (e) {
         setErr(e.message || "Failed to submit your vote.");
         throw e;
       }
     },
-    [roomId, myPlayerId, proposal, refresh]
+    [roomId, myPlayerId, mySecret, proposal, refresh]
   );
 
   const iHaveVoted = statusList.some((p) => p.playerId === myPlayerId && p.status !== "pending");

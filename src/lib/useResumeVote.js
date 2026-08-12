@@ -9,7 +9,7 @@ import * as api from "./supabaseApi.js";
 // explicit instruction, resuming now requires the same full-agreement
 // vote as pausing itself.
 // ---------------------------------------------------------------------------
-export function useResumeVote({ roomId, myPlayerId }) {
+export function useResumeVote({ roomId, myPlayerId, mySecret }) {
   const [proposal, setProposal] = useState(null);
   const [statusList, setStatusList] = useState([]);
   const [err, setErr] = useState("");
@@ -40,27 +40,33 @@ export function useResumeVote({ roomId, myPlayerId }) {
   const propose = useCallback(async () => {
     setErr("");
     try {
-      await api.proposeResume({ roomId, callerPlayerId: myPlayerId });
+      await api.proposeResume({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret });
       await refresh();
     } catch (e) {
       setErr(e.message || "Failed to propose resuming.");
       throw e;
     }
-  }, [roomId, myPlayerId, refresh]);
+  }, [roomId, myPlayerId, mySecret, refresh]);
 
   const vote = useCallback(
     async (voteValue) => {
       if (!proposal) return;
       setErr("");
       try {
-        await api.voteResume({ roomId, callerPlayerId: myPlayerId, proposalId: proposal.proposalId, vote: voteValue });
+        await api.voteResume({
+          roomId,
+          callerPlayerId: myPlayerId,
+          callerSecret: mySecret,
+          proposalId: proposal.proposalId,
+          vote: voteValue,
+        });
         await refresh();
       } catch (e) {
         setErr(e.message || "Failed to submit your vote.");
         throw e;
       }
     },
-    [roomId, myPlayerId, proposal, refresh]
+    [roomId, myPlayerId, mySecret, proposal, refresh]
   );
 
   const iHaveVoted = proposal ? proposal.votedPlayerIds.includes(myPlayerId) : false;

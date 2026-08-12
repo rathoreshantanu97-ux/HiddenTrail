@@ -30,6 +30,7 @@ export default function LobbyScreen({
   roomId,
   roomCode,
   myPlayerId,
+  mySecret,
   myRole,
   onRoleChanged,
   isHost,
@@ -148,7 +149,7 @@ export default function LobbyScreen({
     setReassigning(true);
     setErr("");
     try {
-      await api.reassignHost({ roomId, callerPlayerId: myPlayerId, newHostPlayerId: myPlayerId });
+      await api.reassignHost({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, newHostPlayerId: myPlayerId });
       onHostChanged && onHostChanged(true);
       await refresh();
     } catch (e) {
@@ -162,7 +163,7 @@ export default function LobbyScreen({
     setFreeingSeat(true);
     setErr("");
     try {
-      await api.freeInactiveLobbySeat({ roomId, callerPlayerId: myPlayerId, targetRole });
+      await api.freeInactiveLobbySeat({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, targetRole });
       await refresh();
     } catch (e) {
       setErr(e.message || "Failed to free that seat.");
@@ -194,7 +195,7 @@ export default function LobbyScreen({
     setColorPicking(detectiveId);
     setColorPickErr("");
     try {
-      await api.setSeatColor({ roomId, callerPlayerId: myPlayerId, detectiveId, color });
+      await api.setSeatColor({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, detectiveId, color });
       await refresh();
     } catch (e) {
       setColorPickErr(e.message || "Failed to set color.");
@@ -207,7 +208,14 @@ export default function LobbyScreen({
     setNamePicking(detectiveId);
     setNamePickErr("");
     try {
-      await api.setSeatName({ roomId, callerPlayerId: myPlayerId, detectiveId, name, mapCharacterNames: map?.characterNames || null });
+      await api.setSeatName({
+        roomId,
+        callerPlayerId: myPlayerId,
+        callerSecret: mySecret,
+        detectiveId,
+        name,
+        mapCharacterNames: map?.characterNames || null,
+      });
       await refresh();
     } catch (e) {
       setNamePickErr(e.message || "Failed to set character name.");
@@ -231,7 +239,7 @@ export default function LobbyScreen({
     setLeaving(true);
     setErr("");
     try {
-      await api.leaveLobby({ roomId, playerId: myPlayerId });
+      await api.leaveLobby({ roomId, playerId: myPlayerId, callerSecret: mySecret });
       onLeave();
     } catch (e) {
       setErr(e.message || "Failed to leave.");
@@ -244,7 +252,7 @@ export default function LobbyScreen({
     setSwitching(true);
     setErr("");
     try {
-      await api.switchSeat({ roomId, playerId: myPlayerId, newRole: seatRole });
+      await api.switchSeat({ roomId, playerId: myPlayerId, callerSecret: mySecret, newRole: seatRole });
       onRoleChanged && onRoleChanged(seatRole);
       await refresh();
     } catch (e) {
@@ -258,7 +266,7 @@ export default function LobbyScreen({
     setReassigning(true);
     setErr("");
     try {
-      await api.reassignHost({ roomId, callerPlayerId: myPlayerId, newHostPlayerId });
+      await api.reassignHost({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, newHostPlayerId });
       onHostChanged && onHostChanged(false); // this client is no longer host
       await refresh();
     } catch (e) {
@@ -273,6 +281,7 @@ export default function LobbyScreen({
       <EditRoomSettingsForm
         roomId={roomId}
         myPlayerId={myPlayerId}
+        mySecret={mySecret}
         currentMapId={mapId}
         currentNumDetectives={numDetectives}
         currentTotalPlayers={totalPlayers}

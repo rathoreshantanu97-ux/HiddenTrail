@@ -6,7 +6,7 @@ import * as api from "./supabaseApi.js";
 // pattern, different table). See that file's comments for the shared
 // reasoning (polling instead of realtime, simplified-first-version voting).
 // ---------------------------------------------------------------------------
-export function usePauseVote({ roomId, myPlayerId }) {
+export function usePauseVote({ roomId, myPlayerId, mySecret }) {
   const [proposal, setProposal] = useState(null);
   const [statusList, setStatusList] = useState([]);
   const [err, setErr] = useState("");
@@ -37,27 +37,33 @@ export function usePauseVote({ roomId, myPlayerId }) {
   const propose = useCallback(async () => {
     setErr("");
     try {
-      await api.proposePause({ roomId, callerPlayerId: myPlayerId });
+      await api.proposePause({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret });
       await refresh();
     } catch (e) {
       setErr(e.message || "Failed to propose pausing.");
       throw e;
     }
-  }, [roomId, myPlayerId, refresh]);
+  }, [roomId, myPlayerId, mySecret, refresh]);
 
   const vote = useCallback(
     async (voteValue) => {
       if (!proposal) return;
       setErr("");
       try {
-        await api.votePause({ roomId, callerPlayerId: myPlayerId, proposalId: proposal.proposalId, vote: voteValue });
+        await api.votePause({
+          roomId,
+          callerPlayerId: myPlayerId,
+          callerSecret: mySecret,
+          proposalId: proposal.proposalId,
+          vote: voteValue,
+        });
         await refresh();
       } catch (e) {
         setErr(e.message || "Failed to submit your vote.");
         throw e;
       }
     },
-    [roomId, myPlayerId, proposal, refresh]
+    [roomId, myPlayerId, mySecret, proposal, refresh]
   );
 
   const iHaveVoted = proposal ? proposal.votedPlayerIds.includes(myPlayerId) : false;

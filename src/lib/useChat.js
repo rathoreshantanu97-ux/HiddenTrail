@@ -11,7 +11,7 @@ import * as api from "./supabaseApi.js";
 // where Mr. X's browser ever receives detectives-channel message bodies,
 // on top of the server-side role check inside that RPC.
 // ---------------------------------------------------------------------------
-export function useChat({ roomId, myPlayerId, myRole }) {
+export function useChat({ roomId, myPlayerId, mySecret, myRole }) {
   const [allMessages, setAllMessages] = useState([]);
   const [detectiveMessages, setDetectiveMessages] = useState([]);
   const lastAllRef = useRef("1970-01-01T00:00:00Z");
@@ -56,6 +56,7 @@ export function useChat({ roomId, myPlayerId, myRole }) {
           const newDet = await api.getDetectiveMessages({
             roomId,
             callerPlayerId: myPlayerId,
+            callerSecret: mySecret,
             after: lastDetRef.current,
           });
           if (newDet.length) {
@@ -74,7 +75,7 @@ export function useChat({ roomId, myPlayerId, myRole }) {
     } finally {
       inFlightRef.current = null;
     }
-  }, [roomId, myPlayerId, isDetective]);
+  }, [roomId, myPlayerId, mySecret, isDetective]);
 
 
   useEffect(() => {
@@ -85,13 +86,14 @@ export function useChat({ roomId, myPlayerId, myRole }) {
   }, [roomId, poll]);
 
   const sendToAll = useCallback(
-    (body) => api.sendMessage({ roomId, callerPlayerId: myPlayerId, channel: "all", body }).then(poll),
-    [roomId, myPlayerId, poll]
+    (body) => api.sendMessage({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, channel: "all", body }).then(poll),
+    [roomId, myPlayerId, mySecret, poll]
   );
 
   const sendToDetectives = useCallback(
-    (body) => api.sendMessage({ roomId, callerPlayerId: myPlayerId, channel: "detectives", body }).then(poll),
-    [roomId, myPlayerId, poll]
+    (body) =>
+      api.sendMessage({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, channel: "detectives", body }).then(poll),
+    [roomId, myPlayerId, mySecret, poll]
   );
 
   return {

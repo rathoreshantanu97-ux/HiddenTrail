@@ -6,8 +6,8 @@ import { seatLabel } from "../lib/seatLayout.js";
 // TAKEOVER PANEL — renders whatever the current takeover event's state
 // calls for. Nothing renders if there's no active event.
 // ---------------------------------------------------------------------------
-export default function TakeoverPanel({ roomId, myPlayerId, isHost, theme }) {
-  const { event, err, decide, startTakeoverNow, nominate, vote, iHaveNominated } = useTakeover({ roomId, myPlayerId });
+export default function TakeoverPanel({ roomId, myPlayerId, mySecret, isHost, theme }) {
+  const { event, err, decide, startTakeoverNow, nominate, vote, iHaveNominated } = useTakeover({ roomId, myPlayerId, mySecret });
 
   if (!event) return null;
 

@@ -8,7 +8,7 @@ import * as api from "./supabaseApi.js";
 // deciding, nominating, voting), plus flag/cancel used to drive the
 // inactivity-detection side of things.
 // ---------------------------------------------------------------------------
-export function useTakeover({ roomId, myPlayerId }) {
+export function useTakeover({ roomId, myPlayerId, mySecret }) {
   const [event, setEvent] = useState(null);
   const [err, setErr] = useState("");
 
@@ -34,53 +34,59 @@ export function useTakeover({ roomId, myPlayerId }) {
       if (!event) return;
       setErr("");
       try {
-        await api.hostDecideTakeover({ roomId, callerPlayerId: myPlayerId, eventId: event.eventId, decision });
+        await api.hostDecideTakeover({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, eventId: event.eventId, decision });
         await refresh();
       } catch (e) {
         setErr(e.message || "Failed to record decision.");
         throw e;
       }
     },
-    [roomId, myPlayerId, event, refresh]
+    [roomId, myPlayerId, mySecret, event, refresh]
   );
 
   const startTakeoverNow = useCallback(async () => {
     if (!event) return;
     setErr("");
     try {
-      await api.startTakeoverFromWaiting({ roomId, callerPlayerId: myPlayerId, eventId: event.eventId });
+      await api.startTakeoverFromWaiting({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, eventId: event.eventId });
       await refresh();
     } catch (e) {
       setErr(e.message || "Failed to start takeover.");
       throw e;
     }
-  }, [roomId, myPlayerId, event, refresh]);
+  }, [roomId, myPlayerId, mySecret, event, refresh]);
 
   const nominate = useCallback(async () => {
     if (!event) return;
     setErr("");
     try {
-      await api.nominateSelf({ roomId, callerPlayerId: myPlayerId, eventId: event.eventId });
+      await api.nominateSelf({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, eventId: event.eventId });
       await refresh();
     } catch (e) {
       setErr(e.message || "Failed to nominate yourself.");
       throw e;
     }
-  }, [roomId, myPlayerId, event, refresh]);
+  }, [roomId, myPlayerId, mySecret, event, refresh]);
 
   const vote = useCallback(
     async (nomineePlayerId) => {
       if (!event) return;
       setErr("");
       try {
-        await api.voteTakeoverNominee({ roomId, callerPlayerId: myPlayerId, eventId: event.eventId, nomineePlayerId });
+        await api.voteTakeoverNominee({
+          roomId,
+          callerPlayerId: myPlayerId,
+          callerSecret: mySecret,
+          eventId: event.eventId,
+          nomineePlayerId,
+        });
         await refresh();
       } catch (e) {
         setErr(e.message || "Failed to submit your vote.");
         throw e;
       }
     },
-    [roomId, myPlayerId, event, refresh]
+    [roomId, myPlayerId, mySecret, event, refresh]
   );
 
   const cancel = useCallback(async () => {

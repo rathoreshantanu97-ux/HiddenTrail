@@ -11,9 +11,9 @@ import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 // the caller (only rendered when isHost && redistributeRolesEnabled for
 // this room, mirroring every other feature toggle in this project).
 // ---------------------------------------------------------------------------
-export default function RedistributeRolesVote({ roomId, myPlayerId, isHost, numDetectives, totalPlayers, theme, resolveLabel }) {
+export default function RedistributeRolesVote({ roomId, myPlayerId, mySecret, isHost, numDetectives, totalPlayers, theme, resolveLabel }) {
   const enabled = useFeatureEnabled("redistribute_roles_enabled", roomId);
-  const { proposal, statusList, err, propose, vote, iHaveVoted } = useRedistributeVote({ roomId, myPlayerId });
+  const { proposal, statusList, err, propose, vote, iHaveVoted } = useRedistributeVote({ roomId, myPlayerId, mySecret });
   const [showForm, setShowForm] = useState(false);
   const [players, setPlayers] = useState([]);
   const [assignments, setAssignments] = useState({}); // playerId -> role

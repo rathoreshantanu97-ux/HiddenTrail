@@ -22,7 +22,7 @@ import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
 // `roomId` and `myPlayerId` are supplied by the room create/join flow
 // (App.jsx passes them in once the player has created or joined a room).
 // ---------------------------------------------------------------------------
-export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
+export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRole }) {
   const [match, setMatch] = useState(null);
   const [error, setError] = useState(null);
   const myMrxPositionRef = useRef(null);
@@ -30,12 +30,12 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
   const refreshMrxPosition = useCallback(async () => {
     if (myRole !== "mrx" || !roomId || !myPlayerId) return;
     try {
-      const pos = await api.getMrxPosition({ roomId, callerPlayerId: myPlayerId });
+      const pos = await api.getMrxPosition({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
       myMrxPositionRef.current = pos;
     } catch (e) {
       console.error("Failed to fetch Mr. X position:", e);
     }
-  }, [roomId, myPlayerId, myRole]);
+  }, [roomId, myPlayerId, myPlayerSecret, myRole]);
 
   const refreshMatch = useCallback(async () => {
     if (!roomId) return;
@@ -75,10 +75,10 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
   useEffect(() => {
     if (!myPlayerId) return;
     const id = setInterval(() => {
-      api.heartbeat({ playerId: myPlayerId }).catch(() => {});
+      api.heartbeat({ playerId: myPlayerId, callerSecret: myPlayerSecret }).catch(() => {});
     }, 15000);
     return () => clearInterval(id);
-  }, [myPlayerId]);
+  }, [myPlayerId, myPlayerSecret]);
 
   const startGame = useCallback(
     async (map) => {
@@ -130,6 +130,7 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
         await api.startGameRpc({
           roomId,
           callerPlayerId: myPlayerId,
+          callerSecret: myPlayerSecret,
           startPool: map.startPool,
           mrxStartingTickets: ticketCounts.mrx,
           detectiveStartingTickets: ticketCounts.detective,
@@ -144,61 +145,61 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myRole }) {
         throw e;
       }
     },
-    [roomId, myPlayerId, refreshMatch]
+    [roomId, myPlayerId, myPlayerSecret, refreshMatch]
   );
 
   const submitDetectiveMove = useCallback(
     async (_map, detId, to, mode) => {
       if (!roomId || !myPlayerId) return;
       try {
-        await api.makeDetectiveMove({ roomId, callerPlayerId: myPlayerId, detId, to, mode });
+        await api.makeDetectiveMove({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, detId, to, mode });
         await refreshMatch();
       } catch (e) {
         setError(e.message);
         throw e;
       }
     },
-    [roomId, myPlayerId, refreshMatch]
+    [roomId, myPlayerId, myPlayerSecret, refreshMatch]
   );
 
   const passTurn = useCallback(
     async (actor) => {
       if (!roomId || !myPlayerId) return;
       try {
-        await api.passTurn({ roomId, callerPlayerId: myPlayerId, actor });
+        await api.passTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, actor });
         await refreshMatch();
       } catch (e) {
         setError(e.message);
         throw e;
       }
     },
-    [roomId, myPlayerId, refreshMatch]
+    [roomId, myPlayerId, myPlayerSecret, refreshMatch]
   );
 
   const submitMrXMove = useCallback(
     async (_map, to, edgeMode, ticketUsed) => {
       if (!roomId || !myPlayerId) return;
       try {
-        await api.makeMrxMove({ roomId, callerPlayerId: myPlayerId, to, edgeMode, ticketUsed });
+        await api.makeMrxMove({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, to, edgeMode, ticketUsed });
         await refreshMatch();
       } catch (e) {
         setError(e.message);
         throw e;
       }
     },
-    [roomId, myPlayerId, refreshMatch]
+    [roomId, myPlayerId, myPlayerSecret, refreshMatch]
   );
 
   const activateDoubleMove = useCallback(async () => {
     if (!roomId || !myPlayerId) return;
     try {
-      await api.activateDoubleMoveRpc({ roomId, callerPlayerId: myPlayerId });
+      await api.activateDoubleMoveRpc({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
       await refreshMatch();
     } catch (e) {
       setError(e.message);
       throw e;
     }
-  }, [roomId, myPlayerId, refreshMatch]);
+  }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
 
   // No-op: online multiplayer has no "pass the device" handoff screen --
   // each player has their own device, so there's no local phase

@@ -9,7 +9,7 @@ import * as api from "./supabaseApi.js";
 // replaced by that takeover can propose reversing it (enforced
 // server-side in propose_takeover_reversal).
 // ---------------------------------------------------------------------------
-export function useTakeoverReversalVote({ roomId, myPlayerId }) {
+export function useTakeoverReversalVote({ roomId, myPlayerId, mySecret }) {
   const [proposal, setProposal] = useState(null);
   const [statusList, setStatusList] = useState([]);
   const [err, setErr] = useState("");
@@ -45,14 +45,14 @@ export function useTakeoverReversalVote({ roomId, myPlayerId }) {
     async (takeoverEventId) => {
       setErr("");
       try {
-        await api.proposeTakeoverReversal({ roomId, callerPlayerId: myPlayerId, takeoverEventId });
+        await api.proposeTakeoverReversal({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret, takeoverEventId });
         await refresh();
       } catch (e) {
         setErr(e.message || "Failed to propose a reversal.");
         throw e;
       }
     },
-    [roomId, myPlayerId, refresh]
+    [roomId, myPlayerId, mySecret, refresh]
   );
 
   const vote = useCallback(
@@ -63,6 +63,7 @@ export function useTakeoverReversalVote({ roomId, myPlayerId }) {
         await api.voteTakeoverReversal({
           roomId,
           callerPlayerId: myPlayerId,
+          callerSecret: mySecret,
           proposalId: proposal.proposalId,
           vote: voteValue,
         });
@@ -72,7 +73,7 @@ export function useTakeoverReversalVote({ roomId, myPlayerId }) {
         throw e;
       }
     },
-    [roomId, myPlayerId, proposal, refresh]
+    [roomId, myPlayerId, mySecret, proposal, refresh]
   );
 
   const iHaveVoted = statusList.some((p) => p.playerId === myPlayerId && p.status !== "pending");

@@ -48,7 +48,18 @@ export async function createRoom({
   });
   const row = rows?.[0];
   if (!row) throw new Error("Failed to create room");
-  return { roomId: row.out_room_id, roomCode: row.out_room_code, hostPlayerId: row.out_host_player_id };
+  // out_host_secret -- the host's session secret, returned ONLY here (at
+  // creation time) and never retrievable again except by re-authenticating
+  // via the room-code-based rejoin flow. Every subsequent action RPC now
+  // requires it alongside the player_id, since player_id alone sits in a
+  // deliberately-public table (see verify_player_secret in functions.sql
+  // for the full reasoning) and can no longer prove identity by itself.
+  return {
+    roomId: row.out_room_id,
+    roomCode: row.out_room_code,
+    hostPlayerId: row.out_host_player_id,
+    hostSecret: row.out_host_secret,
+  };
 }
 
 export async function lookupRoom(roomCode) {
@@ -74,7 +85,7 @@ export async function joinRoom({ roomCode, role, displayName }) {
   });
   const row = rows?.[0];
   if (!row) throw new Error("Failed to join room");
-  return { roomId: row.out_room_id, playerId: row.out_player_id };
+  return { roomId: row.out_room_id, playerId: row.out_player_id, playerSecret: row.out_player_secret };
 }
 
 export async function switchSeat({ roomId, playerId, newRole }) {
@@ -92,6 +103,7 @@ export async function computeSeatLayout({ numDetectives, totalPlayers }) {
 export async function startGameRpc({
   roomId,
   callerPlayerId,
+  callerSecret,
   startPool,
   mrxStartingTickets,
   detectiveStartingTickets,
@@ -103,6 +115,7 @@ export async function startGameRpc({
   const args = {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_start_pool: startPool,
     p_mrx_starting_tickets: mrxStartingTickets,
     p_detective_starting_tickets: detectiveStartingTickets,
@@ -122,56 +135,62 @@ export async function startGameRpc({
   await callRpc("start_game", args);
 }
 
-export async function getMrxPosition({ roomId, callerPlayerId }) {
+export async function getMrxPosition({ roomId, callerPlayerId, callerSecret }) {
   const rows = await callRpc("get_mrx_position", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
   });
   const row = rows?.[0];
   if (!row) return null; // not Mr. X, or game not started yet
   return { pos: row.out_mrx_pos, positionLog: row.out_mrx_position_log };
 }
 
-export async function makeDetectiveMove({ roomId, callerPlayerId, detId, to, mode }) {
+export async function makeDetectiveMove({ roomId, callerPlayerId, callerSecret, detId, to, mode }) {
   await callRpc("make_detective_move", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_det_id: detId,
     p_to_station: to,
     p_mode: mode,
   });
 }
 
-export async function makeMrxMove({ roomId, callerPlayerId, to, edgeMode, ticketUsed }) {
+export async function makeMrxMove({ roomId, callerPlayerId, callerSecret, to, edgeMode, ticketUsed }) {
   await callRpc("make_mrx_move", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_to_station: to,
     p_edge_mode: edgeMode,
     p_ticket_used: ticketUsed,
   });
 }
 
-export async function activateDoubleMoveRpc({ roomId, callerPlayerId }) {
+export async function activateDoubleMoveRpc({ roomId, callerPlayerId, callerSecret }) {
   await callRpc("activate_double_move", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
   });
 }
 
-export async function sendMessage({ roomId, callerPlayerId, channel, body }) {
+export async function sendMessage({ roomId, callerPlayerId, callerSecret, channel, body }) {
   await callRpc("send_message", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_channel: channel,
     p_body: body,
   });
 }
 
-export async function getDetectiveMessages({ roomId, callerPlayerId, after }) {
+export async function getDetectiveMessages({ roomId, callerPlayerId, callerSecret, after }) {
   const rows = await callRpc("get_detective_messages", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_after: after || "1970-01-01",
   });
   return (rows || []).map((r) => ({
@@ -197,8 +216,13 @@ export async function getAllChannelMessages({ roomId, after }) {
   }));
 }
 
-export async function reassignHost({ roomId, callerPlayerId, newHostPlayerId }) {
-  await callRpc("reassign_host", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_new_host_player_id: newHostPlayerId });
+export async function reassignHost({ roomId, callerPlayerId, callerSecret, newHostPlayerId }) {
+  await callRpc("reassign_host", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+    p_new_host_player_id: newHostPlayerId,
+  });
 }
 
 // Expanded to the full feature-override surface create_room accepts
@@ -208,6 +232,7 @@ export async function reassignHost({ roomId, callerPlayerId, newHostPlayerId }) 
 export async function updateRoomSettings({
   roomId,
   callerPlayerId,
+  callerSecret,
   mapId,
   numDetectives,
   totalPlayers,
@@ -220,6 +245,7 @@ export async function updateRoomSettings({
   await callRpc("update_room_settings", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_map_id: mapId,
     p_num_detectives: numDetectives,
     p_total_players: totalPlayers,
@@ -244,10 +270,11 @@ export async function updateRoomSettings({
 // in functions.sql for the full validation (ownership, allow-list,
 // duplicate-color rejection) -- this is a thin passthrough, all real
 // rules live server-side.
-export async function setSeatColor({ roomId, callerPlayerId, detectiveId, color }) {
+export async function setSeatColor({ roomId, callerPlayerId, callerSecret, detectiveId, color }) {
   await callRpc("set_seat_color", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_detective_id: detectiveId,
     p_color: color ?? null,
   });
@@ -260,30 +287,40 @@ export async function setSeatColor({ roomId, callerPlayerId, detectiveId, color 
 // passed on every call for validation/default-collision checking, same
 // reasoning as p_map_station_count elsewhere. See set_seat_name in
 // functions.sql for the full validation.
-export async function setSeatName({ roomId, callerPlayerId, detectiveId, name, mapCharacterNames }) {
+export async function setSeatName({ roomId, callerPlayerId, callerSecret, detectiveId, name, mapCharacterNames }) {
   await callRpc("set_seat_name", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_detective_id: detectiveId,
     p_name: name ?? null,
     p_map_character_names: mapCharacterNames ?? null,
   });
 }
 
-export async function passTurn({ roomId, callerPlayerId, actor }) {
-  await callRpc("pass_turn", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_actor: actor });
+export async function passTurn({ roomId, callerPlayerId, callerSecret, actor }) {
+  await callRpc("pass_turn", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+    p_actor: actor,
+  });
 }
 
-export async function leaveRoomPermanently({ roomId, playerId }) {
-  await callRpc("leave_room_permanently", { p_room_id: roomId, p_player_id: playerId });
+export async function leaveRoomPermanently({ roomId, playerId, callerSecret }) {
+  await callRpc("leave_room_permanently", { p_room_id: roomId, p_player_id: playerId, p_caller_secret: callerSecret });
 }
 
-export async function leaveLobby({ roomId, playerId }) {
-  await callRpc("leave_lobby", { p_room_id: roomId, p_player_id: playerId });
+export async function leaveLobby({ roomId, playerId, callerSecret }) {
+  await callRpc("leave_lobby", { p_room_id: roomId, p_player_id: playerId, p_caller_secret: callerSecret });
 }
 
-export async function proposeEndGame({ roomId, callerPlayerId }) {
-  const rows = await callRpc("propose_end_game", { p_room_id: roomId, p_caller_player_id: callerPlayerId });
+export async function proposeEndGame({ roomId, callerPlayerId, callerSecret }) {
+  const rows = await callRpc("propose_end_game", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+  });
   const row = rows?.[0];
   if (!row) throw new Error("Failed to propose ending the game");
   return { proposalId: row.out_proposal_id };
@@ -317,10 +354,11 @@ export async function getActiveEndGameProposal(roomId) {
   };
 }
 
-export async function voteEndGame({ roomId, callerPlayerId, proposalId, vote }) {
+export async function voteEndGame({ roomId, callerPlayerId, callerSecret, proposalId, vote }) {
   await callRpc("vote_end_game", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_proposal_id: proposalId,
     p_vote: vote,
   });
@@ -348,31 +386,39 @@ export async function getActiveTakeoverEvent(roomId) {
   };
 }
 
-export async function hostDecideTakeover({ roomId, callerPlayerId, eventId, decision }) {
+export async function hostDecideTakeover({ roomId, callerPlayerId, callerSecret, eventId, decision }) {
   await callRpc("host_decide_takeover", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_event_id: eventId,
     p_decision: decision,
   });
 }
 
-export async function startTakeoverFromWaiting({ roomId, callerPlayerId, eventId }) {
+export async function startTakeoverFromWaiting({ roomId, callerPlayerId, callerSecret, eventId }) {
   await callRpc("start_takeover_from_waiting", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_event_id: eventId,
   });
 }
 
-export async function nominateSelf({ roomId, callerPlayerId, eventId }) {
-  await callRpc("nominate_self", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_event_id: eventId });
+export async function nominateSelf({ roomId, callerPlayerId, callerSecret, eventId }) {
+  await callRpc("nominate_self", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+    p_event_id: eventId,
+  });
 }
 
-export async function voteTakeoverNominee({ roomId, callerPlayerId, eventId, nomineePlayerId }) {
+export async function voteTakeoverNominee({ roomId, callerPlayerId, callerSecret, eventId, nomineePlayerId }) {
   await callRpc("vote_takeover_nominee", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_event_id: eventId,
     p_nominee_player_id: nomineePlayerId,
   });
@@ -382,17 +428,22 @@ export async function cancelTakeoverEvent({ roomId, eventId }) {
   await callRpc("cancel_takeover_event", { p_room_id: roomId, p_event_id: eventId });
 }
 
-export async function reassignVacatedSeat({ roomId, callerPlayerId, vacatedRole, recipientPlayerId }) {
+export async function reassignVacatedSeat({ roomId, callerPlayerId, callerSecret, vacatedRole, recipientPlayerId }) {
   await callRpc("reassign_vacated_seat", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_vacated_role: vacatedRole,
     p_recipient_player_id: recipientPlayerId,
   });
 }
 
-export async function proposePause({ roomId, callerPlayerId }) {
-  const rows = await callRpc("propose_pause", { p_room_id: roomId, p_caller_player_id: callerPlayerId });
+export async function proposePause({ roomId, callerPlayerId, callerSecret }) {
+  const rows = await callRpc("propose_pause", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+  });
   const row = rows?.[0];
   if (!row) throw new Error("Failed to propose pausing");
   return { proposalId: row.out_proposal_id };
@@ -413,17 +464,22 @@ export async function getActivePauseProposal(roomId) {
   };
 }
 
-export async function votePause({ roomId, callerPlayerId, proposalId, vote }) {
+export async function votePause({ roomId, callerPlayerId, callerSecret, proposalId, vote }) {
   await callRpc("vote_pause", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_proposal_id: proposalId,
     p_vote: vote,
   });
 }
 
-export async function proposeResume({ roomId, callerPlayerId }) {
-  const rows = await callRpc("propose_resume", { p_room_id: roomId, p_caller_player_id: callerPlayerId });
+export async function proposeResume({ roomId, callerPlayerId, callerSecret }) {
+  const rows = await callRpc("propose_resume", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+  });
   const row = rows?.[0];
   if (!row) throw new Error("Failed to propose resuming");
   return { proposalId: row.out_proposal_id };
@@ -444,10 +500,11 @@ export async function getActiveResumeProposal(roomId) {
   };
 }
 
-export async function voteResume({ roomId, callerPlayerId, proposalId, vote }) {
+export async function voteResume({ roomId, callerPlayerId, callerSecret, proposalId, vote }) {
   await callRpc("vote_resume", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_proposal_id: proposalId,
     p_vote: vote,
   });
@@ -472,10 +529,11 @@ export async function checkPlayerStillInRoom({ roomId, playerId }) {
   };
 }
 
-export async function proposeTakeoverReversal({ roomId, callerPlayerId, takeoverEventId }) {
+export async function proposeTakeoverReversal({ roomId, callerPlayerId, callerSecret, takeoverEventId }) {
   const rows = await callRpc("propose_takeover_reversal", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_takeover_event_id: takeoverEventId,
   });
   const row = rows?.[0];
@@ -497,19 +555,21 @@ export async function getActiveTakeoverReversal(roomId) {
   };
 }
 
-export async function voteTakeoverReversal({ roomId, callerPlayerId, proposalId, vote }) {
+export async function voteTakeoverReversal({ roomId, callerPlayerId, callerSecret, proposalId, vote }) {
   await callRpc("vote_takeover_reversal", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_proposal_id: proposalId,
     p_vote: vote,
   });
 }
 
-export async function proposeRedistributeRoles({ roomId, callerPlayerId, newAssignments }) {
+export async function proposeRedistributeRoles({ roomId, callerPlayerId, callerSecret, newAssignments }) {
   const rows = await callRpc("propose_redistribute_roles", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_new_assignments: newAssignments,
   });
   const row = rows?.[0];
@@ -531,17 +591,18 @@ export async function getActiveRedistributeProposal(roomId) {
   };
 }
 
-export async function voteRedistributeRoles({ roomId, callerPlayerId, proposalId, vote }) {
+export async function voteRedistributeRoles({ roomId, callerPlayerId, callerSecret, proposalId, vote }) {
   await callRpc("vote_redistribute_roles", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
     p_proposal_id: proposalId,
     p_vote: vote,
   });
 }
 
-export async function heartbeat({ playerId }) {
-  await callRpc("heartbeat", { p_player_id: playerId });
+export async function heartbeat({ playerId, callerSecret }) {
+  await callRpc("heartbeat", { p_player_id: playerId, p_caller_secret: callerSecret });
 }
 
 export async function getPublicRooms() {
@@ -570,11 +631,33 @@ export async function rejoinLobbySeat({ playerId, displayName }) {
   const rows = await callRpc("rejoin_lobby_seat", { p_player_id: playerId, p_display_name: displayName ?? null });
   const row = rows?.[0];
   if (!row) throw new Error("Failed to rejoin.");
-  return { roomId: row.out_room_id, role: row.out_role };
+  // Every rejoin ROTATES the session secret server-side -- a fresh one is
+  // issued and returned only here, invalidating whatever was in play
+  // before. Callers must persist out_player_secret going forward.
+  return { roomId: row.out_room_id, role: row.out_role, playerSecret: row.out_player_secret };
 }
 
-export async function freeInactiveLobbySeat({ roomId, callerPlayerId, targetRole }) {
-  await callRpc("free_inactive_lobby_seat", { p_room_id: roomId, p_caller_player_id: callerPlayerId, p_target_role: targetRole });
+// rejoinActiveSeat -- the mid-game counterpart to rejoinLobbySeat, for a
+// player reconnecting via room code to a seat that's already playing
+// (not still in the lobby). Same "must currently be inactive" gate, same
+// secret-rotation behavior. Previously there was no dedicated RPC for
+// this at all -- the client just adopted a bare, publicly-readable
+// player_id with no server-side handshake, which is exactly the gap the
+// session-secret work closes.
+export async function rejoinActiveSeat({ playerId, displayName }) {
+  const rows = await callRpc("rejoin_active_seat", { p_player_id: playerId, p_display_name: displayName ?? null });
+  const row = rows?.[0];
+  if (!row) throw new Error("Failed to rejoin.");
+  return { roomId: row.out_room_id, role: row.out_role, playerSecret: row.out_player_secret };
+}
+
+export async function freeInactiveLobbySeat({ roomId, callerPlayerId, callerSecret, targetRole }) {
+  await callRpc("free_inactive_lobby_seat", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+    p_target_role: targetRole,
+  });
 }
 
 export async function getReconnectableSeats(roomCode) {
@@ -585,13 +668,6 @@ export async function getReconnectableSeats(roomCode) {
     role: r.out_role,
     displayName: r.out_display_name,
   }));
-}
-
-export async function rejoinOwnSeat(playerId) {
-  const rows = await callRpc("rejoin_own_seat", { p_player_id: playerId });
-  const row = rows?.[0];
-  if (!row) throw new Error("Failed to rejoin.");
-  return { roomId: row.out_room_id, role: row.out_role };
 }
 
 export async function getActivePlayerIds(roomId) {
@@ -626,7 +702,18 @@ export async function getEffectiveDestinationHighlightStyle(roomId) {
 }
 
 export async function fetchPlayers(roomId) {
-  const { data, error } = await supabase.from("players").select("*").eq("room_id", roomId);
+  // Explicit column list, NOT select("*") -- players.session_secret is a
+  // real column now (see functions.sql), and its column-level SELECT
+  // privilege is deliberately revoked from anon/authenticated so it can
+  // never be read this way, only ever returned inline by the specific
+  // RPC that issues/rotates it for its own owner. select("*") against a
+  // column this role has no privilege on fails outright, so this list
+  // must be kept in sync with whatever the lobby/color/name pickers and
+  // presence logic actually need.
+  const { data, error } = await supabase
+    .from("players")
+    .select("id, room_id, role, display_name, connected_at, last_seen_at")
+    .eq("room_id", roomId);
   if (error) throw new Error(error.message);
   return data || [];
 }

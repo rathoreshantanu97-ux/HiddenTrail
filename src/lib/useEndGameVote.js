@@ -8,7 +8,7 @@ import * as api from "./supabaseApi.js";
 // second realtime subscription just for this). Exposes the current
 // proposal state (if any) plus propose/vote actions.
 // ---------------------------------------------------------------------------
-export function useEndGameVote({ roomId, myPlayerId }) {
+export function useEndGameVote({ roomId, myPlayerId, mySecret }) {
   const [proposal, setProposal] = useState(null);
   const [statusList, setStatusList] = useState([]);
   const [err, setErr] = useState("");
@@ -39,27 +39,33 @@ export function useEndGameVote({ roomId, myPlayerId }) {
   const propose = useCallback(async () => {
     setErr("");
     try {
-      await api.proposeEndGame({ roomId, callerPlayerId: myPlayerId });
+      await api.proposeEndGame({ roomId, callerPlayerId: myPlayerId, callerSecret: mySecret });
       await refresh();
     } catch (e) {
       setErr(e.message || "Failed to propose ending the game.");
       throw e;
     }
-  }, [roomId, myPlayerId, refresh]);
+  }, [roomId, myPlayerId, mySecret, refresh]);
 
   const vote = useCallback(
     async (voteValue) => {
       if (!proposal) return;
       setErr("");
       try {
-        await api.voteEndGame({ roomId, callerPlayerId: myPlayerId, proposalId: proposal.proposalId, vote: voteValue });
+        await api.voteEndGame({
+          roomId,
+          callerPlayerId: myPlayerId,
+          callerSecret: mySecret,
+          proposalId: proposal.proposalId,
+          vote: voteValue,
+        });
         await refresh();
       } catch (e) {
         setErr(e.message || "Failed to submit your vote.");
         throw e;
       }
     },
-    [roomId, myPlayerId, proposal, refresh]
+    [roomId, myPlayerId, mySecret, proposal, refresh]
   );
 
   const iHaveVoted = proposal ? proposal.votedPlayerIds.includes(myPlayerId) : false;

@@ -223,6 +223,19 @@ export default function App({ account, onLogout }) {
   const [mpRoomId, setMpRoomId] = useState(null);
   const [mpRoomCode, setMpRoomCode] = useState(null);
   const [mpPlayerId, setMpPlayerId] = useState(null);
+  // mpPlayerSecret -- issued once by create_room/join_room, or ROTATED on
+  // every rejoin (rejoin_lobby_seat/rejoin_active_seat). Required
+  // alongside mpPlayerId by every action RPC now (moves, votes, chat,
+  // seat pickers, etc) -- see verify_player_secret in functions.sql.
+  // player_id alone used to be sufficient "proof" of identity, but the
+  // players table is deliberately publicly readable (every other seat's
+  // id, role, and display name needs to be visible for the lobby/color
+  // picker/presence UI), so player_id by itself could never actually
+  // prove who was calling. This is the actual secret half of that pair,
+  // and it's never selectable from the players table itself (see
+  // fetchPlayers' explicit column list) -- it only ever arrives here via
+  // the specific RPC that issues or rotates it for its own caller.
+  const [mpPlayerSecret, setMpPlayerSecret] = useState(null);
   const [mpRole, setMpRole] = useState(null);
   const [mpIsHost, setMpIsHost] = useState(false);
   const [mpNumDetectives, setMpNumDetectives] = useState(3);
@@ -254,6 +267,7 @@ export default function App({ account, onLogout }) {
   const supabaseStore = useSupabaseGameStore({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     myPlayerId: mpPlayerId,
+    myPlayerSecret: mpPlayerSecret,
     myRole: mpRole,
   });
   const { showEndedScreen: mpShowEndedScreen } = useDelayedEndedTransition(supabaseStore.match);
@@ -397,6 +411,7 @@ export default function App({ account, onLogout }) {
           setMpRoomId(parsed.roomId);
           setMpRoomCode(parsed.roomCode);
           setMpPlayerId(parsed.playerId);
+          setMpPlayerSecret(parsed.playerSecret || null);
           setMpRole(parsed.role);
           setMpIsHost(parsed.isHost);
           setMpNumDetectives(parsed.numDetectives);
@@ -416,6 +431,7 @@ export default function App({ account, onLogout }) {
       roomId: mpRoomId,
       roomCode: mpRoomCode,
       playerId: mpPlayerId,
+      playerSecret: mpPlayerSecret,
       role: mpRole,
       isHost: mpIsHost,
       numDetectives: mpNumDetectives,
@@ -433,7 +449,7 @@ export default function App({ account, onLogout }) {
   }
 
   async function handleCreateRoom({ displayName, mapId, numDetectives, totalPlayers, hostRole, mapStationCount, turnTimerSeconds, featureOverrides, isPublic, roomName }) {
-    const { roomId, roomCode, hostPlayerId } = await api.createRoom({
+    const { roomId, roomCode, hostPlayerId, hostSecret } = await api.createRoom({
       mapId,
       numDetectives,
       totalPlayers,
@@ -448,6 +464,7 @@ export default function App({ account, onLogout }) {
     setMpRoomId(roomId);
     setMpRoomCode(roomCode);
     setMpPlayerId(hostPlayerId);
+    setMpPlayerSecret(hostSecret);
     setMpRole(hostRole);
     setMpIsHost(true);
     setMpNumDetectives(numDetectives);
@@ -461,6 +478,7 @@ export default function App({ account, onLogout }) {
         roomId,
         roomCode,
         playerId: hostPlayerId,
+        playerSecret: hostSecret,
         role: hostRole,
         isHost: true,
         numDetectives,
@@ -477,11 +495,12 @@ export default function App({ account, onLogout }) {
   }
 
   async function handleConfirmJoin({ displayName, roomCode, role }) {
-    const { roomId, playerId } = await api.joinRoom({ roomCode, role, displayName });
+    const { roomId, playerId, playerSecret } = await api.joinRoom({ roomCode, role, displayName });
     const info = await api.lookupRoom(roomCode); // to get mapId/numDetectives/totalPlayers for the lobby screen
     setMpRoomId(roomId);
     setMpRoomCode(roomCode);
     setMpPlayerId(playerId);
+    setMpPlayerSecret(playerSecret);
     setMpRole(role);
     setMpIsHost(false);
     setMpNumDetectives(info.numDetectives);
@@ -495,6 +514,7 @@ export default function App({ account, onLogout }) {
         roomId,
         roomCode,
         playerId,
+        playerSecret,
         role,
         isHost: false,
         numDetectives: info.numDetectives,
@@ -509,16 +529,22 @@ export default function App({ account, onLogout }) {
   // Rejoining an EXISTING seat mid-game (a disconnected/refreshed
   // player getting back into their own seat, NOT a fresh join --
   // join_room explicitly refuses a started game, which is exactly what
-  // this path is for). Mirrors handleConfirmJoin's final "settle into
-  // this session" steps, but starting from a known player_id/role
-  // (chosen from get_reconnectable_seats) rather than a fresh join
-  // response.
-  async function handleRejoin({ playerId, roomId, role, roomCode, displayName }) {
+  // this path is for). Calls rejoin_active_seat FIRST -- this both
+  // re-verifies server-side that the chosen seat is genuinely inactive
+  // (defense in depth against the seat list going stale between fetch
+  // and click) AND rotates a fresh session secret for it, which is the
+  // actual credential every subsequent action RPC needs. The raw
+  // playerId/role handed in from the reconnect list is otherwise just a
+  // starting point -- the RPC's own response (roomId/role) is what's
+  // actually trusted from here on.
+  async function handleRejoin({ playerId, roomCode, displayName }) {
+    const { roomId, role, playerSecret } = await api.rejoinActiveSeat({ playerId, displayName });
     const room = await api.fetchRoom(roomId); // for mapId/numDetectives/totalPlayers/host_player_id
     const isHost = room.host_player_id === playerId;
     setMpRoomId(roomId);
     setMpRoomCode(roomCode);
     setMpPlayerId(playerId);
+    setMpPlayerSecret(playerSecret);
     setMpRole(role);
     setMpIsHost(isHost);
     setMpNumDetectives(room.num_detectives);
@@ -532,6 +558,7 @@ export default function App({ account, onLogout }) {
         roomId,
         roomCode,
         playerId,
+        playerSecret,
         role,
         isHost,
         numDetectives: room.num_detectives,
@@ -548,12 +575,13 @@ export default function App({ account, onLogout }) {
   // already taken", since their original row was never removed). Lands
   // them back in the lobby exactly as if they'd never left.
   async function handleLobbyRejoin({ playerId, roomCode, displayName }) {
-    const { roomId, role } = await api.rejoinLobbySeat({ playerId, displayName });
+    const { roomId, role, playerSecret } = await api.rejoinLobbySeat({ playerId, displayName });
     const room = await api.fetchRoom(roomId);
     const isHost = room.host_player_id === playerId;
     setMpRoomId(roomId);
     setMpRoomCode(roomCode);
     setMpPlayerId(playerId);
+    setMpPlayerSecret(playerSecret);
     setMpRole(role);
     setMpIsHost(isHost);
     setMpNumDetectives(room.num_detectives);
@@ -567,6 +595,7 @@ export default function App({ account, onLogout }) {
         roomId,
         roomCode,
         playerId,
+        playerSecret,
         role,
         isHost,
         numDetectives: room.num_detectives,
@@ -596,7 +625,7 @@ export default function App({ account, onLogout }) {
     // and the scheduled job remains the fallback safety net if this call
     // fails for any reason (network issue, etc).
     if (mpRoomId && mpPlayerId) {
-      api.leaveRoomPermanently({ roomId: mpRoomId, playerId: mpPlayerId }).catch((e) => {
+      api.leaveRoomPermanently({ roomId: mpRoomId, playerId: mpPlayerId, callerSecret: mpPlayerSecret }).catch((e) => {
         console.error("Failed to notify server of room departure (non-fatal, scheduled cleanup will catch it eventually):", e);
       });
     }
@@ -604,6 +633,7 @@ export default function App({ account, onLogout }) {
     setMpRoomId(null);
     setMpRoomCode(null);
     setMpPlayerId(null);
+    setMpPlayerSecret(null);
     setMpRole(null);
     setMpIsHost(false);
     setAppMode("landing");
@@ -887,6 +917,7 @@ export default function App({ account, onLogout }) {
             setMpRoomId(null);
             setMpRoomCode(null);
             setMpPlayerId(null);
+            setMpPlayerSecret(null);
             setMpRole(null);
             setMpIsHost(false);
             setAppMode("landing");
@@ -901,6 +932,7 @@ export default function App({ account, onLogout }) {
           roomId={mpRoomId}
           roomCode={mpRoomCode}
           myPlayerId={mpPlayerId}
+          mySecret={mpPlayerSecret}
           myRole={mpRole}
           onRoleChanged={setMpRole}
           isHost={liveIsHost}
@@ -928,6 +960,7 @@ export default function App({ account, onLogout }) {
             setMpRoomId(null);
             setMpRoomCode(null);
             setMpPlayerId(null);
+            setMpPlayerSecret(null);
             setMpRole(null);
             setMpIsHost(false);
             setAppMode("landing");
@@ -971,7 +1004,15 @@ export default function App({ account, onLogout }) {
     }
 
     if (match.phase === "paused") {
-      return withRulebook(<PausedScreen roomId={mpRoomId} myPlayerId={mpPlayerId} onResumed={() => {}} resolveLabel={resolveVoterLabel} />);
+      return withRulebook(
+        <PausedScreen
+          roomId={mpRoomId}
+          myPlayerId={mpPlayerId}
+          mySecret={mpPlayerSecret}
+          onResumed={() => {}}
+          resolveLabel={resolveVoterLabel}
+        />
+      );
     }
 
     // Derive the huddle-panel data from Presence: every OTHER detective
@@ -1026,8 +1067,8 @@ export default function App({ account, onLogout }) {
         extraHeaderContent={
           <>
             <RulebookButton compact onClick={() => setShowRulebook(true)} />
-            <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} resolveLabel={resolveVoterLabel} />
-            <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} resolveLabel={resolveVoterLabel} />
+            <PauseVote roomId={mpRoomId} myPlayerId={mpPlayerId} mySecret={mpPlayerSecret} resolveLabel={resolveVoterLabel} />
+            <EndGameVote roomId={mpRoomId} myPlayerId={mpPlayerId} mySecret={mpPlayerSecret} resolveLabel={resolveVoterLabel} />
           </>
         }
         extraHeaderContentBelow={
@@ -1042,6 +1083,7 @@ export default function App({ account, onLogout }) {
               <TakeoverReversalVote
                 roomId={mpRoomId}
                 myPlayerId={mpPlayerId}
+                mySecret={mpPlayerSecret}
                 completedTakeoverEventId={mpSpectatorInfo?.takeoverEventId || null}
                 theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }}
                 resolveLabel={resolveVoterLabel}
@@ -1049,6 +1091,7 @@ export default function App({ account, onLogout }) {
               <RedistributeRolesVote
                 roomId={mpRoomId}
                 myPlayerId={mpPlayerId}
+                mySecret={mpPlayerSecret}
                 isHost={liveIsHost}
                 numDetectives={liveNumDetectives}
                 totalPlayers={liveTotalPlayers}
@@ -1056,13 +1099,20 @@ export default function App({ account, onLogout }) {
                 resolveLabel={resolveVoterLabel}
               />
             </div>
-            <TakeoverPanel roomId={mpRoomId} myPlayerId={mpPlayerId} isHost={liveIsHost} theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }} />
+            <TakeoverPanel
+              roomId={mpRoomId}
+              myPlayerId={mpPlayerId}
+              mySecret={mpPlayerSecret}
+              isHost={liveIsHost}
+              theme={{ mrxName: mrxName(), detectiveTeamName: map.detectiveTeamName }}
+            />
           </div>
         }
         belowTicketsContent={
           <ChatPanel
             roomId={mpRoomId}
             myPlayerId={mpPlayerId}
+            mySecret={mpPlayerSecret}
             myRole={mpRole}
             myDisplayName={mpDisplayName}
             detectiveTeamName={map.detectiveTeamName}

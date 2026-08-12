@@ -29,7 +29,7 @@ import { styles } from "./GameBoard.jsx";
 // every field from it, so "open, look, cancel" or "open, save with no
 // changes" are both true no-ops.
 // ---------------------------------------------------------------------------
-export default function EditRoomSettingsForm({ roomId, myPlayerId, currentMapId, currentNumDetectives, currentTotalPlayers, onSaved, onCancel }) {
+export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, currentMapId, currentNumDetectives, currentTotalPlayers, onSaved, onCancel }) {
   const MAP_LIST = useActiveMaps();
   const [mapId, setMapId] = useState(currentMapId);
   const [numDetectives, setNumDetectives] = useState(currentNumDetectives);
@@ -96,6 +96,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, currentMapId,
       await api.updateRoomSettings({
         roomId,
         callerPlayerId: myPlayerId,
+        callerSecret: mySecret,
         mapId,
         numDetectives,
         totalPlayers: numDetectives + 1,

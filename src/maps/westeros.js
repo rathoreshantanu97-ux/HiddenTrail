@@ -159,10 +159,8 @@ const EDGES_MET2 = [
   [1,23,"underground"],
   [1,29,"underground"],
   [35,50,"underground"],
-  [61,64,"bus"],
   [2,10,"bus"],
   [2,11,"bus"],
-  [24,62,"bus"],
   [47,57,"bus"],
   [3,6,"bus"],
   [55,56,"bus"],
@@ -177,7 +175,6 @@ const EDGES_MET2 = [
   [36,40,"bus"],
   [13,19,"bus"],
   [6,11,"bus"],
-  [50,63,"bus"],
   [42,47,"bus"],
   [1,6,"taxi"],
   [2,16,"taxi"],
@@ -272,6 +269,37 @@ const EDGES_MET2 = [
   [57,42,"taxi"],
   [59,42,"taxi"],
   [61,63,"taxi"],
+  // Dead-end fixes -- these 3 stations previously had exactly ONE
+  // connection each (a genuine dead end that forces backtracking the
+  // same edge to leave), verified via a real degree count of the whole
+  // graph, not eyeballed. Each gets one additional taxi link to its
+  // nearest neighbor with real lore adjacency (checked for clearance --
+  // none pass close to a third station).
+  [1,3,"taxi"], // Winterfell <-> The Wall (both North, Night's Watch route)
+  [8,9,"taxi"], // Karhold <-> Last Hearth (neighboring Northern keeps)
+  [57,58,"taxi"], // Godsgrace <-> Salt Shore (both Dorne)
+  // Essos overland road -- Volantis and Myr sit on the same landmass, a
+  // normal foot route between them (paired with the Ship route below,
+  // this also fixes Myr's old dead-end status).
+  [63,64,"taxi"],
+];
+
+// FERRY_EDGES_MET2 -- the "Ship" mode (Mr.X-only secret route, always
+// costs a black ticket, same mechanic as Bengaluru's "Secret Tunnel" and
+// City of Sendhwa's ferry chain) was defined in MODE_GOT below but had
+// ZERO actual routes, meaning the Ship ticket was completely unusable --
+// confirmed by grep, this array was hardcoded empty. Fixed with a
+// deliberate CHAIN (not a triangle, same design rule as Bengaluru's own
+// secret-tunnel chain): Gulltown <-> Pentos <-> Myr, Pentos as the
+// shared junction. This also replaces two edges that were previously
+// modeled as "bus" (Horse) directly crossing the Narrow Sea -- a real
+// lore/mechanics mismatch (you cannot ride a horse across open water) --
+// with the actually-correct Ship mode, while giving Pentos and Myr (both
+// former dead ends) real connectivity. Both legs verified with wide
+// clearance from every other station (8.5+ units).
+const FERRY_EDGES_MET2 = [
+  [24,62], // Gulltown <-> Pentos
+  [62,64], // Pentos <-> Myr
 ];
 
 const MAJOR_STATIONS_MET2 = new Set([1,23,29,35,42,50,55,61]);
@@ -279,10 +307,10 @@ const MAJOR_STATIONS_MET2 = new Set([1,23,29,35,42,50,55,61]);
 const MAJOR_LABEL_DIR_MET2 = {
   1: "NW",   // Winterfell
   23: "NE",   // The Eyrie
-  29: "W",   // Casterly Rock
+  29: "N",   // Casterly Rock -- was "W", ran the label off the left edge of the viewBox (verified: box extended to x=-1.9 against a 0-100 canvas)
   35: "SE",   // King's Landing
   42: "SW",   // Oldtown
-  50: "SE",   // Storm's End
+  50: "N",   // Storm's End -- was "SE", collided with the Volantis node (verified: label box overlapped it directly)
   55: "S",   // Sunspear
   61: "SE",   // Braavos
 };
@@ -346,6 +374,40 @@ const MINOR_LABEL_DIR_MET2 = {
   64: "SE",
 };
 
+// MANUAL_CURVE_OFFSETS_MET2 -- the Dragon (underground) backbone is this
+// map's signature feature (a sparse express network connecting only the
+// 8 major seats), but as single point-to-point lines with no automatic
+// curving (auto-curve only kicks in for a station PAIR with 2+ edges,
+// and every one of these pairs has just the one Dragon edge), 9 of the
+// 11 Dragon routes rendered as straight lines running almost directly
+// THROUGH an uninvolved third station -- confirmed by direct numeric
+// clearance check, several under 1 unit (i.e. the line visually passing
+// right over the node), one ([35,61] King's Landing<->Braavos) at just
+// 0.05 units from Storm's End -- essentially on top of it. Every offset
+// below was computed the same way as Sendhwa's own curve fixes: search
+// for the offset that MAXIMIZES the worst-case clearance from every
+// OTHER station on the map (not just the one it was originally
+// colliding with), checked numerically against the actual rendered
+// quadratic-Bezier curve (same math as curveGeometry.js), not eyeballed.
+// [1,23] (Winterfell<->The Eyrie, the longest Dragon leg at ~66 units)
+// additionally required constraining the search to keep the curve's
+// control point on-canvas -- the unconstrained best offset swung it off
+// the top edge of the viewBox.
+const MANUAL_CURVE_OFFSETS_MET2 = {
+  "1-23": 12.24, // Winterfell <-> The Eyrie
+  "1-29": 10.65, // Winterfell <-> Casterly Rock
+  "23-35": -14.13, // The Eyrie <-> King's Landing
+  "23-50": -4.8, // The Eyrie <-> Storm's End
+  "29-42": 3.99, // Casterly Rock <-> Oldtown
+  "35-42": 14.29, // King's Landing <-> Oldtown
+  "35-61": 9.13, // King's Landing <-> Braavos -- was passing 0.05 units from Storm's End
+  "42-55": -14.24, // Oldtown <-> Sunspear
+  "50-55": -18.41, // Storm's End <-> Sunspear
+  // Essos overland route (taxi, not Dragon) -- the straight line passed
+  // only 1.92 units from Braavos, needing the same treatment.
+  "63-64": -11.85, // Volantis <-> Myr
+};
+
 // Region hulls: convex hulls of each region's actual station cluster,
 // padded outward -- always correctly wrap their stations.
 const MET2_REGION_HULLS = {
@@ -387,12 +449,13 @@ export const westerosMap = {
   subtitle: "Game of Thrones · Night King vs. the realm",
   stations: STATIONS_MET2,
   edges: EDGES_MET2,
-  ferryEdges: [],
+  ferryEdges: FERRY_EDGES_MET2,
   names: STATION_NAMES_MET2,
   majorStations: MAJOR_STATIONS_MET2,
   majorLabelDir: MAJOR_LABEL_DIR_MET2,
   minorLabelDir: MINOR_LABEL_DIR_MET2,
   modeTheme: MODE_GOT,
+  manualCurveOffsets: MANUAL_CURVE_OFFSETS_MET2,
   viewW: MET2_VIEW_W,
   viewH: MET2_VIEW_H,
   background: {

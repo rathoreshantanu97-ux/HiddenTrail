@@ -1683,19 +1683,21 @@ export default function GameBoard({
                         and ticket-aware -- stacked one ring per
                         currently-highlighted detective that can reach
                         this station, so overlapping sets from different
-                        detectives stay distinguishable by color. */}
+                        detectives stay distinguishable by color. Per
+                        explicit design decision, this now reuses the SAME
+                        game-level highlight ring system as every other
+                        highlight on the board (highlightDestinationStyle
+                        -- ring/rotating/blink/static/none, whatever the
+                        room's admin-configured setting is) rather than a
+                        separate bespoke filled-circle style -- one
+                        consistent highlighting language for the whole
+                        board, not two. Each ring is colored to match its
+                        own detective (rd.color) instead of a flat black,
+                        so overlapping highlights from different
+                        detectives stay distinguishable by color, same
+                        color-coding already used for origin rings below. */}
                     {reachingDetectives.map((rd, i) => (
-                      <circle
-                        key={rd.detId}
-                        cx={x}
-                        cy={y}
-                        r={nodeR + 1.0 + i * 0.4}
-                        fill={i === 0 ? rd.color : "none"}
-                        opacity={i === 0 ? 0.22 : 0.85}
-                        stroke={rd.color}
-                        strokeWidth={0.3}
-                        strokeDasharray={i === 0 ? undefined : "0.4,0.4"}
-                      />
+                      <HighlightRing key={rd.detId} x={x} y={y} radius={nodeR + 0.7 + i * 0.4} color={rd.color} strokeWidth={0.3} dashed={i > 0} style={highlightDestinationStyle} />
                     ))}
                     {/* Origin ring for any highlighted detective's CURRENT
                         position -- lets you see, at a glance, whose

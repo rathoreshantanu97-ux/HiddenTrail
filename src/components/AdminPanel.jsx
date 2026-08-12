@@ -591,6 +591,8 @@ export default function AdminPanel({ accountId, onBack }) {
             { key: "pauseResume", label: "Pause / resume" },
             { key: "redistributeRoles", label: "Host: redistribute roles" },
             { key: "routeExplorer", label: "Route explorer (show reachable stations by mode)" },
+            { key: "draw", label: "Freehand drawing / annotation layer (detectives only)" },
+            { key: "peek", label: "Peek into a teammate's screen" },
           ].map(({ key, label }) => (
             <div key={key} style={styles.featureRow}>
               <span style={styles.featureLabel}>{label}</span>

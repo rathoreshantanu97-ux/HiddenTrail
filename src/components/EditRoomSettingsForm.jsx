@@ -89,6 +89,8 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
           destinationHighlightStyle: room.destination_highlight_style_override,
           routeExplorer: room.route_explorer_enabled_override,
           roundScalingRatio: room.round_scaling_ratio_override,
+          draw: room.draw_enabled_override,
+          peek: room.peek_enabled_override,
         });
       })
       .catch((e) => console.error("Failed to fetch current room settings:", e))
@@ -253,6 +255,26 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
                 type="checkbox"
                 checked={featureOverrides.routeExplorer ?? featureConfig.routeExplorerEnabled}
                 onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, routeExplorer: e.target.checked }))}
+              />
+            </label>
+          )}
+          {featureConfig.drawOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Allow the freehand drawing / annotation layer</span>
+              <input
+                type="checkbox"
+                checked={featureOverrides.draw ?? featureConfig.drawEnabled}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, draw: e.target.checked }))}
+              />
+            </label>
+          )}
+          {featureConfig.peekOverridable && (
+            <label style={styles.featureOverrideRow}>
+              <span>Allow peeking into a teammate's screen</span>
+              <input
+                type="checkbox"
+                checked={featureOverrides.peek ?? featureConfig.peekEnabled}
+                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, peek: e.target.checked }))}
               />
             </label>
           )}

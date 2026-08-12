@@ -45,6 +45,8 @@ export async function createRoom({
     p_destination_highlight_style_override: featureOverrides.destinationHighlightStyle ?? null,
     p_route_explorer_override: featureOverrides.routeExplorer ?? null,
     p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
+    p_draw_override: featureOverrides.draw ?? null,
+    p_peek_override: featureOverrides.peek ?? null,
     p_is_public: isPublic,
     p_room_name: roomName,
   });
@@ -264,6 +266,8 @@ export async function updateRoomSettings({
     p_destination_highlight_style_override: featureOverrides.destinationHighlightStyle ?? null,
     p_route_explorer_override: featureOverrides.routeExplorer ?? null,
     p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
+    p_draw_override: featureOverrides.draw ?? null,
+    p_peek_override: featureOverrides.peek ?? null,
     p_is_public: isPublic,
     p_room_name: roomName,
   });

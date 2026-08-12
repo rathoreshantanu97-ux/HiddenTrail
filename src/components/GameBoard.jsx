@@ -416,6 +416,8 @@ export default function GameBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myPeekable]);
   const routeExplorerEnabled = useFeatureEnabled("route_explorer_enabled", roomId);
+  const drawEnabled = useFeatureEnabled("draw_enabled", roomId);
+  const peekEnabled = useFeatureEnabled("peek_enabled", roomId);
   const [message, setMessage] = useState("");
   const dragState = React.useRef(null);
   const svgRef = React.useRef(null);
@@ -1093,6 +1095,7 @@ export default function GameBoard({
               their own turn to act starts. See the auto-release effect
               below for the case where the buffer ends WHILE peeking. */}
           {iAmDetective &&
+            peekEnabled &&
             routeExplorerEnabled &&
             preThinkActive &&
             detectivePlayersRoster.filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false).length > 0 && (
@@ -1128,7 +1131,7 @@ export default function GameBoard({
               it's a durable preference you'd want to set once, not
               something to fumble with in the few seconds the buffer is
               actually running. */}
-          {iAmDetective && routeExplorerEnabled && (
+          {iAmDetective && peekEnabled && routeExplorerEnabled && (
             <label style={styles.peekToggleRow}>
               <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
               Let teammates peek into my screen
@@ -1140,7 +1143,7 @@ export default function GameBoard({
               below), never visible to Mr.X. While peeking a teammate's
               screen, these three buttons draw on THEIR board instead of
               yours (see applyStrokeAction) -- the label reflects that. */}
-          {iAmDetective && (
+          {iAmDetective && drawEnabled && (
             <div style={styles.drawToolbar}>
               <button
                 type="button"
@@ -2081,7 +2084,7 @@ export default function GameBoard({
                   in-progress stroke (liveStrokePoints) renders regardless
                   of peek state, since that's immediate feedback for the
                   hand currently drawing. */}
-              {iAmDetective && (
+              {iAmDetective && drawEnabled && (
                 <g style={{ pointerEvents: "none" }}>
                   {strokesToRender.map((s) => (
                     <path key={s.id} d={pointsToPath(s.points)} fill="none" stroke={styles.strokeColor} strokeWidth={0.35} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />

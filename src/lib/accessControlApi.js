@@ -367,6 +367,8 @@ export async function getFeatureConfig() {
     routeExplorerEnabled: true, routeExplorerOverridable: true,
     roundScalingRatio: 1.0, roundScalingOverridable: true,
     publicRoomsEnabled: true,
+    drawEnabled: true, drawOverridable: true,
+    peekEnabled: true, peekOverridable: true,
   };
   let row;
   try {
@@ -406,6 +408,10 @@ export async function getFeatureConfig() {
     roundScalingRatio: row.out_round_scaling_ratio,
     roundScalingOverridable: row.out_round_scaling_overridable,
     publicRoomsEnabled: row.out_public_rooms_enabled,
+    drawEnabled: row.out_draw_enabled,
+    drawOverridable: row.out_draw_overridable,
+    peekEnabled: row.out_peek_enabled,
+    peekOverridable: row.out_peek_overridable,
   };
 }
 
@@ -431,6 +437,10 @@ export async function setFeatureToggles({ callerAccountId, config }) {
     p_round_scaling_ratio: config.roundScalingRatio,
     p_round_scaling_overridable: config.roundScalingOverridable,
     p_public_rooms_enabled: config.publicRoomsEnabled,
+    p_draw_enabled: config.drawEnabled,
+    p_draw_overridable: config.drawOverridable,
+    p_peek_enabled: config.peekEnabled,
+    p_peek_overridable: config.peekOverridable,
   });
 }
 

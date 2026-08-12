@@ -16,7 +16,7 @@
 // than being a flat shortcut.
 
 const STATIONS_BENGALURU = {
-1:[65.74,-1.19],2:[60.8,8.63],3:[53.27,23.52],4:[74.62,21.45],5:[89.77,31.13],6:[86.07,51.58],7:[90.9,41.59],8:[99,39.21],9:[105.13,52.58],10:[114.76,41.43],11:[115.12,54.61],12:[113.64,64.36],13:[92.75,59.5],14:[93.27,68.86],15:[80.82,74.41],16:[103.09,89.02],17:[89.62,75.67],18:[101.13,60.46],19:[76.56,55.06],20:[75.99,44.6],21:[66.47,47.15],22:[62.79,53.64],23:[58.39,43.97],24:[48.59,43.02],25:[55.26,34.3],26:[42.34,32.87],27:[37.51,26.69],28:[27.43,33.03],29:[17.95,36.15],30:[16.23,19.84],31:[31.69,40.01],32:[38.57,50.44],33:[42.77,39.05],34:[33.44,61.87],35:[44.47,53.95],36:[49.06,61.87],37:[39.72,68.01],38:[50.34,69.15],39:[35.49,75.73],40:[50.58,76.78],41:[62.65,84.29],42:[61.71,96.83],43:[62.5,90.16],44:[63.14,75.73],45:[63.66,66.15],46:[70.82,73.25],48:[75.24,96.76],49:[68.8,91.52],50:[69.6,56.96],51:[72.83,66.87],52:[78.12,62.01],53:[60.37,59.18],54:[48.51,95.84],55:[29.73,92.16],56:[54.55,53.64],57:[52.99,14.96],58:[109.79,25.27],59:[8.81,40.08],60:[9.8,64.36],61:[13.24,79.7],62:[32.4,3.08],63:[94.03,5.86],64:[83.63,79.94],65:[82.99,89.16],66:[36.8,86.44],67:[53.92,88.11],68:[20.47,72.5],69:[46.46,27.8],70:[18.39,30.03],71:[23.25,44.36],72:[17.78,56.01],73:[29.73,46.94],74:[27.22,66.33],75:[32.26,18.61],76:[25.96,58.07],77:[42.34,16.71],78:[31.74,9.89],79:[69.6,36.52],80:[61.37,29.23],81:[67.05,19.4],82:[79.26,34.3],83:[101.41,33.19],84:[78.12,11.49],85:[68.47,12.27],86:[84.4,8.85],87:[68.75,6.25],88:[81.53,18.15],89:[89.64,19.71],90:[98.43,23.68]
+1:[65.74,-1.19],2:[60.8,8.63],3:[53.27,23.52],4:[74.62,21.45],5:[89.77,31.13],6:[86.07,51.58],7:[90.9,41.59],8:[99,39.21],9:[105.13,52.58],10:[114.76,41.43],11:[115.12,54.61],12:[113.64,64.36],13:[92.75,59.5],14:[93.27,68.86],15:[80.82,74.41],16:[103.09,89.02],17:[89.62,75.67],18:[101.13,60.46],19:[76.56,55.06],20:[75.99,44.6],21:[66.47,47.15],22:[62.25,52.06],23:[60.93,41.2],24:[48.77,43.94],25:[55.26,34.3],26:[44.14,32.49],27:[37.51,26.69],28:[27.43,33.03],29:[17.95,36.15],30:[16.23,19.84],31:[31.69,40.01],32:[38.57,50.44],33:[42.77,39.05],34:[33.44,61.87],35:[44.47,53.95],36:[49.06,61.87],37:[39.72,68.01],38:[50.34,69.15],39:[35.49,75.73],40:[50.58,76.78],41:[63.27,82.83],42:[61.71,96.83],43:[62.58,89.55],44:[63.14,75.73],45:[63.66,66.15],46:[70.82,73.25],48:[75.24,96.76],49:[68.8,91.52],50:[69.6,56.96],51:[72.83,66.87],52:[78.12,62.01],53:[60.37,59.18],54:[48.51,95.84],55:[29.73,92.16],56:[53.66,53.12],57:[52.99,14.96],58:[109.79,25.27],59:[8.81,40.08],60:[9.8,64.36],61:[13.24,79.7],62:[32.4,3.08],63:[94.03,5.86],64:[83.63,79.94],65:[82.99,89.16],66:[36.8,86.44],67:[53.92,88.11],68:[20.47,72.5],69:[46.46,27.8],70:[18.91,27.89],71:[23.25,44.36],72:[17.78,56.01],73:[29.73,46.94],74:[27.22,66.33],75:[32.26,18.61],76:[25.96,58.07],77:[42.34,16.71],78:[31.74,9.89],79:[69.6,36.52],80:[61.37,29.23],81:[67.05,19.4],82:[79.26,34.3],83:[101.41,33.19],84:[78.12,11.49],85:[68.47,12.27],86:[84.4,8.85],87:[68.75,6.25],88:[81.53,18.15],89:[91.75,14.83],90:[97.5,21.31]
 };
 
 const STATION_NAMES_BENGALURU = {
@@ -421,11 +421,48 @@ const MINOR_LABEL_DIR_BENGALURU = {
 };
 
 const MODE_BENGALURU = {
-  taxi: { color: "#a0740d", label: "Taxi", short: "T" },
-  bus: { color: "#109347", label: "Bus", short: "B" },
+  taxi: { color: "#a0740d", label: "Auto", short: "T" },
+  bus: { color: "#109347", label: "Cab", short: "B" },
   underground: { color: "#c12115", label: "Metro", short: "M" },
   ferry: { color: "#1a1a1a", label: "Secret Tunnel", short: "S" },
   black: { color: "#2b2b2b", label: "Black", short: "X" },
+};
+
+const MANUAL_CURVE_OFFSETS_BENGALURU = {
+  "2-3": -0.26,
+  "1-30": [-9.44,-10.84,-6.04],
+  "1-58": [6.96,10.47,6.2],
+  "2-25": -2.06,
+  "3-25": 0.08,
+  "4-58": [-0.39,-0.05],
+  "11-16": [-2.93,-3.5,-2.5],
+  "14-46": [0.25,-0.28,0.21],
+  "15-51": -0.43,
+  "20-25": 1.56,
+  "20-32": [0.37,-1.16],
+  "20-46": -3.34,
+  "25-32": -2.33,
+  "25-56": 2.08,
+  "29-30": 7.36,
+  "29-70": 0.18,
+  "30-70": -0.2,
+  "31-33": 0.16,
+  "32-39": 0.43,
+  "36-39": -3.45,
+  "36-56": -0.14,
+  "41-42": -2.71,
+  "41-43": 0.27,
+  "41-44": -0.06,
+  "41-45": -3.4,
+  "42-43": -0.62,
+  "44-45": -0.18,
+  "45-53": 0.66,
+  "45-56": -6.7,
+  "46-51": 0.67,
+  "48-54": 4.91,
+  "50-51": -0.21,
+  "54-61": [4.38,6.76,4.23],
+  "58-90": 0.18,
 };
 
 // DECORATIONS_BENGALURU — converted from the hand-coded landmark art that
@@ -438,38 +475,24 @@ const MODE_BENGALURU = {
 // delete them via the Map Editor, same as any decoration they add
 // themselves. See DecorationsLayer.jsx for the object shape.
 const DECORATIONS_BENGALURU = [
-  // Rural Lake -- was a <ellipse fill="url(#lakeGrad)"> near station #86.
-  { id: "bg_bengaluru_rural_lake", type: "icon", icon: "water", x: 84.4, y: 8.5, rotation: 10, size: 9, color: "#6a9dc0", opacity: 0.9 },
-  // Small Lake -- near station #87.
-  { id: "bg_bengaluru_small_lake", type: "icon", icon: "water", x: 68.75, y: 5.8, rotation: -8, size: 7, color: "#6a9dc0", opacity: 0.9 },
-  // Lalbagh -- garden ellipse near station #36.
-  { id: "bg_bengaluru_lalbagh", type: "icon", icon: "garden", x: 49.06, y: 61.87, size: 11, color: "#9dc48a", opacity: 0.85 },
-  // Nice Road Park -- garden ellipse near station #55.
-  { id: "bg_bengaluru_nice_road_park", type: "icon", icon: "garden", x: 29.73, y: 92.16, size: 10, color: "#9dc48a", opacity: 0.85 },
-  // State Forest -- forest icon near station #77.
-  { id: "bg_bengaluru_state_forest", type: "icon", icon: "forest", x: 42.34, y: 16.71, size: 11, color: "#6b9556", opacity: 0.8 },
-  // Bamboo Forest -- forest icon near station #84.
-  { id: "bg_bengaluru_bamboo_forest", type: "icon", icon: "forest", x: 78.12, y: 11.49, size: 10, color: "#6b9556", opacity: 0.8 },
-  // Botanical Garden -- garden ellipse near station #83.
-  { id: "bg_bengaluru_botanical_garden", type: "icon", icon: "garden", x: 101.41, y: 33.19, size: 11, color: "#9dc48a", opacity: 0.85 },
-  // Vidhana Soudha -- domed legislative building near station #24.
-  { id: "bg_bengaluru_vidhana_soudha", type: "icon", icon: "cityhall", x: 48.59, y: 40.5, size: 8, color: "#c9b98a" },
-  // Bengaluru Palace -- Tudor-style crenellated building near station #25.
-  { id: "bg_bengaluru_palace", type: "icon", icon: "fort", x: 55.26, y: 32, size: 5, color: "#d8b98a" },
-  // Kempegowda International Airport -- station #1, northernmost point.
-  { id: "bg_bengaluru_airport", type: "icon", icon: "airport", x: 65.74, y: -3.6, rotation: -30, size: 10, color: "#5c6066" },
-  // IISc -- academic institution near station #69.
-  { id: "bg_bengaluru_iisc", type: "icon", icon: "college", x: 46.46, y: 25.5, size: 6, color: "#4a5a7a" },
-  // IIM Bangalore -- academic institution near station #41.
-  { id: "bg_bengaluru_iim", type: "icon", icon: "college", x: 62.65, y: 81.9, size: 6, color: "#4a5a7a" },
-  // Christ University -- academic institution near station #70.
-  { id: "bg_bengaluru_christ_university", type: "icon", icon: "college", x: 18.39, y: 27.7, size: 6, color: "#4a5a7a" },
-  // IKEA Nagasandra -- retail icon near station #30.
-  { id: "bg_bengaluru_ikea", type: "icon", icon: "mall", x: 16.23, y: 17.6, size: 6, color: "#2a5fa5" },
-  // Phoenix Mall -- retail icon near station #8.
-  { id: "bg_bengaluru_phoenix_mall", type: "icon", icon: "mall", x: 99, y: 36.8, size: 6, color: "#a5522a" },
-  // Manyata Tech Park -- office/tech campus icon near station #81.
-  { id: "bg_bengaluru_manyata_tech_park", type: "icon", icon: "office", x: 67.05, y: 17.1, size: 7, color: "#6b8caf" },
+  { x: 84.54, y: 8.78, id: "bg_bengaluru_rural_lake", icon: "water", size: 8, type: "icon", color: "#6a9dc0", opacity: 0.9, rotation: 10 },
+  { x: 68.75, y: 6.26, id: "bg_bengaluru_small_lake", icon: "water", size: 7, type: "icon", color: "#6a9dc0", opacity: 0.9, rotation: -8 },
+  { x: 49.06, y: 61.87, id: "bg_bengaluru_lalbagh", icon: "garden", size: 9, type: "icon", color: "#9dc48a", opacity: 0.85, rotation: 0 },
+  { x: 29.73, y: 92.16, id: "bg_bengaluru_nice_road_park", icon: "garden", size: 8, type: "icon", color: "#9dc48a", opacity: 0.85, rotation: 0 },
+  { x: 101.55, y: 33.41, id: "bg_bengaluru_botanical_garden", icon: "garden", size: 9, type: "icon", color: "#9dc48a", opacity: 0.85, rotation: 0 },
+  { x: 48.59, y: 40.5, id: "bg_bengaluru_vidhana_soudha", icon: "cityhall", size: 6, type: "icon", color: "#c9b98a", opacity: 1, rotation: 0 },
+  { x: 55.22, y: 31.02, id: "bg_bengaluru_palace", icon: "fort", size: 5, type: "icon", color: "#d8b98a", opacity: 1, rotation: 0 },
+  { x: 66.07, y: -4.43, id: "bg_bengaluru_airport", icon: "airport", size: 10, type: "icon", color: "#5c6066", opacity: 1, rotation: -30 },
+  { x: 15.12, y: 17.47, id: "bg_bengaluru_ikea", icon: "mall", size: 6, type: "icon", color: "#2a5fa5", opacity: 1, rotation: 0 },
+  { x: 67.05, y: 17.1, id: "bg_bengaluru_manyata_tech_park", icon: "office", size: 7, type: "icon", color: "#6b8caf", opacity: 1, rotation: 0 },
+  { x: 66.01, y: 94.74, id: "dec_msnat17l_q96dcr", icon: "lake", size: 4, type: "icon", color: "#78a5c4", opacity: 1, rotation: 0 },
+  { x: 98.76, y: 67.74, id: "dec_msnaur90_n35gl6", icon: "water", size: 6, type: "icon", color: "#78a5c4", opacity: 1, rotation: 0 },
+  { x: 40.85, y: 12.44, id: "dec_msnb6h3v_wp7j0z", icon: "forest", size: 6, type: "icon", color: "#b1dd8c", opacity: 1, rotation: 0 },
+  { x: 38.12, y: 15.45, id: "dec_msnb6mfi_zigf7j", icon: "forest", size: 6, type: "icon", color: "#b1dd8c", opacity: 1, rotation: 0 },
+  { x: 44.55, y: 14.62, id: "dec_msnb6qbd_qk3jq3", icon: "forest", size: 6, type: "icon", color: "#b1dd8c", opacity: 1, rotation: 0 },
+  { x: 46.17, y: 23.57, id: "dec_msnbkm03_prut8h", icon: "college", size: 3, type: "icon", color: "#001e57", opacity: 1, rotation: 0 },
+  { x: 67.9, y: 82.51, id: "dec_msnblmgo_edl59r", icon: "college", size: 3, type: "icon", color: "#38571a", opacity: 1, rotation: 0 },
+  { x: 60.45, y: 85.91, id: "dec_msnbm9nd_mc36lf", icon: "hospital", size: 3, type: "icon", color: "#831100", opacity: 1, rotation: 0 },
 ];
 
 export const bengaluruMap = {
@@ -484,10 +507,13 @@ export const bengaluruMap = {
   majorLabelDir: MAJOR_LABEL_DIR_BENGALURU,
   minorLabelDir: MINOR_LABEL_DIR_BENGALURU,
   modeTheme: MODE_BENGALURU,
+  manualCurveOffsets: MANUAL_CURVE_OFFSETS_BENGALURU,
   viewW: 126,
   viewH: 102,
   background: { kind: "citymap", theme: "bengaluru" },
+  backgroundOverrideColor: "#eef0f2",
   decorations: DECORATIONS_BENGALURU,
   characterNames: null,
-  mrxName: null,
+  mrxName: "The Fugitive",
+  fixedTicketCounts: {"mrx":{"bus":3,"taxi":4,"black":5,"double":2,"underground":3},"detective":{"bus":9,"taxi":14,"underground":5}},
 };

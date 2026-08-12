@@ -616,8 +616,21 @@ export function deriveMap(config) {
     viewW: config.viewW || 100,
     viewH: config.viewH || 100,
     background: config.background || { kind: "plain" },
+    // Optional baked-in default background tint, same field name/shape as
+    // the live admin override applyMapOverride() writes at read time (see
+    // useMapWithOverrides.js) -- lets a map ship with this as its actual
+    // default rather than relying on a separate DB override to always be
+    // present. A live override (if any) still takes precedence, same as
+    // every other field here.
+    backgroundOverrideColor: config.backgroundOverrideColor || null,
     mapLimits: computeMapLimits(Object.keys(stations).length, config.detectiveDensityRatio),
-    ticketCounts: computeTicketCounts(
+    // fixedTicketCounts -- optional baked-in override of the normally
+    // auto-computed ticket counts (computeTicketCounts below), same
+    // shape/precedence pattern as backgroundOverrideColor above. Lets a
+    // map ship with hand-tuned ticket counts as its real default (set via
+    // the Map Editor and then baked in) instead of always relying on a
+    // live per-room override to reproduce the same numbers.
+    ticketCounts: config.fixedTicketCounts || computeTicketCounts(
       graph,
       Object.keys(stations).map(Number),
       computeRoundsAndRevealSchedule(graph, Object.keys(stations).map(Number), config.roundScalingRatio).totalRounds

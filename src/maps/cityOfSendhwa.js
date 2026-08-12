@@ -33,11 +33,11 @@
 // identical after the shift, not just assumed to carry over.
 
 const STATIONS_CITY_OF_SENDHWA = {
-  1:[18.29,60.95],2:[20.16,69.47],3:[28.69,68.41],4:[36.05,72.13],5:[67.87,51.7],6:[154.67,57.78],7:[166.0,57.8],8:[129.87,63.8],9:[135.94,58.4],10:[112.46,58.92],11:[100.93,61.16],12:[77.26,35.15],13:[81.16,62.12],14:[44.97,60.68],15:[37.03,60.82],16:[53.7,60.95],17:[157.01,49.03],18:[85.37,27.39],19:[147.2,51.58],20:[98.36,43.82],21:[91.06,36.31],22:[95.48,109.08],23:[143.61,86.39],24:[29.57,60.82],25:[66.54,62.95],26:[67.59,71.53],27:[74.2,55.97],28:[90.45,61.96],29:[92.73,66.94],30:[109.4,68.41],31:[77.04,93.31],32:[99.4,78.75],33:[91.65,86.92],34:[80.47,75.33],35:[109.44,79.99],36:[130.94,46.48],37:[92.33,75.2],38:[72.45,81.98],39:[18.52,90.7],40:[44.53,100.77],41:[69.01,107.16],42:[27.51,82.12],43:[48.79,71.6],44:[58.21,66.81],45:[6.0,60.92],46:[105.16,51.41],47:[96.81,55.98],48:[118.52,53.25],49:[105.77,45.48],50:[116.64,39.37],51:[125.79,40.15],52:[109.45,37.71],53:[119.58,32.16],54:[122.64,58.68],55:[121.21,48.03],56:[114.21,46.71],57:[140.34,39.26],58:[139.52,48.92],59:[47.09,27.5],60:[57.94,29.33],61:[35.75,27.52],62:[106.36,27.08],63:[141.71,29.22],64:[152.51,38.6],65:[62.42,24.72],66:[61.07,15.51],67:[88.61,17.29],68:[68.0,31.63],69:[42.65,11.6],70:[83.61,40.97],71:[88.41,45.5],72:[93.38,50.66],73:[83.61,54.12],74:[123.84,14.63],75:[64.69,41.18],76:[51.23,37.91],77:[30.1,37.04],78:[52.06,50.49],79:[29.12,46.92],80:[73.51,45.5],81:[13.46,46.28],82:[18.92,29.79],83:[60.95,56.07],84:[75.27,16.87],85:[89.83,6.0],86:[120.05,71.3]
+1:[18.29,60.95],2:[20.16,69.47],3:[28.69,68.41],4:[36.05,72.13],5:[67.87,51.7],6:[154.67,57.78],7:[166,57.8],8:[129.87,63.8],9:[135.94,58.4],10:[112.46,58.92],11:[101.73,62.74],12:[77.26,35.15],13:[80.22,62.72],14:[44.97,60.68],15:[37.03,60.82],16:[53.7,60.95],17:[157.01,49.03],18:[85.37,27.39],19:[145.54,54.3],20:[99.4,43.79],21:[91.06,36.31],22:[95.48,109.08],23:[143.61,86.39],24:[29.57,60.82],25:[66.54,62.95],26:[67.59,71.53],27:[74.22,58.56],28:[90.45,61.96],29:[92.69,68.26],30:[109.4,68.41],31:[77.04,93.31],32:[102.29,76.29],33:[91.65,86.92],34:[80.47,75.33],35:[109.44,79.99],36:[130.94,46.48],37:[91.67,77.15],38:[72.45,81.98],39:[18.52,90.7],40:[44.53,100.77],41:[69.01,107.16],42:[27.51,82.12],43:[48.79,71.6],44:[58.21,66.81],45:[6,60.92],46:[105.14,50.68],47:[96.81,55.98],48:[120.63,53],49:[105.77,45.48],50:[116.64,39.37],51:[125.79,40.15],52:[109.6,37.78],53:[119.58,32.16],54:[122.64,58.68],55:[121.67,47.03],56:[114.21,46.71],57:[140.34,39.26],58:[139.52,48.92],59:[47.09,27.5],60:[57.94,29.33],61:[35.75,27.52],62:[106.36,27.08],63:[141.71,29.22],64:[152.51,38.6],65:[61.46,23.53],66:[61.07,15.51],67:[88.61,17.29],68:[68,31.63],69:[42.65,11.6],70:[83.61,40.97],71:[88.41,45.5],72:[93.38,50.66],73:[83.61,54.12],74:[123.84,14.63],75:[64.69,41.18],76:[51.23,37.91],77:[30.1,37.04],78:[52.06,50.49],79:[29.76,47.85],80:[73.51,45.5],81:[13.46,46.28],82:[21.87,32.5],83:[59.21,55.73],84:[75.27,16.87],85:[89.83,6],86:[120.05,71.3]
 };
 
 const STATION_NAMES_CITY_OF_SENDHWA = {
-  1:"Chhoti Bijasan",2:"New Lions",3:"Darul Uloom",4:"Church",5:"Daaru Godam",6:"Advantage City",7:"Chowdhary Dhaba",8:"Mayur's Mahal",9:"New Bus Stand",10:"Old Bus Stand",11:"Bhawani Chowk",12:"Triveni",13:"Fawwara Chowk",14:"Shanti Palace",15:"Jain",16:"PG College",17:"Shubham's Den",18:"Sudama Colony",19:"Indira Colony",20:"Fort Garden",21:"Sai Mandir",22:"Balwadi",23:"Narayan Das Hospital",24:"Sree Garden",25:"On Prakash Talkies",26:"Mangal Bhawan",27:"Chetna Pani puri",28:"Sabji Mandi",29:"Ayush's Villa",30:"Police Thana",31:"Raghuwansh Public School",32:"Govt. School",33:"RamKatora",34:"Shantanu's Home",35:"Dawal Bedi",36:"RajRajeshwar Mandir",37:"Nalepar",38:"Saraswati Colony",39:"English Wine Shop",40:"Jai Bhawani Dhaba",41:"Ramdev Dhaba",42:"Hanfiya Eidgah",43:"Tehsil Office",44:"Tagore Bedi",45:"Chetan Hanuman",46:"Kila Gate",47:"Baban",48:"Gate 4",49:"Old Lions",50:"Tiles",51:"Shani Mandir",52:"Gate 2",53:"Saraswati Shishu School",54:"Petrol Pump",55:"Ground",56:"Fort",57:"Khedapati Hanuman",58:"Mukti Dham",59:"RK Bakery",60:"Abhinav Colony",61:"Gold Shine",62:"Jogwada Road",63:"Devjiri",64:"Dream Land City",65:"Tanu's Mansion",66:"Sendhwa Public School",67:"Govt. Hospital",68:"Niwali Road",69:"Chhota GhatyaPatya",70:"Mittal Complex",71:"Chomuwala",72:"Sadar Bazaar",73:"Zama Masjid",74:"Badgaon",75:"Nimbark Colony",76:"Nand Colony",77:"Dadu Colony",78:"Khalwadi Market",79:"Cricket Academy",80:"Maulana Azad Marg",81:"Pipaldhar",82:"Homeopathy College",83:"Dinesh Ganj",84:"Bagrecha Garden",85:"Sankat Mochan Hanuman",86:"Varla Road"
+1:"Chhoti Bijasan",2:"New Lions",3:"Darul Uloom",4:"Church",5:"Daaru Godam",6:"Advantage City",7:"Chowdhary Dhaba",8:"Mayur's Home",9:"New Bus Stand",10:"Old Bus Stand",11:"Bhawani Chowk",12:"Triveni",13:"Fawwara Chowk",14:"Shanti Palace",15:"Jain",16:"PG College",17:"Shubham's Home",18:"Sudama Colony",19:"Indira Colony",20:"Fort Garden",21:"Sai Mandir",22:"Balwadi",23:"Narayan Das Hospital",24:"Sree Garden",25:"On Prakash Talkies",26:"Mangal Bhawan",27:"Chetna Pani puri",28:"Sabji Mandi",29:"Dhawal's Home",30:"Police Thana",31:"Raghuwansh Public School",32:"Govt. School",33:"RamKatora",34:"Shantanu's Home",35:"Dawal Bedi",36:"RajRajeshwar Mandir",37:"Nalepar",38:"Saraswati Colony",39:"English Wine Shop",40:"Jai Bhawani Dhaba",41:"Ramdev Dhaba",42:"Hanfiya Eidgah",43:"Tehsil Office",44:"Tagore Bedi",45:"Chetan Hanuman",46:"Kila Gate",47:"Baban",48:"Gate 4",49:"Old Lions",50:"Tiles",51:"Shani Mandir",52:"Jail",53:"Saraswati Shishu School",54:"Petrol Pump",55:"Silver",56:"Fort",57:"Khedapati Hanuman",58:"Mukti Dham",59:"RK Bakery",60:"Abhinav Colony",61:"Gold Shine",62:"Jogwada Road",63:"Devjiri",64:"Dream Land City",65:"Tanu's Home",66:"Sendhwa Public School",67:"Govt. Hospital",68:"Niwali Road",69:"Chhota GhatyaPatya",70:"Mittal Complex",71:"Chomuwala",72:"Sadar Bazaar",73:"Zama Masjid",74:"Badgaon",75:"Nimbark Colony",76:"Nand Colony",77:"Dadu Colony",78:"Khalwadi Market",79:"Cricket Academy",80:"Maulana Azad Marg",81:"Pipaldhar",82:"Homeopathy College",83:"Dinesh Ganj",84:"Bagrecha Garden",85:"Sankat Mochan Hanuman",86:"Varla Road"
 };
 
 const EDGES_CITY_OF_SENDHWA = [
@@ -321,9 +321,9 @@ const MINOR_LABEL_DIR_CITY_OF_SENDHWA = {
 };
 
 const MODE_CITY_OF_SENDHWA = {
-  taxi: { color: "#a0740d", label: "Taxi", short: "T" },
-  bus: { color: "#109347", label: "Bus", short: "B" },
-  underground: { color: "#c12115", label: "Metro", short: "M" },
+  taxi: { color: "#a0740d", label: "Bike", short: "T" },
+  bus: { color: "#109347", label: "Auto", short: "B" },
+  underground: { color: "#c12115", label: "Bus", short: "M" },
   ferry: { color: "#1a1a1a", label: "Secret Tunnel", short: "S" },
   black: { color: "#2b2b2b", label: "Black", short: "X" },
 };
@@ -341,44 +341,38 @@ const MODE_CITY_OF_SENDHWA = {
 // maximize clearance from every named avoid-station, checked
 // numerically, not eyeballed.
 const MANUAL_CURVE_OFFSETS_CITY_OF_SENDHWA = {
-  // FIXED: the original -4 offset was a flat value copied from
-  // Bengaluru's tuning, but City of Sendhwa's stations sit much farther
-  // apart (this map's edges run 30-100+ units vs Bengaluru's typical
-  // 10-30), so a flat -4 was only ~6% of the edge's own length here --
-  // visually almost imperceptible, which is exactly why these looked
-  // "still not curved." Recomputed each offset as ~15% of that specific
-  // edge's own length (matching the proportion that reads clearly on
-  // Bengaluru), then verified the resulting curve genuinely clears the
-  // named avoid-station(s) by a wide margin, not just barely.
-  // "22-45": recomputed from -30.49 to -42.4. The old value was verified
-  // wrong by direct numeric check: it put the curve only 0.21 units from
-  // station 41 (Ramdev Dhaba) -- a near-collision, not a clean "outside"
-  // curve, because 41 sits almost exactly on the straight line between 22
-  // and 45, so any moderate bow sweeps the curve right across it before
-  // diverging. A single quadratic curve genuinely can't clear all of 39/
-  // 40/41 to their south without pushing the control point off-canvas
-  // (would need roughly -90 to -110, putting it at y=165-190 against a
-  // map whose stations only span up to y=109) -- -42.4 is the offset that
-  // maximizes the worst-case clearance from all three while keeping the
-  // curve's visible apex on-canvas (~y=111): clearances come out to
-  // 4.17 / 4.33 / 4.14 units from 39 / 40 / 41 respectively (was 8.58 /
-  // 1.61 / 0.21 -- station 41 was the real problem).
-  "22-45": -42.4, // bus route Chetan Hanuman<->Balwadi
-  "7-22": -26.16, // bus route Balwadi<->Chowdhary Dhaba, curving outside Narayan Das Hospital
-  "62-69": -19.67, // bus route Jogwada Road<->Chhota GhatyaPatya, curving outside Sendhwa Public School, Bagrecha Garden, Govt. Hospital -- verified clearances 8.29/12.42/13.07, already fine, unchanged
-  "1-82": -9.35, // bus route Homeopathy College<->Chhoti Bijasan, curving outside Pipaldhar
-  // "63-7": new curve for the rerouted 63<->7 edge (was 63-9). Straight
-  // line clears station 64 by only 2.15 units and station 17 by only
-  // 1.17 -- -11.6 is the offset that maximizes worst-case clearance
-  // across all five nearby stations (64/17/57/19/6): 7.49/3.89/3.86/
-  // 4.55/4.68 units respectively.
-  "63-7": -11.6,
-  // "1-69": new bus route Chhoti Bijasan<->Chhota GhatyaPatya. A straight
-  // line here would run through station 77 (0.01 units clearance -- a
-  // real overlap) and pass very close to 61 (0.86). -13.4 is the offset
-  // that maximizes worst-case clearance across 77/61/79/82: 6.70/6.52/
-  // 9.12/6.53 units respectively.
-  "1-69": -13.4,
+  "22-45": [-14.5,-23.32,-22.96],
+  "7-22": [9.18,11.95],
+  "62-69": [7.76,6.18,4.64],
+  "1-82": 4.78,
+  "1-69": [-15.49,-14.23,-7.08],
+  "7-9": -3.94,
+  "1-14": 4.25,
+  "1-25": -3.51,
+  "5-28": [-4.62,-2.71,-0.06],
+  "5-72": [-3.64,-6.25,-2.95],
+  "7-63": [-4.93,-2.97],
+  "9-11": -1.91,
+  "9-35": [-3.36,-2.34],
+  "9-56": [-7.09,-12.63,-14.25],
+  "10-21": -4.44,
+  "11-22": [2.85,0.07],
+  "11-28": 2.45,
+  "11-68": [5.7,7.7,6.3],
+  "14-25": 5.2,
+  "16-43": [0.02,0.05,0.21],
+  "21-63": [-3.04,-7.34,-6.6],
+  "21-69": [1.39,3.16,0.95],
+  "22-37": [-1.44,-0.61],
+  "25-26": 0.52,
+  "25-31": [-1.21,-1.43,-1.52],
+  "31-37": [-2,-3.56,-1.42],
+  "46-56": 1.86,
+  "56-72": [-1.05,-3.29],
+  "61-77": 1.54,
+  "62-63": [4.58,7.59,5.1],
+  "68-72": -1.74,
+  "68-82": [0.96,1.71],
 };
 
 // DECORATIONS_CITY_OF_SENDHWA — converted from the hand-coded landmark art
@@ -389,20 +383,51 @@ const MANUAL_CURVE_OFFSETS_CITY_OF_SENDHWA = {
 // MapBackground.jsx rather than converted -- see the comment left in that
 // file for why (the "shape" decoration type has no dashed-stroke option).
 const DECORATIONS_CITY_OF_SENDHWA = [
-  // Lake near Chhota GhatyaPatya -- station #80.
-  { id: "sendhwa_lake", type: "icon", icon: "water", x: 42.65, y: 11.6, size: 11, color: "#6a9dc0", opacity: 0.9 },
-  // School icon near New Lions -- station #3.
-  { id: "sendhwa_school_new_lions", type: "icon", icon: "school", x: 20.16, y: 66.8, size: 6, color: "#4a5a7a" },
-  // School icon near Sendhwa Public School -- station #76.
-  { id: "sendhwa_school_public", type: "icon", icon: "school", x: 61.07, y: 12.84, size: 6, color: "#4a5a7a" },
-  // School icon near Raghuwansh Public School -- station #35.
-  { id: "sendhwa_school_raghuwansh", type: "icon", icon: "school", x: 77.04, y: 90.64, size: 6, color: "#4a5a7a" },
-  // Bus icon near New Bus Stand -- station #10.
-  { id: "sendhwa_bus_stand", type: "icon", icon: "bus", x: 135.94, y: 55.0, size: 8, color: "#3a6b8a" },
-  // Police icon near Police Thana -- station #34.
-  { id: "sendhwa_police_thana", type: "icon", icon: "police", x: 109.4, y: 65.6, size: 7, color: "#2f4a7a" },
-  // Fort icon -- crenellated tower silhouette above the fort boundary.
-  { id: "sendhwa_fort", type: "icon", icon: "fort", x: 114.5, y: 23, size: 8, color: "#a8926a" },
+  { x: 43.94, y: 18.93, id: "sendhwa_lake", icon: "water", size: 8, type: "icon", color: "#6a9dc0", opacity: 0.9, rotation: 0 },
+  { x: 22.49, y: 71.59, id: "sendhwa_school_new_lions", icon: "school", size: 3, type: "icon", color: "#4a5a7a", opacity: 1, rotation: 0 },
+  { x: 63.8, y: 17.61, id: "sendhwa_school_public", icon: "school", size: 3, type: "icon", color: "#4a5a7a", opacity: 1, rotation: 0 },
+  { x: 79.65, y: 94.95, id: "sendhwa_school_raghuwansh", icon: "school", size: 3, type: "icon", color: "#4a5a7a", opacity: 1, rotation: 0 },
+  { x: 133.66, y: 52.76, id: "sendhwa_bus_stand", icon: "bus", size: 4, type: "icon", color: "#3a6b8a", opacity: 1, rotation: 0 },
+  { x: 112.93, y: 68.37, id: "sendhwa_police_thana", icon: "police", size: 3, type: "icon", color: "#000000", opacity: 1, rotation: 0 },
+  { x: 63.38, y: 101.42, id: "dec_mspjh4h5_0v7fct", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 62.11, y: 96.47, id: "dec_mspjhame_clvars", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 67.78, y: 98.38, id: "dec_mspjhcr8_1ne6rv", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 70.45, y: 102.7, id: "dec_mspjherw_dtusho", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 55.89, y: 100.18, id: "dec_mspjgvf_28yml5", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 76.5, y: 104.57, id: "dec_mspji3q1_q5oe3q", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 83.34, y: 105.2, id: "dec_mspji9od_xtuoy0", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 73.75, y: 99.5, id: "dec_mspjibgr_3r089e", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 46.79, y: 18.01, id: "dec_mspjjtxy_d7ks09", icon: "lake", size: 6, type: "icon", color: "#77a5c5", opacity: 1, rotation: -60 },
+  { x: 50.41, y: 20.41, id: "dec_mspjl2ma_i7imff", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 46.59, y: 22.84, id: "dec_mspjlag6_x90wjt", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 120.09, y: 93.04, id: "dec_mspjllm0_mkvuw2", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 115.6, y: 95.27, id: "dec_mspjlnci_tj3puu", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 79.5, y: 100.1, id: "dec_mspjlosu_ke757a", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 111.32, y: 97.58, id: "dec_mspjlqdq_bbhsf4", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 106.61, y: 100.11, id: "dec_mspjlrxa_q4vcye", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 129.73, y: 83.17, id: "dec_mspjmtpj_uamuml", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 130.59, y: 88.79, id: "dec_mspjmv93_8epr3p", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 124.01, y: 86.69, id: "dec_mspjmwpw_sa1lni", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 117.78, y: 89.26, id: "dec_mspjmy4b_y54zmu", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 112.07, y: 92.69, id: "dec_mspjmzl2_w6ls1e", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 125.8, y: 91.12, id: "dec_mspjn12d_wgkg20", icon: "forest", size: 6, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 134.34, y: 84.97, id: "dec_mspjn2n9_dy6iar", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 33.93, y: 87.73, id: "dec_mspjnwax_23a0zl", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 40.53, y: 90.95, id: "dec_mspjnxl5_fgxqe2", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 18.59, y: 81.98, id: "dec_mspjnyxs_lnoh85", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 40.22, y: 95.49, id: "dec_mspjo0o8_oof8lz", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 34.63, y: 92.67, id: "dec_mspjo25h_ugouth", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 28.59, y: 90.58, id: "dec_mspjo3tq_rz710j", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 16.71, y: 76.83, id: "dec_mspjotq6_nwfyer", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 147.13, y: 75.88, id: "dec_mspjp0yq_1gmf9q", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 149.33, y: 71.14, id: "dec_mspjp2z0_quw62v", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 153.68, y: 67.98, id: "dec_mspjp4mr_g7zovg", icon: "forest", size: 5, type: "icon", color: "#4f7a28", opacity: 0.6, rotation: 0 },
+  { x: 106.31, y: 37.93, id: "dec_mspjqb91_zqohg7", icon: "prison", size: 3, type: "icon", color: "#5c5648", opacity: 1, rotation: 0 },
+  { x: 82.43, y: 50.7, id: "dec_mspjqnqj_7p9lh9", icon: "mosque", size: 2, type: "icon", color: "#77bb41", opacity: 1, rotation: 0 },
+  { x: 2.42, y: 61.44, id: "dec_mspjr1gy_n4aggi", icon: "temple", size: 3, type: "icon", color: "#d95000", opacity: 1, rotation: 0 },
+  { x: 133.86, y: 47.15, id: "dec_mspjsb8p_i0r76k", icon: "temple", size: 3, type: "icon", color: "#d95000", opacity: 1, rotation: 0 },
+  { x: 98.83, y: 111.42, id: "dec_mspjtgk5_qby0et", icon: "village", size: 5, type: "icon", color: "#7a4a00", opacity: 1, rotation: 0 },
+  { x: 169.46, y: 57.92, id: "dec_mspkbhmt_zh3d2p", icon: "restaurant", size: 2, type: "icon", color: "#831100", opacity: 1, rotation: 0 },
 ];
 
 export const cityOfSendhwaMap = {
@@ -421,7 +446,8 @@ export const cityOfSendhwaMap = {
   viewW: 172,
   viewH: 116,
   background: { kind: "citymap", theme: "city-of-sendhwa" },
+  backgroundOverrideColor: "#eef0f2",
   decorations: DECORATIONS_CITY_OF_SENDHWA,
   characterNames: null,
-  mrxName: null,
+  mrxName: "The Fugitive",
 };

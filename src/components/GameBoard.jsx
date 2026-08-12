@@ -123,8 +123,12 @@ export default function GameBoard({
   teammatesExploring = [], // [{playerId, displayName, color, exploreMode}] -- OTHER detectives' current exploration, for the huddle panel (multiplayer only)
   anyDetectiveExploring = false, // true if ANY detective (including possibly this client) currently has an active exploration -- drives Mr.X's content-free "Detectives are discussing" indicator
   detectivePlayerNames = {}, // detectiveId -> player display name (multiplayer only) -- for the ticket counter's "Priya — D1" labeling
-  secondsRemaining = null, // null (no timer set for this room) | number of seconds left in the current turn -- shown to EVERYONE regardless of whose turn it is
-  turnTimerSeconds = null, // the room's configured timer length, for showing "12 / 60s" style displays
+  secondsRemaining = null, // null (no timer set for this room) | number of seconds left in the current turn/phase -- shown to EVERYONE regardless of whose turn it is
+  turnTimerSeconds = null, // the room's configured timer length (the detective act window), for showing "12 / 60s" style displays
+  timerPhase = null, // null | "mrx" | "buffer" | "detective" -- which segment of the turn schedule is currently counting down (see useTurnTimer.js)
+  preThinkActive = false, // true during the shared detective pre-think buffer -- no one may COMMIT a move, though everyone may still preview reachable stations via the explore/huddle system
+  mrxSecondsForBar = null, // Mr. X's full turn window (schedule.mrxSeconds) -- the denominator for the timer bar while timerPhase === "mrx"
+  bufferSecondsForBar = null, // the shared pre-think buffer's full length (schedule.bufferSeconds) -- the denominator while timerPhase === "buffer"
   roomCode = null, // multiplayer only -- shown persistently so a disconnected player can be told the code to rejoin
 }) {
   const { positionStyle: highlightPositionStyle, destinationStyle: highlightDestinationStyle } = useHighlightStyles(roomId); // each independently 'ring' | 'rotating' | 'blink' | 'static' | 'none'
@@ -525,6 +529,12 @@ export default function GameBoard({
 
   function handleStationClick(station) {
     if (!isMyTurnToAct) return;
+    // Pre-think buffer: nobody may COMMIT a move yet, even the seat whose
+    // turn it technically now is -- the whole point of the buffer is a
+    // shared deliberation window before the act window starts. The
+    // existing explore/huddle preview system is untouched by this check
+    // (it doesn't route through handleStationClick).
+    if (preThinkActive) return;
     if (isMrXTurn) {
       if (myRole !== null && myRole !== "mrx") return; // multiplayer: not your role
       // FIX: was .find(), which only returns the FIRST matching edge --
@@ -1004,20 +1014,41 @@ export default function GameBoard({
                     {!isMrXTurn && <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />}
                     <span style={styles.mapTopBarRound}>Round {match.round}/{match.maxRounds}</span>
                     <span style={styles.mapTopBarDivider}>—</span>
-                    <span>{isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}</span>
+                    {preThinkActive ? (
+                      // Pre-think buffer: framed as a TEAM moment, not any
+                      // one seat's turn -- nobody can move yet, so naming
+                      // a single "X's Turn" here would be misleading.
+                      <span style={styles.mapTopBarBufferLabel}>
+                        🕵️ Detectives are planning their move…
+                      </span>
+                    ) : (
+                      <span>{isMrXTurn ? `${mrxName()}'s Turn` : `${detectiveName(activeDetective.id)}'s Turn`}</span>
+                    )}
                   </div>
-                  {secondsRemaining != null && turnTimerSeconds && (
+                  {secondsRemaining != null && (preThinkActive || turnTimerSeconds) && (
                     <div style={styles.mapTopBarTimerWrap}>
-                      <div style={styles.turnTimerBarTrack}>
-                        <div
-                          style={{
-                            ...styles.turnTimerBarFill,
-                            width: `${Math.max(0, Math.min(100, (secondsRemaining / turnTimerSeconds) * 100))}%`,
-                            background: timerBarColor(secondsRemaining / turnTimerSeconds),
-                          }}
-                        />
-                      </div>
-                      <div style={styles.turnTimerBarText}>{secondsRemaining}s</div>
+                      {(() => {
+                        // The bar's denominator changes with the phase --
+                        // full turnTimerSeconds only applies to a plain
+                        // detective act window; Mr.X's window and the
+                        // buffer each have their own (longer) total.
+                        const denom = timerPhase === "mrx" ? mrxSecondsForBar : timerPhase === "buffer" ? bufferSecondsForBar : turnTimerSeconds;
+                        const frac = denom ? secondsRemaining / denom : 0;
+                        return (
+                          <>
+                            <div style={styles.turnTimerBarTrack}>
+                              <div
+                                style={{
+                                  ...styles.turnTimerBarFill,
+                                  width: `${Math.max(0, Math.min(100, frac * 100))}%`,
+                                  background: timerBarColor(frac),
+                                }}
+                              />
+                            </div>
+                            <div style={styles.turnTimerBarText}>{secondsRemaining}s</div>
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -1902,6 +1933,18 @@ export const styles = {
   },
   mapTopBarRound: { color: "#888", fontWeight: 600, fontSize: 13 },
   mapTopBarDivider: { color: "#ccc", fontWeight: 400 },
+  mapTopBarBufferLabel: { color: "#5b4636", fontWeight: 700 },
+  timerSchedulePreview: {
+    marginTop: -4,
+    padding: "10px 12px",
+    background: "#f7f5f0",
+    border: "1px solid #e7e2d6",
+    borderRadius: 8,
+    fontSize: 12.5,
+    color: "#5a5648",
+    lineHeight: 1.6,
+  },
+  timerSchedulePreviewTitle: { fontWeight: 700, color: "#3d3a30", marginBottom: 2 },
   mapTopBarTimerWrap: {
     display: "flex",
     alignItems: "center",

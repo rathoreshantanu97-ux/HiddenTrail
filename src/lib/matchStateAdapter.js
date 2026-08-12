@@ -56,6 +56,13 @@ export function rowToMatch(gsRow, myMrxPosition) {
     startingMrxTickets: gsRow.starting_mrx_tickets,
     startingDetectiveTickets: gsRow.starting_detective_tickets,
     turnStartedAt: gsRow.turn_started_at,
+    // detectivePhaseStartedAt -- stamped by advance_turn_internal ONLY on
+    // the mrx -> first-detective-seat transition (see the SQL comment
+    // there), i.e. the instant the shared pre-think buffer for this
+    // round begins. null until Mr. X has made at least one move. See
+    // turnSchedule.js / useTurnTimer.js for how this anchors the buffer
+    // countdown.
+    detectivePhaseStartedAt: gsRow.detective_phase_started_at,
   };
 }
 

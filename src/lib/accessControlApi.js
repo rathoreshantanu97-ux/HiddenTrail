@@ -176,20 +176,47 @@ export async function getAppPublicStatus() {
 export async function getPublicConfig() {
   const rows = await callRpc("get_public_config", {});
   const row = rows?.[0];
-  if (!row) return { turnTimerMin: 30, turnTimerMax: 300, defaultInviteLimit: 20 };
+  if (!row) {
+    return {
+      turnTimerMin: 30,
+      turnTimerMax: 300,
+      defaultInviteLimit: 20,
+      preThinkBufferRatio: 3,
+      mrxTimeRatio: 3,
+      extraSeatTimeRatio: 0.5,
+    };
+  }
   return {
     turnTimerMin: row.out_turn_timer_min,
     turnTimerMax: row.out_turn_timer_max,
     defaultInviteLimit: row.out_default_invite_limit,
+    // Turn-schedule ratios (see turnSchedule.js) -- admin-only knobs, the
+    // host never sets these directly, only the one turn_timer_seconds
+    // number. Fall back to turnSchedule.js's own defaults if this is an
+    // older app_settings row from before these columns existed.
+    preThinkBufferRatio: row.out_pre_think_buffer_ratio ?? 3,
+    mrxTimeRatio: row.out_mrx_time_ratio ?? 3,
+    extraSeatTimeRatio: row.out_extra_seat_time_ratio ?? 0.5,
   };
 }
 
-export async function setAppConfig({ callerAccountId, turnTimerMin, turnTimerMax, defaultInviteLimit }) {
+export async function setAppConfig({
+  callerAccountId,
+  turnTimerMin,
+  turnTimerMax,
+  defaultInviteLimit,
+  preThinkBufferRatio,
+  mrxTimeRatio,
+  extraSeatTimeRatio,
+}) {
   await callRpc("set_app_config", {
     p_caller_account_id: callerAccountId,
     p_turn_timer_min: turnTimerMin,
     p_turn_timer_max: turnTimerMax,
     p_default_invite_limit: defaultInviteLimit,
+    p_pre_think_buffer_ratio: preThinkBufferRatio ?? null,
+    p_mrx_time_ratio: mrxTimeRatio ?? null,
+    p_extra_seat_time_ratio: extraSeatTimeRatio ?? null,
   });
 }
 

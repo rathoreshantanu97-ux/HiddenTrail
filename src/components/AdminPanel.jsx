@@ -17,7 +17,14 @@ export default function AdminPanel({ accountId, onBack }) {
   const [accounts, setAccounts] = useState([]);
   const [pending, setPending] = useState([]);
   const [inactiveMapIds, setInactiveMapIds] = useState([]);
-  const [config, setConfig] = useState({ turnTimerMin: 30, turnTimerMax: 300, defaultInviteLimit: 20 });
+  const [config, setConfig] = useState({
+    turnTimerMin: 30,
+    turnTimerMax: 300,
+    defaultInviteLimit: 20,
+    preThinkBufferRatio: 3,
+    mrxTimeRatio: 3,
+    extraSeatTimeRatio: 0.5,
+  });
   const [configDraft, setConfigDraft] = useState(config);
   const [timingConfig, setTimingConfigState] = useState(null);
   const [timingDraft, setTimingDraft] = useState(null);
@@ -133,6 +140,9 @@ export default function AdminPanel({ accountId, onBack }) {
         turnTimerMin: Number(configDraft.turnTimerMin),
         turnTimerMax: Number(configDraft.turnTimerMax),
         defaultInviteLimit: Number(configDraft.defaultInviteLimit),
+        preThinkBufferRatio: Number(configDraft.preThinkBufferRatio),
+        mrxTimeRatio: Number(configDraft.mrxTimeRatio),
+        extraSeatTimeRatio: Number(configDraft.extraSeatTimeRatio),
       });
       await refresh();
       setGameConfigSaved("Saved.");
@@ -370,6 +380,63 @@ export default function AdminPanel({ accountId, onBack }) {
             />
           </label>
         </div>
+
+        {/* Turn-schedule ratios -- these are the ONLY place these
+            multiples ever appear. A host never sees or sets a ratio,
+            they only pick one number (turn timer seconds); everything
+            else in the actual game schedule (Mr. X's window, the shared
+            pre-think buffer, each detective's act window) is derived
+            from that one number using these three admin-level ratios --
+            see turnSchedule.js for the full reasoning. */}
+        <div style={{ ...styles.cardTitle, fontSize: 15, marginTop: 20 }}>Turn schedule ratios</div>
+        <p style={styles.smallNote}>
+          These control how the host's single "turn timer" number is split into an actual in-game schedule. The host
+          never sees these ratios directly — they only see the computed result (shown live as they set their one
+          number).
+        </p>
+        <div style={styles.configGrid}>
+          <label style={styles.configLabel}>
+            Pre-think buffer (× the base timer)
+            <input
+              type="number"
+              min={0.5}
+              step={0.1}
+              style={styles.configInput}
+              value={configDraft.preThinkBufferRatio}
+              onChange={(e) => setConfigDraft({ ...configDraft, preThinkBufferRatio: e.target.value })}
+            />
+          </label>
+          <label style={styles.configLabel}>
+            Mr. X's turn (× the base timer)
+            <input
+              type="number"
+              min={0.5}
+              step={0.1}
+              style={styles.configInput}
+              value={configDraft.mrxTimeRatio}
+              onChange={(e) => setConfigDraft({ ...configDraft, mrxTimeRatio: e.target.value })}
+            />
+          </label>
+          <label style={styles.configLabel}>
+            Extra detective seat (× the base timer)
+            <input
+              type="number"
+              min={0}
+              step={0.1}
+              style={styles.configInput}
+              value={configDraft.extraSeatTimeRatio}
+              onChange={(e) => setConfigDraft({ ...configDraft, extraSeatTimeRatio: e.target.value })}
+            />
+          </label>
+        </div>
+        <div style={styles.smallNote}>
+          Example: with a 20s base timer at the current draft values — Mr. X gets{" "}
+          {Math.ceil(20 * Number(configDraft.mrxTimeRatio || 0))}s, the shared pre-think buffer runs{" "}
+          {Math.ceil(20 * Number(configDraft.preThinkBufferRatio || 0))}s, each detective gets 20s for their first
+          seat this round and +{Math.ceil(20 * Number(configDraft.extraSeatTimeRatio || 0))}s for every additional
+          seat they control.
+        </div>
+
         <div style={styles.smallNote}>
           Turn timer minimum can never go below 15s, even if entered lower — this protects the inactivity-detection
           system from a conflicting configuration.

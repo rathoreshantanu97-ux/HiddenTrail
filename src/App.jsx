@@ -271,10 +271,22 @@ export default function App({ account, onLogout }) {
     myRole: mpRole,
   });
   const { showEndedScreen: mpShowEndedScreen } = useDelayedEndedTransition(supabaseStore.match);
-  const { secondsRemaining: mpSecondsRemaining, turnTimerSeconds: mpTurnTimerSeconds } = useTurnTimer({
+  // mpPlayersList must be declared BEFORE useTurnTimer below, since the
+  // hook now needs the seat-ownership data (role -> player) to apportion
+  // detective act-window time correctly for multi-seat players.
+  const [mpPlayersList, setMpPlayersList] = useState([]);
+  const {
+    secondsRemaining: mpSecondsRemaining,
+    turnTimerSeconds: mpTurnTimerSeconds,
+    phaseLabel: mpPhaseLabel,
+    preThinkActive: mpPreThinkActive,
+    mrxSeconds: mpMrxSeconds,
+    bufferSeconds: mpBufferSeconds,
+  } = useTurnTimer({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     map: getEffectiveMap(liveMapId),
     match: supabaseStore.match,
+    players: mpPlayersList,
     onDetectiveMove: (detId, to, mode) => supabaseStore.submitDetectiveMove(getEffectiveMap(liveMapId), detId, to, mode),
     onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(getEffectiveMap(liveMapId), to, edgeMode, ticketUsed),
     // BUG FIX: without this, a player whose timer expired with genuinely
@@ -295,7 +307,6 @@ export default function App({ account, onLogout }) {
     myExploreMode: mpExploreMode,
   });
 
-  const [mpPlayersList, setMpPlayersList] = useState([]);
   useEffect(() => {
     if (appMode !== "multiplayer" || mpStage !== "playing" || !mpRoomId) return;
     let cancelled = false;
@@ -1057,6 +1068,10 @@ export default function App({ account, onLogout }) {
         roomCode={mpRoomCode}
         secondsRemaining={mpSecondsRemaining}
         turnTimerSeconds={mpTurnTimerSeconds}
+        timerPhase={mpPhaseLabel}
+        preThinkActive={mpPreThinkActive}
+        mrxSecondsForBar={mpMrxSeconds}
+        bufferSecondsForBar={mpBufferSeconds}
         onExploreModeChange={setMpExploreMode}
         teammatesExploring={teammatesExploring}
         anyDetectiveExploring={anyDetectiveExploring}

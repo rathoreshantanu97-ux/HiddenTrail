@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useActiveMaps } from "../lib/useActiveMaps.js";
 import { useMapWithOverrides } from "../lib/useMapWithOverrides.js";
 import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
+import { computeTurnSchedule } from "../lib/turnSchedule.js";
 import * as auth from "../lib/accessControlApi.js";
 import * as api from "../lib/supabaseApi.js";
 import { styles } from "./GameBoard.jsx";
@@ -349,6 +350,30 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
               </div>
             </label>
           )}
+
+          {publicConfig && turnTimerSeconds && (() => {
+            // Host only ever sets the ONE number above -- everything else
+            // here is a READ-ONLY preview, derived the exact same way the
+            // live game clock will derive it (computeTurnSchedule), using
+            // the three ratios an admin configured. Hosts never see or
+            // set the ratios themselves, per explicit design decision.
+            const n = parseInt(turnTimerSeconds, 10);
+            if (!n) return null;
+            const schedule = computeTurnSchedule(n, {
+              preThinkBufferRatio: publicConfig.preThinkBufferRatio,
+              mrxTimeRatio: publicConfig.mrxTimeRatio,
+              extraSeatTimeRatio: publicConfig.extraSeatTimeRatio,
+            });
+            return (
+              <div style={styles.timerSchedulePreview}>
+                <div style={styles.timerSchedulePreviewTitle}>How this plays out each round</div>
+                <div>Mr. X's turn: up to {schedule.mrxSeconds}s to move</div>
+                <div>Detectives' planning time (shared, right after Mr. X moves): up to {schedule.bufferSeconds}s — no one can move yet, but everyone can preview routes</div>
+                <div>Each detective's turn to act: up to {schedule.actSeconds}s</div>
+                <div>A player controlling more than one detective: +{schedule.extraSeatSeconds}s for each detective beyond their first, that same round</div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

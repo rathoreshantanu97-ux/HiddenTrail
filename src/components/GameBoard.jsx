@@ -184,6 +184,17 @@ export default function GameBoard({
   const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
   const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
 
+  // Peeking is only OFFERED during the shared pre-think buffer (see the
+  // panel's own gating below) -- but the buffer can end mid-peek (it's a
+  // countdown, not something you dismiss), so this auto-releases any
+  // active peek the instant it does. Necessary, not just tidy: peeking
+  // blocks board clicks entirely, so a detective who forgot to un-peek
+  // right as their own act window opened would otherwise be locked out
+  // of making their own move.
+  useEffect(() => {
+    if (!preThinkActive && peekedPlayerId) setPeekedPlayerId(null);
+  }, [preThinkActive, peekedPlayerId]);
+
   // ---------------------------------------------------------------------
   // FREEHAND DRAWING -- a quick, disposable "let me show you my
   // reasoning" sketch layer, like circling a region on a real paper board
@@ -191,29 +202,44 @@ export default function GameBoard({
   // as the route explorer). Strokes are in MAP-SPACE coordinates (SVG
   // viewBox units, via screenPointToSvgPoint), so a stroke lands in the
   // same place for a peeking teammate regardless of either client's own
-  // zoom/pan. Auto-clears at the start of every new round (see the
-  // useEffect below) -- a real player wouldn't keep last round's
-  // scribbles around either. Broadcast via the SAME Presence payload as
-  // the route-explorer toggles, on stroke COMPLETION only (not live per-
-  // point), to keep Presence traffic reasonable.
+  // zoom/pan. Auto-clears the instant the shared buffer ends (see the
+  // useEffect below) -- a real player's board goes back to normal the
+  // moment everyone breaks from huddling and looks at their own screen,
+  // not just at the NEXT round's buffer. Broadcast via the SAME Presence
+  // payload as the route-explorer toggles, on stroke COMPLETION only
+  // (not live per-point), to keep Presence traffic reasonable.
   // ---------------------------------------------------------------------
   const [drawMode, setDrawMode] = useState(null); // null | "pen" | "eraser"
   const [myStrokes, setMyStrokes] = useState([]); // [{id, points: [{x,y}, ...]}]
   const [liveStrokePoints, setLiveStrokePoints] = useState(null); // points of the stroke currently being drawn (not yet committed to myStrokes)
   const [lastRoundStrokes, setLastRoundStrokes] = useState([]); // whatever myStrokes held right before the most recent auto-clear -- default behavior stays "blank," this is purely an opt-in recall
-  const lastClearedRoundRef = React.useRef(null);
-  const myStrokesRef = React.useRef(myStrokes); // lets the round-clear effect read the CURRENT strokes without depending on them (avoiding a clear-triggers-effect loop)
+  const wasPreThinkActiveRef = React.useRef(false); // lets the clear effect detect the true -> false EDGE (buffer just ended), not just "buffer is currently off"
+  const myStrokesRef = React.useRef(myStrokes); // lets the clear effect read the CURRENT strokes without depending on them (avoiding a clear-triggers-effect loop)
   myStrokesRef.current = myStrokes;
 
-  // Auto-clear MY OWN strokes at the start of every new round -- default
-  // is blank, per the real-board precedent (nobody keeps last round's
-  // scribbles visible), but the just-cleared strokes are stashed so the
-  // explicit "Recall last round" button (see toolbar below) can bring
-  // them back if you actually wanted to keep looking at them.
+  // Auto-clear MY OWN strokes the moment the shared pre-think buffer
+  // ends -- default is blank, per the real-board precedent (nobody keeps
+  // scribbles visible once everyone's back to their own screen), but the
+  // just-cleared strokes are stashed so the explicit "Recall last round"
+  // button (see toolbar below) can bring them back if you actually
+  // wanted to keep looking at them. Also clears on a plain round change
+  // (belt-and-suspenders for rooms with no configured planning time,
+  // where preThinkActive never turns on at all).
+  useEffect(() => {
+    const bufferJustEnded = wasPreThinkActiveRef.current && !preThinkActive;
+    wasPreThinkActiveRef.current = preThinkActive;
+    if (!bufferJustEnded) return;
+    if (myStrokesRef.current.length > 0) setLastRoundStrokes(myStrokesRef.current);
+    setMyStrokes([]);
+    setLiveStrokePoints(null);
+  }, [preThinkActive]);
+
+  const lastClearedRoundRef = React.useRef(null);
   useEffect(() => {
     if (match?.round == null) return;
     if (lastClearedRoundRef.current === match.round) return;
     lastClearedRoundRef.current = match.round;
+    if (preThinkActive) return; // this round's own buffer will handle the clear when IT ends -- don't clear twice
     if (myStrokesRef.current.length > 0) setLastRoundStrokes(myStrokesRef.current);
     setMyStrokes([]);
     setLiveStrokePoints(null);
@@ -951,43 +977,55 @@ export default function GameBoard({
               onto yours, live. Select again to stop peeking. Only players
               who currently allow it (myPeekable, opt-out below) are
               listed -- someone who's turned peeking off simply doesn't
-              appear here, no "request denied" moment for either side. */}
-          {iAmDetective && routeExplorerEnabled && (
-            <>
-              {detectivePlayersRoster.filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false).length > 0 && (
-                <div style={styles.huddlePanel}>
-                  <div style={styles.exploreLabel}>Peek into a teammate's screen:</div>
-                  {detectivePlayersRoster
-                    .filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false)
-                    .map((p) => (
-                      <button
-                        key={p.playerId}
+              appear here, no "request denied" moment for either side.
+              ONLY offered during the shared pre-think buffer -- peeking
+              during Mr.X's turn or an individual detective's own act
+              window doesn't match the "team is thinking together" moment
+              this is meant for, and would otherwise risk a detective
+              locking their OWN board (peeking blocks clicks) right as
+              their own turn to act starts. See the auto-release effect
+              below for the case where the buffer ends WHILE peeking. */}
+          {iAmDetective &&
+            routeExplorerEnabled &&
+            preThinkActive &&
+            detectivePlayersRoster.filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false).length > 0 && (
+              <div style={styles.huddlePanel}>
+                <div style={styles.exploreLabel}>Peek into a teammate's screen:</div>
+                {detectivePlayersRoster
+                  .filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false)
+                  .map((p) => (
+                    <button
+                      key={p.playerId}
+                      style={{
+                        ...styles.huddleRow,
+                        ...(peekedPlayerId === p.playerId ? styles.huddleRowActive : {}),
+                      }}
+                      onClick={() => setPeekedPlayerId(peekedPlayerId === p.playerId ? null : p.playerId)}
+                    >
+                      <span
                         style={{
-                          ...styles.huddleRow,
-                          ...(peekedPlayerId === p.playerId ? styles.huddleRowActive : {}),
+                          ...styles.huddleDot,
+                          background: match.detectives.find((d) => d.id === p.detectiveIds[0])?.color || "#666",
                         }}
-                        onClick={() => setPeekedPlayerId(peekedPlayerId === p.playerId ? null : p.playerId)}
-                      >
-                        <span
-                          style={{
-                            ...styles.huddleDot,
-                            background: match.detectives.find((d) => d.id === p.detectiveIds[0])?.color || "#666",
-                          }}
-                        />
-                        {p.displayName}
-                        {peekedPlayerId === p.playerId ? " (peeking)" : ""}
-                      </button>
-                    ))}
-                </div>
-              )}
-              {/* Your OWN privacy preference -- controls whether you show
-                  up in OTHER players' peek lists above, not whether you
-                  can peek at others. */}
-              <label style={styles.peekToggleRow}>
-                <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
-                Let teammates peek into my screen
-              </label>
-            </>
+                      />
+                      {p.displayName}
+                      {peekedPlayerId === p.playerId ? " (peeking)" : ""}
+                    </button>
+                  ))}
+              </div>
+            )}
+
+          {/* Your OWN privacy preference -- controls whether you show up
+              in OTHER players' peek lists above, not whether you can peek
+              at others. Kept visible ANYTIME (not buffer-gated), since
+              it's a durable preference you'd want to set once, not
+              something to fumble with in the few seconds the buffer is
+              actually running. */}
+          {iAmDetective && routeExplorerEnabled && (
+            <label style={styles.peekToggleRow}>
+              <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
+              Let teammates peek into my screen
+            </label>
           )}
 
           {/* Freehand drawing -- pen/eraser/undo only, no color picker (a

@@ -181,7 +181,10 @@ export async function getPublicConfig() {
       turnTimerMin: 30,
       turnTimerMax: 300,
       defaultInviteLimit: 20,
-      preThinkBufferRatio: 3,
+      planningTimeMin: 30,
+      planningTimeMax: 600,
+      mrxSecondsMin: 15,
+      mrxSecondsMax: 900,
       mrxTimeRatio: 3,
       extraSeatTimeRatio: 0.5,
     };
@@ -190,11 +193,17 @@ export async function getPublicConfig() {
     turnTimerMin: row.out_turn_timer_min,
     turnTimerMax: row.out_turn_timer_max,
     defaultInviteLimit: row.out_default_invite_limit,
-    // Turn-schedule ratios (see turnSchedule.js) -- admin-only knobs, the
-    // host never sets these directly, only the one turn_timer_seconds
-    // number. Fall back to turnSchedule.js's own defaults if this is an
+    // Turn-schedule config (see turnSchedule.js) -- admin-only knobs. The
+    // host sets exactly TWO numbers directly (act time / turn_timer_seconds,
+    // and planning/buffer time / planning_time_seconds); these bound BOTH
+    // of those host inputs, plus the DERIVED Mr.X window (mrxTimeRatio x
+    // planning time, clamped to [mrxSecondsMin, mrxSecondsMax] as a safety
+    // net). Fall back to turnSchedule.js's own defaults if this is an
     // older app_settings row from before these columns existed.
-    preThinkBufferRatio: row.out_pre_think_buffer_ratio ?? 3,
+    planningTimeMin: row.out_planning_time_min ?? 30,
+    planningTimeMax: row.out_planning_time_max ?? 600,
+    mrxSecondsMin: row.out_mrx_seconds_min ?? 15,
+    mrxSecondsMax: row.out_mrx_seconds_max ?? 900,
     mrxTimeRatio: row.out_mrx_time_ratio ?? 3,
     extraSeatTimeRatio: row.out_extra_seat_time_ratio ?? 0.5,
   };
@@ -205,7 +214,10 @@ export async function setAppConfig({
   turnTimerMin,
   turnTimerMax,
   defaultInviteLimit,
-  preThinkBufferRatio,
+  planningTimeMin,
+  planningTimeMax,
+  mrxSecondsMin,
+  mrxSecondsMax,
   mrxTimeRatio,
   extraSeatTimeRatio,
 }) {
@@ -214,7 +226,10 @@ export async function setAppConfig({
     p_turn_timer_min: turnTimerMin,
     p_turn_timer_max: turnTimerMax,
     p_default_invite_limit: defaultInviteLimit,
-    p_pre_think_buffer_ratio: preThinkBufferRatio ?? null,
+    p_planning_time_min: planningTimeMin ?? null,
+    p_planning_time_max: planningTimeMax ?? null,
+    p_mrx_seconds_min: mrxSecondsMin ?? null,
+    p_mrx_seconds_max: mrxSecondsMax ?? null,
     p_mrx_time_ratio: mrxTimeRatio ?? null,
     p_extra_seat_time_ratio: extraSeatTimeRatio ?? null,
   });

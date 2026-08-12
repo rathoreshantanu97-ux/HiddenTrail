@@ -17,8 +17,9 @@ import { computeTurnSchedule, actSecondsForSeatIndex } from "./turnSchedule.js";
 //      during the shared pre-think buffer.
 //
 // SCHEDULE: see turnSchedule.js for the full reasoning. In short, the
-// host's one turn_timer_seconds number becomes:
-//   - Mr. X's own turn window (mrxSeconds, admin ratio)
+// host sets TWO independent numbers (turn_timer_seconds = the act window,
+// planning_time_seconds = the shared buffer), which become:
+//   - Mr. X's own turn window (mrxSeconds, admin ratio OF THE BUFFER, clamped)
 //   - a ONE-TIME shared pre-think buffer, prepended to the FIRST
 //     detective seat's turn only (right after Mr. X moves) -- during
 //     this window nobody can move, and no auto-move fallback can fire
@@ -44,7 +45,9 @@ import { computeTurnSchedule, actSecondsForSeatIndex } from "./turnSchedule.js";
 // ---------------------------------------------------------------------------
 export function useTurnTimer({ roomId, map, match, players, onDetectiveMove, onMrXMove, onPassTurn }) {
   const [actSeconds, setActSeconds] = useState(null);
+  const [bufferSecondsInput, setBufferSecondsInput] = useState(null); // the host's OWN planning-time number (room.planning_time_seconds), before ratio/bounds are applied
   const [ratios, setRatios] = useState(null);
+  const [bounds, setBounds] = useState(null);
   const [secondsRemaining, setSecondsRemaining] = useState(null);
   const [phaseLabel, setPhaseLabel] = useState(null); // "buffer" | "mrx" | "detective" | null
   const attemptedForRef = useRef(null); // guards against submitting more than once for the same turn+phase
@@ -56,10 +59,14 @@ export function useTurnTimer({ roomId, map, match, players, onDetectiveMove, onM
       .then(([room, cfg]) => {
         if (cancelled) return;
         setActSeconds(room?.turn_timer_seconds ?? null);
+        setBufferSecondsInput(room?.planning_time_seconds ?? null);
         setRatios({
-          preThinkBufferRatio: cfg.preThinkBufferRatio,
           mrxTimeRatio: cfg.mrxTimeRatio,
           extraSeatTimeRatio: cfg.extraSeatTimeRatio,
+        });
+        setBounds({
+          mrxSecondsMin: cfg.mrxSecondsMin,
+          mrxSecondsMax: cfg.mrxSecondsMax,
         });
       })
       .catch((e) => console.error("Failed to fetch room's turn timer / schedule ratios:", e));
@@ -68,7 +75,10 @@ export function useTurnTimer({ roomId, map, match, players, onDetectiveMove, onM
     };
   }, [roomId]);
 
-  const schedule = useMemo(() => (actSeconds && ratios ? computeTurnSchedule(actSeconds, ratios) : null), [actSeconds, ratios]);
+  const schedule = useMemo(
+    () => (actSeconds && ratios && bounds ? computeTurnSchedule(actSeconds, bufferSecondsInput, ratios, bounds) : null),
+    [actSeconds, bufferSecondsInput, ratios, bounds]
+  );
 
   // seatIndexWithinPlayer -- for each detective seat in turn_order, its
   // 0-based ordinal among THAT SEAT'S OWN player's seats, walked in
@@ -141,7 +151,7 @@ export function useTurnTimer({ roomId, map, match, players, onDetectiveMove, onM
       const seatIdx = seatIndexWithinPlayer[actor] ?? 0;
       const actDuration = actSecondsForSeatIndex(schedule, seatIdx);
 
-      if (isFirstDetectiveSeat && match.detectivePhaseStartedAt) {
+      if (isFirstDetectiveSeat && match.detectivePhaseStartedAt && schedule.bufferSeconds) {
         // The shared pre-think buffer is anchored on detectivePhaseStartedAt
         // (stamped server-side exactly once per round, on the mrx ->
         // first-detective-seat transition) rather than turnStartedAt --

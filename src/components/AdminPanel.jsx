@@ -21,7 +21,10 @@ export default function AdminPanel({ accountId, onBack }) {
     turnTimerMin: 30,
     turnTimerMax: 300,
     defaultInviteLimit: 20,
-    preThinkBufferRatio: 3,
+    planningTimeMin: 30,
+    planningTimeMax: 600,
+    mrxSecondsMin: 15,
+    mrxSecondsMax: 900,
     mrxTimeRatio: 3,
     extraSeatTimeRatio: 0.5,
   });
@@ -140,7 +143,10 @@ export default function AdminPanel({ accountId, onBack }) {
         turnTimerMin: Number(configDraft.turnTimerMin),
         turnTimerMax: Number(configDraft.turnTimerMax),
         defaultInviteLimit: Number(configDraft.defaultInviteLimit),
-        preThinkBufferRatio: Number(configDraft.preThinkBufferRatio),
+        planningTimeMin: Number(configDraft.planningTimeMin),
+        planningTimeMax: Number(configDraft.planningTimeMax),
+        mrxSecondsMin: Number(configDraft.mrxSecondsMin),
+        mrxSecondsMax: Number(configDraft.mrxSecondsMax),
         mrxTimeRatio: Number(configDraft.mrxTimeRatio),
         extraSeatTimeRatio: Number(configDraft.extraSeatTimeRatio),
       });
@@ -381,33 +387,61 @@ export default function AdminPanel({ accountId, onBack }) {
           </label>
         </div>
 
-        {/* Turn-schedule ratios -- these are the ONLY place these
-            multiples ever appear. A host never sees or sets a ratio,
-            they only pick one number (turn timer seconds); everything
-            else in the actual game schedule (Mr. X's window, the shared
-            pre-think buffer, each detective's act window) is derived
-            from that one number using these three admin-level ratios --
-            see turnSchedule.js for the full reasoning. */}
-        <div style={{ ...styles.cardTitle, fontSize: 15, marginTop: 20 }}>Turn schedule ratios</div>
+        {/* Turn schedule -- hosts set TWO numbers directly (the detective
+            "turn timer" seconds, unchanged; and a new "planning time"
+            seconds, the shared buffer), each bounded by the ranges set
+            here. Mr. X's window is still DERIVED (mrxTimeRatio × planning
+            time, clamped to the Mr.X bounds below) since Mr.X has no
+            second number of his own to set -- see turnSchedule.js. */}
+        <div style={{ ...styles.cardTitle, fontSize: 15, marginTop: 20 }}>Turn schedule</div>
         <p style={styles.smallNote}>
-          These control how the host's single "turn timer" number is split into an actual in-game schedule. The host
-          never sees these ratios directly — they only see the computed result (shown live as they set their one
-          number).
+          Hosts set the detective turn timer AND a separate planning-time number directly (each bounded by the ranges
+          below). Mr. X's window and the extra-seat top-up stay derived from these via the ratios below, since Mr.X
+          has no second number of his own.
         </p>
         <div style={styles.configGrid}>
           <label style={styles.configLabel}>
-            Pre-think buffer (× the base timer)
+            Planning time min (seconds)
             <input
               type="number"
-              min={0.5}
-              step={0.1}
+              min={1}
               style={styles.configInput}
-              value={configDraft.preThinkBufferRatio}
-              onChange={(e) => setConfigDraft({ ...configDraft, preThinkBufferRatio: e.target.value })}
+              value={configDraft.planningTimeMin}
+              onChange={(e) => setConfigDraft({ ...configDraft, planningTimeMin: e.target.value })}
             />
           </label>
           <label style={styles.configLabel}>
-            Mr. X's turn (× the base timer)
+            Planning time max (seconds)
+            <input
+              type="number"
+              min={1}
+              style={styles.configInput}
+              value={configDraft.planningTimeMax}
+              onChange={(e) => setConfigDraft({ ...configDraft, planningTimeMax: e.target.value })}
+            />
+          </label>
+          <label style={styles.configLabel}>
+            Mr. X's turn min (seconds)
+            <input
+              type="number"
+              min={1}
+              style={styles.configInput}
+              value={configDraft.mrxSecondsMin}
+              onChange={(e) => setConfigDraft({ ...configDraft, mrxSecondsMin: e.target.value })}
+            />
+          </label>
+          <label style={styles.configLabel}>
+            Mr. X's turn max (seconds)
+            <input
+              type="number"
+              min={1}
+              style={styles.configInput}
+              value={configDraft.mrxSecondsMax}
+              onChange={(e) => setConfigDraft({ ...configDraft, mrxSecondsMax: e.target.value })}
+            />
+          </label>
+          <label style={styles.configLabel}>
+            Mr. X's turn (× planning time)
             <input
               type="number"
               min={0.5}
@@ -418,7 +452,7 @@ export default function AdminPanel({ accountId, onBack }) {
             />
           </label>
           <label style={styles.configLabel}>
-            Extra detective seat (× the base timer)
+            Extra detective seat (× the act timer)
             <input
               type="number"
               min={0}
@@ -430,11 +464,13 @@ export default function AdminPanel({ accountId, onBack }) {
           </label>
         </div>
         <div style={styles.smallNote}>
-          Example: with a 20s base timer at the current draft values — Mr. X gets{" "}
-          {Math.ceil(20 * Number(configDraft.mrxTimeRatio || 0))}s, the shared pre-think buffer runs{" "}
-          {Math.ceil(20 * Number(configDraft.preThinkBufferRatio || 0))}s, each detective gets 20s for their first
-          seat this round and +{Math.ceil(20 * Number(configDraft.extraSeatTimeRatio || 0))}s for every additional
-          seat they control.
+          Example: with a 20s act timer and a 90s planning time at the current draft values — Mr. X gets{" "}
+          {Math.max(
+            Number(configDraft.mrxSecondsMin || 0),
+            Math.min(Number(configDraft.mrxSecondsMax || 99999), Math.ceil(90 * Number(configDraft.mrxTimeRatio || 0)))
+          )}
+          s, the shared planning buffer runs 90s, each detective gets 20s for their first seat this round and +
+          {Math.ceil(20 * Number(configDraft.extraSeatTimeRatio || 0))}s for every additional seat they control.
         </div>
 
         <div style={styles.smallNote}>

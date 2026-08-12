@@ -35,7 +35,16 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
   const [mapId, setMapId] = useState(currentMapId);
   const [numDetectives, setNumDetectives] = useState(currentNumDetectives);
   const [turnTimerSeconds, setTurnTimerSeconds] = useState(null);
-  const [publicConfig, setPublicConfig] = useState({ turnTimerMin: 30, turnTimerMax: 300, defaultInviteLimit: 20 });
+  const [planningTimeSeconds, setPlanningTimeSeconds] = useState(null);
+  const [publicConfig, setPublicConfig] = useState({
+    turnTimerMin: 30,
+    turnTimerMax: 300,
+    defaultInviteLimit: 20,
+    planningTimeMin: 30,
+    planningTimeMax: 600,
+    mrxSecondsMin: 15,
+    mrxSecondsMax: 900,
+  });
   const [featureConfig, setFeatureConfig] = useState(null);
   const [featureOverrides, setFeatureOverrides] = useState({});
   const [isPublic, setIsPublic] = useState(false);
@@ -63,6 +72,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
       .then((room) => {
         if (!room) return;
         setTurnTimerSeconds(room.turn_timer_seconds ?? null);
+        setPlanningTimeSeconds(room.planning_time_seconds ?? null);
         setIsPublic(!!room.is_public);
         setRoomName(room.room_name || "");
         setFeatureOverrides({
@@ -103,6 +113,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
         totalPlayers: numDetectives + 1,
         mapStationCount: selectedMap ? Object.keys(selectedMap.stations).length : null,
         turnTimerSeconds,
+        planningTimeSeconds,
         featureOverrides,
         isPublic,
         roomName: isPublic ? roomName.trim() : null,
@@ -351,24 +362,84 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
             </label>
           )}
 
+          {publicConfig && turnTimerSeconds && (
+            <label style={styles.featureOverrideRow}>
+              <span>Planning time (seconds) — shared team thinking time right after Mr. X moves; blank means no shared pause</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  type="button"
+                  aria-label="Decrease planning time by 10 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={() => {
+                    const current = planningTimeSeconds === null || planningTimeSeconds === "" ? publicConfig.planningTimeMin : parseInt(planningTimeSeconds, 10) || publicConfig.planningTimeMin;
+                    const next = Math.max(publicConfig.planningTimeMin, Math.min(publicConfig.planningTimeMax, current - 10));
+                    setPlanningTimeSeconds(next);
+                  }}
+                >
+                  −
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="No shared pause"
+                  style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+                  value={planningTimeSeconds ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "" || /^\d*$/.test(v)) {
+                      setPlanningTimeSeconds(v === "" ? null : v);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (planningTimeSeconds === null || planningTimeSeconds === "") {
+                      setPlanningTimeSeconds(null);
+                      return;
+                    }
+                    const n = Math.max(publicConfig.planningTimeMin, Math.min(publicConfig.planningTimeMax, parseInt(planningTimeSeconds, 10) || publicConfig.planningTimeMin));
+                    setPlanningTimeSeconds(n);
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Increase planning time by 10 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={() => {
+                    const current = planningTimeSeconds === null || planningTimeSeconds === "" ? publicConfig.planningTimeMin : parseInt(planningTimeSeconds, 10) || publicConfig.planningTimeMin;
+                    const next = Math.max(publicConfig.planningTimeMin, Math.min(publicConfig.planningTimeMax, current + 10));
+                    setPlanningTimeSeconds(next);
+                  }}
+                >
+                  +
+                </button>
+              </div>
+            </label>
+          )}
+
           {publicConfig && turnTimerSeconds && (() => {
-            // Host only ever sets the ONE number above -- everything else
-            // here is a READ-ONLY preview, derived the exact same way the
-            // live game clock will derive it (computeTurnSchedule), using
-            // the three ratios an admin configured. Hosts never see or
-            // set the ratios themselves, per explicit design decision.
+            // Host sets these TWO numbers above directly -- everything
+            // else here is a READ-ONLY preview, derived the exact same
+            // way the live game clock will derive it (computeTurnSchedule),
+            // using the admin-configured ratios/bounds. Hosts never see
+            // or set the ratios/bounds themselves, per explicit design
+            // decision.
             const n = parseInt(turnTimerSeconds, 10);
             if (!n) return null;
-            const schedule = computeTurnSchedule(n, {
-              preThinkBufferRatio: publicConfig.preThinkBufferRatio,
-              mrxTimeRatio: publicConfig.mrxTimeRatio,
-              extraSeatTimeRatio: publicConfig.extraSeatTimeRatio,
-            });
+            const buf = planningTimeSeconds ? parseInt(planningTimeSeconds, 10) : null;
+            const schedule = computeTurnSchedule(
+              n,
+              buf,
+              { mrxTimeRatio: publicConfig.mrxTimeRatio, extraSeatTimeRatio: publicConfig.extraSeatTimeRatio },
+              { mrxSecondsMin: publicConfig.mrxSecondsMin, mrxSecondsMax: publicConfig.mrxSecondsMax }
+            );
             return (
               <div style={styles.timerSchedulePreview}>
                 <div style={styles.timerSchedulePreviewTitle}>How this plays out each round</div>
                 <div>Mr. X's turn: up to {schedule.mrxSeconds}s to move</div>
-                <div>Detectives' planning time (shared, right after Mr. X moves): up to {schedule.bufferSeconds}s — no one can move yet, but everyone can preview routes</div>
+                {schedule.bufferSeconds ? (
+                  <div>Detectives' planning time (shared, right after Mr. X moves): up to {schedule.bufferSeconds}s — no one can move yet, but everyone can preview routes</div>
+                ) : (
+                  <div>No shared planning window — detectives go straight to their own turn to act.</div>
+                )}
                 <div>Each detective's turn to act: up to {schedule.actSeconds}s</div>
                 <div>A player controlling more than one detective: +{schedule.extraSeatSeconds}s for each detective beyond their first, that same round</div>
               </div>

@@ -130,8 +130,17 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
   const [featureConfig, setFeatureConfig] = useState(null);
   const [featureOverrides, setFeatureOverrides] = useState({});
   const [timingConfig, setTimingConfig] = useState(null);
-  const [publicConfig, setPublicConfig] = useState({ turnTimerMin: 30, turnTimerMax: 300, defaultInviteLimit: 20 });
+  const [publicConfig, setPublicConfig] = useState({
+    turnTimerMin: 30,
+    turnTimerMax: 300,
+    defaultInviteLimit: 20,
+    planningTimeMin: 30,
+    planningTimeMax: 600,
+    mrxSecondsMin: 15,
+    mrxSecondsMax: 900,
+  });
   const [turnTimerSeconds, setTurnTimerSecondsState] = useState(null); // null = no limit
+  const [planningTimeSeconds, setPlanningTimeSecondsState] = useState(null); // null = no shared planning window
 
   useEffect(() => {
     auth
@@ -258,6 +267,7 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
         hostRole,
         mapStationCount: selectedMap ? Object.keys(selectedMap.stations).length : null,
         turnTimerSeconds,
+        planningTimeSeconds,
         featureOverrides,
         isPublic,
         roomName: isPublic ? roomName.trim() : null,
@@ -556,6 +566,61 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
                     const current = turnTimerSeconds === null || turnTimerSeconds === "" ? publicConfig.turnTimerMin : parseInt(turnTimerSeconds, 10) || publicConfig.turnTimerMin;
                     const next = Math.max(publicConfig.turnTimerMin, Math.min(publicConfig.turnTimerMax, current + 10));
                     setTurnTimerSecondsState(next);
+                  }}
+                >
+                  +
+                </button>
+              </div>
+            </label>
+          )}
+
+          {publicConfig && (
+            <label style={styles.featureOverrideRow}>
+              <span>Planning time (seconds) — shared team thinking time right after Mr. X moves; blank means no shared pause</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  type="button"
+                  aria-label="Decrease planning time by 10 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const current = planningTimeSeconds === null || planningTimeSeconds === "" ? publicConfig.planningTimeMin : parseInt(planningTimeSeconds, 10) || publicConfig.planningTimeMin;
+                    const next = Math.max(publicConfig.planningTimeMin, Math.min(publicConfig.planningTimeMax, current - 10));
+                    setPlanningTimeSecondsState(next);
+                  }}
+                >
+                  −
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="No shared pause"
+                  style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+                  value={planningTimeSeconds ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "" || /^\d*$/.test(v)) {
+                      setPlanningTimeSecondsState(v === "" ? null : v);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (planningTimeSeconds === null || planningTimeSeconds === "") {
+                      setPlanningTimeSecondsState(null);
+                      return;
+                    }
+                    const n = Math.max(publicConfig.planningTimeMin, Math.min(publicConfig.planningTimeMax, parseInt(planningTimeSeconds, 10) || publicConfig.planningTimeMin));
+                    setPlanningTimeSecondsState(n);
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Increase planning time by 10 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const current = planningTimeSeconds === null || planningTimeSeconds === "" ? publicConfig.planningTimeMin : parseInt(planningTimeSeconds, 10) || publicConfig.planningTimeMin;
+                    const next = Math.max(publicConfig.planningTimeMin, Math.min(publicConfig.planningTimeMax, current + 10));
+                    setPlanningTimeSecondsState(next);
                   }}
                 >
                   +

@@ -119,9 +119,11 @@ export default function GameBoard({
   extraHeaderContent, // shares a row with the "Play 2x card" button (e.g. Pause/End Game in multiplayer, End Game in pass-and-play) -- kept small/short controls only, since it's meant to sit alongside the 2x button without wrapping badly
   extraHeaderContentBelow, // renders as its OWN row, below the 2x/Pause/End-Game row -- for bulkier controls that shouldn't crowd that first row (e.g. multiplayer's Takeover Reversal / Redistribute Roles votes, and the TakeoverPanel)
   belowTicketsContent, // e.g. chat in multiplayer -- renders AFTER the log/tickets panels, per the agreed sidebar order (votes -> huddle -> explorer -> log -> tickets -> chat)
-  onExploreModeChange, // (mode|null) => void -- reports this client's own explore-mode selection upward, so App.jsx can broadcast it via Presence
-  teammatesExploring = [], // [{playerId, displayName, color, exploreMode}] -- OTHER detectives' current exploration, for the huddle panel (multiplayer only)
-  anyDetectiveExploring = false, // true if ANY detective (including possibly this client) currently has an active exploration -- drives Mr.X's content-free "Detectives are discussing" indicator
+  onExploreModeChange, // (detectiveIds: number[]) => void -- reports this client's own EXTRA toggled-on detective ids (beyond their own, which are always shown by default) upward, so App.jsx can broadcast them via Presence
+  onPeekableChange, // (peekable: boolean) => void -- reports this client's own "let teammates peek at my screen" preference upward, for the same Presence broadcast
+  detectivePlayersRoster = [], // [{playerId, displayName, detectiveIds: number[]}] -- every detective-seat player (not Mr.X), multiplayer only, used for the "peek into a player's screen" panel and for showing a peeked player's OWN highlights (which aren't separately broadcast, since they're deterministic from this same roster)
+  presenceState = {}, // playerId -> {displayName, role, toggledDetectiveIds} -- live Presence payloads (multiplayer only), used to read a peeked player's EXTRA toggles
+  myPlayerId = null, // this client's own player id (multiplayer only) -- used to exclude yourself from the peek list
   detectivePlayerNames = {}, // detectiveId -> player display name (multiplayer only) -- for the ticket counter's "Priya — D1" labeling
   secondsRemaining = null, // null (no timer set for this room) | number of seconds left in the current turn/phase -- shown to EVERYONE regardless of whose turn it is
   turnTimerSeconds = null, // the room's configured timer length (the detective act window), for showing "12 / 60s" style displays
@@ -166,18 +168,41 @@ export default function GameBoard({
   const EDGE_MARGIN_TOP = EDGE_MARGIN_TOP_BY_MAP[map?.id] ?? EDGE_MARGIN_TOP_DEFAULT;
   const [pan, setPan] = useState({ x: -EDGE_MARGIN_OTHER, y: -EDGE_MARGIN_TOP });
   const [pendingMove, setPendingMove] = useState(null);
-  const [exploreMode, setExploreMode] = useState(null); // null | "taxi" | "bus" | "underground" -- which mode's reachable stations to highlight
-  const [exploreFromDetectiveId, setExploreFromDetectiveId] = useState(null); // which of MY OWN detectives to explore from, if I control more than one
-  const [peekedTeammateId, setPeekedTeammateId] = useState(null); // playerId whose exploration we're currently peeking at, via the huddle panel
+  // extraToggledIds: OTHER detectives (not your own) this client has
+  // clicked on to add their reachable-station highlight to the board.
+  // Your OWN detectives are always shown by default (see
+  // defaultOwnDetectiveIds below) and never need to appear here.
+  const [extraToggledIds, setExtraToggledIds] = useState(() => new Set());
+  const [mrxSelfExplore, setMrxSelfExplore] = useState(false); // Mr.X clicking his OWN token toggles his own reachable-station highlight -- no teammates to coordinate with, so this stays purely local, never broadcast
+  const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
+  const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
 
-  // Report our own explore-mode selection upward so App.jsx can
-  // broadcast it via Presence -- teammates' huddle panels update live
-  // off this, and it correctly clears (broadcasts null) the moment we
-  // clear our own selection, so nothing lingers stale for others.
+  function toggleDetectiveHighlight(detId) {
+    setExtraToggledIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(detId)) next.delete(detId);
+      else next.add(detId);
+      return next;
+    });
+  }
+
+  // Report our own EXTRA toggles upward so App.jsx can broadcast them via
+  // Presence -- other players' "peek" views update live off this, and it
+  // correctly clears the moment we untoggle everything, so nothing lingers
+  // stale for others.
   useEffect(() => {
-    onExploreModeChange && onExploreModeChange(exploreMode);
+    onExploreModeChange && onExploreModeChange(Array.from(extraToggledIds));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exploreMode]);
+  }, [extraToggledIds]);
+
+  // Report our own peek-privacy preference upward the same way -- default
+  // ON (matches the old always-visible behavior), but a player can turn
+  // it off at any time, which immediately removes them from every
+  // teammate's peek list, live.
+  useEffect(() => {
+    onPeekableChange && onPeekableChange(myPeekable);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myPeekable]);
   const routeExplorerEnabled = useFeatureEnabled("route_explorer_enabled", roomId);
   const [message, setMessage] = useState("");
   const dragState = React.useRef(null);
@@ -444,80 +469,88 @@ export default function GameBoard({
     }
   }, [isMyTurnToAct, isMrXTurn, activeDetective, match, map, myRole, actor]);
 
-  // Route explorer: for whoever's turn it is, compute every station
-  // reachable via a SPECIFIC transport mode from their current position
-  // (following that mode's edges only, any number of hops -- this is a
-  // "what's out there" exploratory view, not a ticket-budgeted move
-  // preview, so it doesn't stop at however many tickets they hold for
-  // that mode). Purely client-side: the map's graph is already fully
-  // loaded, no server round-trip needed.
-  // The detective this client is currently exploring FROM. In
-  // multiplayer, this is always available (any of MY OWN detectives, at
-  // any time) -- defaulting to the first one I control, or whichever I
-  // explicitly picked via exploreFromDetectiveId if I control several.
-  // In pass-and-play, there's no persistent "my own detective" concept
-  // (myRole is null, the device controls everyone) -- the explorer stays
-  // tied to whoever's turn it currently is, same as before.
-  const exploringDetective =
-    myRole === null
-      ? activeDetective
-      : myOwnDetectives.find((d) => d.id === exploreFromDetectiveId) || myOwnDetectives[0] || null;
-
-  function computeReachableFrom(fromPos, mode) {
-    // Shows only the DIRECT, one-hop legal destinations for this mode --
-    // i.e. the actual stations you could move to right now by spending
-    // one ticket of this type, not "everywhere eventually reachable via
-    // unlimited hops of this mode." The taxi tier especially is a dense,
-    // fully-connected local mesh (by design), so an unbounded walk would
-    // reach nearly the entire map -- which is exactly the bug this fixes
-    // (confirmed: taxi was highlighting almost every station).
-    if (!mode || fromPos == null) return new Set();
+  // ---------------------------------------------------------------------
+  // ROUTE EXPLORER v2 -- redesigned around "click a piece on the map to
+  // turn its highlight on/off," rather than a separate mode-picker
+  // control. Reachable stations are now computed across EVERY mode that
+  // piece actually holds a ticket for, all at once (not one mode at a
+  // time) -- a station is only ever highlighted if it's genuinely
+  // reachable given tickets currently held, per explicit design
+  // decision, since showing an unreachable metro-only station to a
+  // detective with zero metro tickets was actively misleading.
+  // ---------------------------------------------------------------------
+  function computeReachableAllModes(fromPos, tickets) {
+    // Direct, one-hop destinations only (not unlimited-hop walks -- see
+    // the original taxi-mesh bug this avoided), unioned across every
+    // mode the piece holds at least one ticket for right now.
+    if (fromPos == null || !tickets) return new Set();
     const reachable = new Set();
     for (const edge of map.graph[fromPos] || []) {
-      if (edge.mode === mode) reachable.add(edge.to);
+      if ((tickets[edge.mode] || 0) > 0) reachable.add(edge.to);
     }
     return reachable;
   }
 
-  const exploreReachable = useMemo(() => {
-    if (isMrXTurn) {
-      // Mr.X's own explorer (still turn-gated -- Mr.X doesn't have a
-      // "coordinate anytime" use case the way detectives do) uses his
-      // actual position, only ever visible on his own client to begin
-      // with (match.mrX.pos is null for everyone else).
-      if (!exploreMode) return new Set();
-      return computeReachableFrom(match.mrX.pos, exploreMode);
-    }
-    if (!exploreMode || !exploringDetective) return new Set();
-    return computeReachableFrom(exploringDetective.pos, exploreMode);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exploreMode, isMrXTurn, match.mrX.pos, exploringDetective, map]);
-
-  // The PEEKED teammate's reachable stations -- computed the same way,
-  // from THEIR position (their own detective's current pos, looked up
-  // by their broadcast role) and THEIR broadcast exploreMode, so peeking
-  // shows exactly what they're currently seeing, live.
-  const peekedTeammateData = teammatesExploring.find((t) => t.playerId === peekedTeammateId);
-  const peekedReachable = useMemo(() => {
-    if (!peekedTeammateData || !peekedTeammateData.exploreMode) return new Set();
-    const theirDetective = match.detectives.find((d) => `d${d.id}` === peekedTeammateData.detectiveSeat);
-    if (!theirDetective) return new Set();
-    return computeReachableFrom(theirDetective.pos, peekedTeammateData.exploreMode);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peekedTeammateData, match.detectives, map]);
-
-  // Which modes the exploring detective (or Mr.X, on his own turn)
-  // actually holds at least one ticket for -- only these are offered as
-  // explore buttons, per project design ("this should take into account
-  // whether the player has that ticket"). Black tickets aren't
-  // mode-specific, so they're excluded entirely -- there's no single
-  // "black route" to show.
-  const myCurrentTickets = isMrXTurn ? match.mrX.tickets : exploringDetective?.tickets;
-  const exploreModeOptions = myCurrentTickets
-    ? Object.entries(myCurrentTickets)
-        .filter(([mode, count]) => (mode === "taxi" || mode === "bus" || mode === "underground") && count > 0)
-        .map(([mode]) => mode)
+  // defaultOwnDetectiveIds: MY OWN detectives' highlights are always ON
+  // by default while it's appropriate for me to see them -- never
+  // require a click. Pass-and-play (myRole === null, one shared device)
+  // treats "own" as "every detective," since the same person plays the
+  // whole team -- but only while it ISN'T Mr.X's own private turn, to
+  // avoid handing Mr.X free intel about detective destinations on the
+  // same device.
+  const showDetectiveHighlights = iAmDetective || isSpectator || (myRole === null && !isMrXTurn);
+  const defaultOwnDetectiveIds = showDetectiveHighlights
+    ? myRole === null
+      ? match.detectives.map((d) => d.id)
+      : myOwnDetectives.map((d) => d.id)
     : [];
+
+  // The PEEKED player's own detectives aren't separately broadcast --
+  // they're fully deterministic from the roster App.jsx already builds
+  // from room roles, so we just recompute them locally the same way.
+  // If the peeked player turns their privacy toggle off WHILE being
+  // peeked, this immediately stops surfacing their data (presenceState
+  // updates live) -- no separate "kick out the peeker" step needed.
+  const peekedPlayerIsPeekable = presenceState[peekedPlayerId]?.peekable !== false;
+  const peekedPlayerRosterEntry = detectivePlayersRoster.find((p) => p.playerId === peekedPlayerId);
+  const peekedOwnIds = showDetectiveHighlights && peekedPlayerIsPeekable && peekedPlayerRosterEntry ? peekedPlayerRosterEntry.detectiveIds : [];
+  const peekedExtraIds = showDetectiveHighlights && peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.toggledDetectiveIds || [] : [];
+
+  // The final set of detectives whose highlight is currently shown to
+  // THIS client: mine (always), whatever I've clicked on beyond that,
+  // and -- while peeking -- everything the peeked player currently has
+  // showing on THEIR screen too.
+  const highlightedDetectiveIds = showDetectiveHighlights
+    ? new Set([...defaultOwnDetectiveIds, ...extraToggledIds, ...peekedOwnIds, ...peekedExtraIds])
+    : new Set();
+
+  // reachableByDetectiveId: stationId -> [{detId, color}] for every
+  // currently-highlighted detective that can reach it -- built once so
+  // rendering can just look up a station and stack whichever detectives'
+  // rings apply, rather than recomputing per-station during render.
+  const reachableByDetectiveId = useMemo(() => {
+    const map_ = new Map();
+    for (const detId of highlightedDetectiveIds) {
+      const det = match.detectives.find((d) => d.id === detId);
+      if (!det) continue;
+      const reachable = computeReachableAllModes(det.pos, det.tickets);
+      for (const stationId of reachable) {
+        if (!map_.has(stationId)) map_.set(stationId, []);
+        map_.get(stationId).push({ detId, color: det.color });
+      }
+    }
+    return map_;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Array.from(highlightedDetectiveIds).sort().join(","), match.detectives, map]);
+
+  // Mr.X's own self-explore -- unchanged in spirit, but now shows ALL
+  // modes he holds tickets for at once too, toggled by clicking his own
+  // token rather than a separate mode-picker row.
+  const mrxReachable = useMemo(() => {
+    if (!mrxSelfExplore || !isMrXTurn) return new Set();
+    return computeReachableAllModes(match.mrX.pos, match.mrX.tickets);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mrxSelfExplore, isMrXTurn, match.mrX.pos, match.mrX.tickets, map]);
 
   // Whether MY OWN position dot should render right now. Pass-and-play:
   // only during Mr. X's own turn (shared-device secrecy). Multiplayer:
@@ -528,12 +561,34 @@ export default function GameBoard({
   const showMrXPos = myRole === null ? isMrXTurn : iAmMrX;
 
   function handleStationClick(station) {
+    // --- Route explorer v2: clicking a station where a PIECE currently
+    // stands toggles that piece's highlight, independent of whose turn
+    // it is -- available any time, exactly like the old explorer. This
+    // takes priority over move-commit logic below, since a station
+    // occupied by a detective can never legally be another detective's
+    // move destination anyway (no real conflict there). The one genuine
+    // ambiguity -- Mr.X CAN legally move onto a detective's station to
+    // capture them -- is excluded explicitly so an in-progress capture
+    // click is never swallowed by this.
+    const detOnStation = match.detectives.find((d) => d.pos === station);
+    const mrxCaptureClickInProgress = isMrXTurn && isMyTurnToAct && !preThinkActive && (myRole === null || myRole === "mrx");
+    if (detOnStation && !mrxCaptureClickInProgress) {
+      const isOwn = myRole === null || myOwnDetectives.some((d) => d.id === detOnStation.id);
+      if (isOwn) return; // your own detectives are ALWAYS shown by default -- nothing to toggle
+      if (!showDetectiveHighlights || !routeExplorerEnabled) return; // not a detective-perspective viewer, or admin has disabled cross-player exploring
+      toggleDetectiveHighlight(detOnStation.id);
+      return;
+    }
+    if (showMrXPos && station === match.mrX.pos) {
+      // Mr.X clicking his own token toggles his own self-explore.
+      setMrxSelfExplore((prev) => !prev);
+      return;
+    }
     if (!isMyTurnToAct) return;
     // Pre-think buffer: nobody may COMMIT a move yet, even the seat whose
     // turn it technically now is -- the whole point of the buffer is a
     // shared deliberation window before the act window starts. The
-    // existing explore/huddle preview system is untouched by this check
-    // (it doesn't route through handleStationClick).
+    // route explorer above is untouched by this check.
     if (preThinkActive) return;
     if (isMrXTurn) {
       if (myRole !== null && myRole !== "mrx") return; // multiplayer: not your role
@@ -693,49 +748,66 @@ export default function GameBoard({
               space with the first row. */}
           {extraHeaderContentBelow}
 
-          {/* Explore-mode row moved here (previously sat between the
-              huddle notes and the travel log) -- it's a CONTROL (a tool
-              you actively use to query the map), so it's grouped with
-              the other controls above (2x/Pause/End-Game, Takeover) 
-              rather than sitting among the read-only INFORMATION panels
-              (huddle notes, travel log, tickets, chat) below. */}
-          {(isMrXTurn ? isMyTurnToAct : iAmDetective || myRole === null) && routeExplorerEnabled && exploreModeOptions.length > 0 && (
-            <div style={styles.exploreRow}>
-              {myOwnDetectives.length > 1 && (
-                <select
-                  style={styles.exploreDetectivePicker}
-                  value={exploringDetective?.id ?? ""}
-                  onChange={(e) => {
-                    setExploreFromDetectiveId(Number(e.target.value));
-                    setExploreMode(null); // switching whose position we explore from clears any active highlight, since it'd otherwise show stale reachability from the previous detective
-                  }}
-                >
-                  {myOwnDetectives.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      Explore from {isWesteros ? detectiveName(d.id) : `Detective ${d.id + 1}`}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <span style={styles.exploreLabel}>Show reachable stations by:</span>
-              {exploreModeOptions.map((mode) => (
-                <button
-                  key={mode}
-                  style={{
-                    ...styles.exploreBtn,
-                    ...(exploreMode === mode ? { ...styles.exploreBtnActive, borderColor: activeMode[mode].color } : {}),
-                  }}
-                  onClick={() => setExploreMode(exploreMode === mode ? null : mode)}
-                >
-                  {activeMode[mode].label}
-                </button>
-              ))}
-              {exploreMode && (
-                <button style={styles.exploreClearBtn} onClick={() => setExploreMode(null)}>
-                  Clear
-                </button>
-              )}
+          {/* Route explorer v2: no separate mode-picker control anymore --
+              your own detectives' reachable stations are always shown by
+              default (see defaultOwnDetectiveIds), and clicking any OTHER
+              detective's token on the map toggles theirs on/off too. This
+              short hint replaces the old control row, so the mechanic is
+              still discoverable without cluttering the sidebar with
+              buttons. */}
+          {iAmDetective && routeExplorerEnabled && match.detectives.some((d) => !myOwnDetectives.some((md) => md.id === d.id)) && (
+            <div style={styles.exploreHint}>💡 Click any teammate's piece on the map to see their reachable stations too.</div>
+          )}
+          {isMrXTurn && iAmMrX && (
+            <div style={styles.exploreHint}>
+              {mrxSelfExplore ? "Showing your own reachable stations — click your token again to hide." : "💡 Click your own token to preview reachable stations."}
             </div>
+          )}
+
+          {/* Peek panel: pick ONE teammate (by player, not by detective --
+              a player controlling several seats is one row) to mirror
+              their ENTIRE current screen -- their own detectives' default
+              highlights plus whatever they've personally toggled on --
+              onto yours, live. Select again to stop peeking. Only players
+              who currently allow it (myPeekable, opt-out below) are
+              listed -- someone who's turned peeking off simply doesn't
+              appear here, no "request denied" moment for either side. */}
+          {iAmDetective && routeExplorerEnabled && (
+            <>
+              {detectivePlayersRoster.filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false).length > 0 && (
+                <div style={styles.huddlePanel}>
+                  <div style={styles.exploreLabel}>Peek into a teammate's screen:</div>
+                  {detectivePlayersRoster
+                    .filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false)
+                    .map((p) => (
+                      <button
+                        key={p.playerId}
+                        style={{
+                          ...styles.huddleRow,
+                          ...(peekedPlayerId === p.playerId ? styles.huddleRowActive : {}),
+                        }}
+                        onClick={() => setPeekedPlayerId(peekedPlayerId === p.playerId ? null : p.playerId)}
+                      >
+                        <span
+                          style={{
+                            ...styles.huddleDot,
+                            background: match.detectives.find((d) => d.id === p.detectiveIds[0])?.color || "#666",
+                          }}
+                        />
+                        {p.displayName}
+                        {peekedPlayerId === p.playerId ? " (peeking)" : ""}
+                      </button>
+                    ))}
+                </div>
+              )}
+              {/* Your OWN privacy preference -- controls whether you show
+                  up in OTHER players' peek lists above, not whether you
+                  can peek at others. */}
+              <label style={styles.peekToggleRow}>
+                <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
+                Let teammates peek into my screen
+              </label>
+            </>
           )}
 
           {/* Pass Turn moved here (previously sat at the very BOTTOM of
@@ -759,30 +831,6 @@ export default function GameBoard({
               >
                 Pass Turn
               </button>
-            </div>
-          )}
-
-          {isMrXTurn && anyDetectiveExploring && (
-            <div style={styles.huddleAmbientNote}>👀 Detectives are discussing...</div>
-          )}
-
-          {iAmDetective && teammatesExploring.length > 0 && (
-            <div style={styles.huddlePanel}>
-              <div style={styles.exploreLabel}>Teammates exploring:</div>
-              {teammatesExploring.map((t) => (
-                <button
-                  key={t.playerId}
-                  style={{
-                    ...styles.huddleRow,
-                    ...(peekedTeammateId === t.playerId ? styles.huddleRowActive : {}),
-                  }}
-                  onClick={() => setPeekedTeammateId(peekedTeammateId === t.playerId ? null : t.playerId)}
-                >
-                  <span style={{ ...styles.huddleDot, background: t.color }} />
-                  {t.displayName}: {activeMode[t.exploreMode]?.label || t.exploreMode}
-                  {peekedTeammateId === t.playerId ? " (peeking)" : ""}
-                </button>
-              ))}
             </div>
           )}
 
@@ -1256,8 +1304,21 @@ export default function GameBoard({
                 // incorrectly staying "currently revealed" through a
                 // second leg that did NOT actually reveal.
                 const isCurrentReveal = isLastKnown && match.mrX.lastRevealMove === match.mrX.travelLog.length;
-                const isExploreReachable = exploreReachable.has(numId);
-                const isPeekedReachable = peekedReachable.has(numId);
+                // Every currently-highlighted detective that can reach
+                // THIS station (all-modes-at-once, ticket-aware -- see
+                // reachableByDetectiveId above), plus Mr.X's own
+                // self-explore highlight if he's toggled it on.
+                const reachingDetectives = reachableByDetectiveId.get(numId) || [];
+                const isMrxReachable = mrxReachable.has(numId);
+                // Whether THIS station is a highlighted detective's
+                // CURRENT position (its "origin" for the explore
+                // highlight) -- skipped when it's already the active
+                // mover's own turn-indicator station, to avoid drawing
+                // two rings on top of each other.
+                const originDetective =
+                  detHere && highlightedDetectiveIds.has(detHere.id) && !(!isMrXTurn && activeDetective && detHere.id === activeDetective.id)
+                    ? detHere
+                    : null;
                 // Turn indicator: for a detective's turn, this is visible
                 // to EVERYONE (their position is always public). For
                 // Mr.X's own turn, a SEPARATE private indicator is shown
@@ -1319,28 +1380,33 @@ export default function GameBoard({
                     {isLegal && (
                       <HighlightRing x={x} y={y} radius={nodeR + 0.7} color="#1a1a1a" strokeWidth={0.25} dashed style={highlightDestinationStyle} />
                     )}
-                    {isExploreReachable && (
+                    {/* Reachable-destination highlights, all-modes-at-once
+                        and ticket-aware -- stacked one ring per
+                        currently-highlighted detective that can reach
+                        this station, so overlapping sets from different
+                        detectives stay distinguishable by color. */}
+                    {reachingDetectives.map((rd, i) => (
                       <circle
+                        key={rd.detId}
                         cx={x}
                         cy={y}
-                        r={nodeR + 1.0}
-                        fill={activeMode[exploreMode].color}
-                        opacity={0.22}
-                        stroke={activeMode[exploreMode].color}
+                        r={nodeR + 1.0 + i * 0.4}
+                        fill={i === 0 ? rd.color : "none"}
+                        opacity={i === 0 ? 0.22 : 0.85}
+                        stroke={rd.color}
                         strokeWidth={0.3}
+                        strokeDasharray={i === 0 ? undefined : "0.4,0.4"}
                       />
+                    ))}
+                    {isMrxReachable && (
+                      <circle cx={x} cy={y} r={nodeR + 1.0} fill="#1a1a1a" opacity={0.22} stroke="#1a1a1a" strokeWidth={0.3} />
                     )}
-                    {isPeekedReachable && (
-                      <circle
-                        cx={x}
-                        cy={y}
-                        r={nodeR + 1.4}
-                        fill="none"
-                        stroke={peekedTeammateData?.color || "#666"}
-                        strokeWidth={0.35}
-                        strokeDasharray="0.4,0.4"
-                        opacity={0.85}
-                      />
+                    {/* Origin ring for any highlighted detective's CURRENT
+                        position -- lets you see, at a glance, whose
+                        highlight a given cluster of destinations belongs
+                        to, without needing the side panel. */}
+                    {originDetective && highlightPositionStyle !== "blink" && (
+                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={originDetective.color} strokeWidth={0.35} dashed style={highlightPositionStyle} />
                     )}
                     {isCurrentReveal && (
                       <circle cx={x} cy={y} r={nodeR + 1.4} fill="none" stroke="#e11" strokeWidth={0.35} opacity={0.8}>
@@ -2188,6 +2254,19 @@ export const styles = {
     fontSize: 12,
   },
   exploreLabel: { color: "#777" },
+  peekToggleRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12.5,
+    color: "#8a8375",
+    padding: "4px 2px",
+  },
+  exploreHint: {
+    fontSize: 12.5,
+    color: "#8a8375",
+    padding: "6px 2px",
+  },
   exploreBtn: {
     border: "1.5px solid #ddd",
     background: "#fff",

@@ -1,63 +1,72 @@
 // ---------------------------------------------------------------------------
-// TURN SCHEDULE — the single source of truth for turning the host's ONE
-// number (turn_timer_seconds, the "detective act window") into the full
-// timing schedule, using the three admin-controlled ratios. Shared by the
-// host-facing preview (EditRoomSettingsForm) and the actual live game
-// clock (useTurnTimer), so they can never drift apart.
+// TURN SCHEDULE — the single source of truth for turning the host's TWO
+// numbers into the full timing schedule, using the two admin-controlled
+// ratios and bounds. Shared by the host-facing preview
+// (EditRoomSettingsForm) and the actual live game clock (useTurnTimer), so
+// they can never drift apart.
 //
-// DESIGN (see the long back-and-forth that led here): real in-person play
-// isn't "everyone gets an identical private clock" -- most of the actual
-// thinking happens continuously while it ISN'T your turn, and the moment
-// it becomes your turn is mostly just executing a decision you already
-// made. That reshapes the schedule into three pieces:
+// HOST INPUTS (two independent numbers, decoupled per explicit request --
+// a host who wants 5 minutes of team thinking and still only 20 seconds to
+// physically move needs to be able to say exactly that):
+//   - actSeconds: the detective act window -- how long a detective gets
+//     once it's genuinely their turn to move. Bounded by
+//     [turnTimerMin, turnTimerMax] (unchanged from before).
+//   - bufferSeconds: the shared pre-think buffer -- how long the whole
+//     detective team gets to plan together right after Mr.X moves, before
+//     anyone may commit a move. Set DIRECTLY by the host now (previously
+//     derived as a multiple of actSeconds) -- bounded by
+//     [planningTimeMin, planningTimeMax].
 //
-//   1. Mr. X's turn -- one dedicated window. Mr. X has no teammates to
-//      split deliberation with, so this needs to BE the primary thinking
-//      time, not a small top-up on a detective's short act window --
-//      sized to roughly the same order as the detectives' shared buffer
-//      below, via mrxTimeRatio (admin-set, default 3x the act window).
+// ADMIN-ONLY DERIVED VALUES:
+//   - mrxSeconds = ceil(bufferSeconds * mrxTimeRatio), then CLAMPED to
+//     [mrxSecondsMin, mrxSecondsMax] -- Mr.X's own deliberation is the
+//     same KIND of thing as the detectives' shared buffer (real thinking,
+//     not quick execution), so it multiplies buffer time, not act time.
+//     The clamp is a safety net requested explicitly, since a large ratio
+//     times a large buffer could otherwise produce an unreasonable turn
+//     length.
+//   - extraSeatSeconds = ceil(actSeconds * extraSeatTimeRatio) -- a
+//     player's SECOND (and further) detective seat this round only gets
+//     this smaller top-up, not another full act window, since the actual
+//     thinking already happened during the buffer.
 //
-//   2. The pre-think buffer -- ONE shared countdown for the whole
-//      detective team, starting the instant Mr. X's move resolves.
-//      Nobody can submit a move during this window (they CAN preview
-//      reachable stations for any detective via the existing explore/
-//      huddle system) -- this is where the real collective planning
-//      happens, which is why it's sized LARGER than any individual's
-//      later act window, via preThinkBufferRatio (admin-set, default 3x).
-//
-//   3. Each detective's act window -- short, since the thinking already
-//      happened in the buffer. A player controlling more than one seat
-//      does NOT get a flat multiple (2 seats != 2x time) -- their first
-//      seat this round gets the full base act window (they still need to
-//      physically execute that first decision), and every ADDITIONAL
-//      seat they personally control only adds a fraction of the base,
-//      via extraSeatTimeRatio (admin-set, default 0.5x) -- reflecting
-//      that by the time you're moving your second detective, you already
-//      decided both moves during the shared buffer.
-//
-// ROUNDING: every derived value is rounded UP (Math.ceil), per explicit
-// instruction -- a player should never end up with LESS time than the
-// ratio math implies just because of a fractional-second truncation.
+// ROUNDING: every derived value is rounded UP (Math.ceil) before any
+// clamping, per explicit instruction -- a player should never end up with
+// LESS time than the ratio math implies just because of a fractional-
+// second truncation.
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_SCHEDULE_RATIOS = {
-  preThinkBufferRatio: 3,
   mrxTimeRatio: 3,
   extraSeatTimeRatio: 0.5,
 };
 
-// computeTurnSchedule -- pure function, no I/O. `actSeconds` is the host's
-// one configured number (turn_timer_seconds). Returns everything derived
-// from it plus the three ratios.
-export function computeTurnSchedule(actSeconds, ratios = {}) {
+export const DEFAULT_SCHEDULE_BOUNDS = {
+  mrxSecondsMin: 15,
+  mrxSecondsMax: 900,
+};
+
+function clamp(n, min, max) {
+  if (min != null) n = Math.max(min, n);
+  if (max != null) n = Math.min(max, n);
+  return n;
+}
+
+// computeTurnSchedule -- pure function, no I/O.
+export function computeTurnSchedule(actSeconds, bufferSeconds, ratios = {}, bounds = {}) {
   const r = { ...DEFAULT_SCHEDULE_RATIOS, ...ratios };
+  const b = { ...DEFAULT_SCHEDULE_BOUNDS, ...bounds };
   if (!actSeconds || actSeconds <= 0) {
-    return { actSeconds: null, mrxSeconds: null, bufferSeconds: null, extraSeatSeconds: null };
+    return { actSeconds: null, bufferSeconds: null, mrxSeconds: null, extraSeatSeconds: null };
   }
-  const mrxSeconds = Math.ceil(actSeconds * r.mrxTimeRatio);
-  const bufferSeconds = Math.ceil(actSeconds * r.preThinkBufferRatio);
+  // bufferSeconds is optional -- a host may configure act-time-only, no
+  // shared planning window (mirrors the existing "blank = no limit"
+  // pattern for act time, applied here to mean "no buffer phase").
+  const effectiveBuffer = bufferSeconds && bufferSeconds > 0 ? bufferSeconds : null;
+  const mrxSecondsRaw = effectiveBuffer ? Math.ceil(effectiveBuffer * r.mrxTimeRatio) : Math.ceil(actSeconds * r.mrxTimeRatio);
+  const mrxSeconds = clamp(mrxSecondsRaw, b.mrxSecondsMin, b.mrxSecondsMax);
   const extraSeatSeconds = Math.ceil(actSeconds * r.extraSeatTimeRatio);
-  return { actSeconds, mrxSeconds, bufferSeconds, extraSeatSeconds };
+  return { actSeconds, bufferSeconds: effectiveBuffer, mrxSeconds, extraSeatSeconds };
 }
 
 // actSecondsForSeatIndex -- how long THIS specific seat's own act window

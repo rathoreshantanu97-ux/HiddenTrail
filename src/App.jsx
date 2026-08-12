@@ -296,7 +296,8 @@ export default function App({ account, onLogout }) {
     onPassTurn: (actor) => supabaseStore.passTurn(actor),
   });
 
-  const [mpExploreMode, setMpExploreMode] = useState(null); // this client's own current route-explorer selection, reported up from GameBoard so it can be broadcast via Presence
+  const [mpToggledDetectiveIds, setMpToggledDetectiveIds] = useState([]); // this client's own EXTRA (non-own) route-explorer toggles, reported up from GameBoard so they can be broadcast via Presence
+  const [mpPeekable, setMpPeekable] = useState(true); // this client's own "let teammates peek at my screen" preference, reported up from GameBoard
 
   const { onlinePlayerIds, isInactive, presenceState } = usePresence({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
@@ -304,7 +305,8 @@ export default function App({ account, onLogout }) {
     myDisplayName: mpDisplayName,
     myRole: mpRole,
     gracePeriodSeconds: 25, // TODO: read from admin config once wired through App-level state
-    myExploreMode: mpExploreMode,
+    myToggledDetectiveIds: mpToggledDetectiveIds,
+    myPeekable: mpPeekable,
   });
 
   useEffect(() => {
@@ -1026,30 +1028,24 @@ export default function App({ account, onLogout }) {
       );
     }
 
-    // Derive the huddle-panel data from Presence: every OTHER detective
-    // player currently broadcasting a non-null exploreMode. Looked up
-    // against mpPlayersList (role -> player) and match.detectives (seat
-    // -> color/position), so the panel shows real names/colors already
-    // used elsewhere on this exact board, not a separate palette.
-    const teammatesExploring = [];
-    let anyDetectiveExploring = false;
+    // Roster of every detective-seat player (role -> which detective ids
+    // they own), for the redesigned route explorer's "peek into a
+    // teammate's screen" panel -- their OWN highlights aren't broadcast
+    // at all (deterministic from this same roster, recomputed locally by
+    // whoever's peeking), only their EXTRA toggles are (via Presence's
+    // toggledDetectiveIds, read directly off presenceState by GameBoard).
+    const detectivePlayersRoster = [];
     for (const p of mpPlayersList) {
-      if (!p.role || p.role === "mrx" || p.id === mpPlayerId) continue; // skip malformed rows, Mr.X's own seat, and myself
-      const payload = presenceState[p.id];
-      if (!payload || !payload.exploreMode) continue;
-      // a multi-detective seat's role is comma-joined (e.g. "d0,d1") --
-      // use the FIRST detective in their seat for color/position, since
-      // that's simplest and still gives a meaningful visual anchor
-      const firstSeat = p.role.split(",")[0];
-      const theirDetective = match.detectives.find((d) => `d${d.id}` === firstSeat);
-      if (!theirDetective) continue;
-      anyDetectiveExploring = true;
-      teammatesExploring.push({
+      if (!p.role || p.role === "mrx") continue; // skip malformed rows and Mr.X's own seat
+      const detectiveIds = p.role
+        .split(",")
+        .map((seat) => parseInt(seat.slice(1), 10))
+        .filter((n) => !isNaN(n));
+      if (detectiveIds.length === 0) continue;
+      detectivePlayersRoster.push({
         playerId: p.id,
-        displayName: detectiveName(theirDetective.id),
-        color: theirDetective.color,
-        exploreMode: payload.exploreMode,
-        detectiveSeat: firstSeat,
+        displayName: detectiveIds.length === 1 ? detectiveName(detectiveIds[0]) : detectiveIds.map((id) => detectiveName(id)).join(" & "),
+        detectiveIds,
       });
     }
 
@@ -1072,9 +1068,11 @@ export default function App({ account, onLogout }) {
         preThinkActive={mpPreThinkActive}
         mrxSecondsForBar={mpMrxSeconds}
         bufferSecondsForBar={mpBufferSeconds}
-        onExploreModeChange={setMpExploreMode}
-        teammatesExploring={teammatesExploring}
-        anyDetectiveExploring={anyDetectiveExploring}
+        onExploreModeChange={setMpToggledDetectiveIds}
+        onPeekableChange={setMpPeekable}
+        detectivePlayersRoster={detectivePlayersRoster}
+        presenceState={presenceState}
+        myPlayerId={mpPlayerId}
         onDetectiveMove={(detId, to, mode) => supabaseStore.submitDetectiveMove(map, detId, to, mode)}
         onMrXMove={(to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => supabaseStore.activateDoubleMove()}

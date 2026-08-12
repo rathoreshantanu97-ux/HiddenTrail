@@ -27,16 +27,17 @@ import { supabase } from "./supabaseClient.js";
 // same as "actually disconnected," rather than sitting in a false
 // "still here" status indefinitely.
 // ---------------------------------------------------------------------------
-export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePeriodSeconds = 25, myExploreMode = null }) {
+export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePeriodSeconds = 25, myToggledDetectiveIds = [], myPeekable = true }) {
   const [onlinePlayerIds, setOnlinePlayerIds] = useState(new Set());
   // playerId -> their full tracked presence payload (displayName, role,
-  // and now exploreMode) -- exposed so consumers (like the detective
-  // huddle panel) can read what a teammate is CURRENTLY doing, not just
-  // whether they're online. "Currently" is enforced by construction: a
-  // stale value can never linger here, since re-tracking (see the
-  // exploreMode effect below) always overwrites the whole payload, and a
-  // teammate clearing their own selection re-tracks with exploreMode:
-  // null, which immediately propagates via the same "sync" event.
+  // and now toggledDetectiveIds) -- exposed so consumers (like the "peek
+  // into a player's screen" panel) can read what a teammate is CURRENTLY
+  // looking at, not just whether they're online. "Currently" is enforced
+  // by construction: a stale value can never linger here, since
+  // re-tracking (see the effect below) always overwrites the whole
+  // payload, and a teammate clearing their own toggles re-tracks with
+  // toggledDetectiveIds: [], which immediately propagates via the same
+  // "sync" event.
   const [presenceState, setPresenceState] = useState({});
   // playerId -> timestamp (ms) when they were first observed as gone.
   // Used to compute the grace-period-adjusted "inactive" set below.
@@ -79,7 +80,7 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
 
     channel.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await channel.track({ displayName: myDisplayName, role: myRole, exploreMode: myExploreMode });
+        await channel.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable });
       }
     });
 
@@ -96,8 +97,13 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
   // changes, not on every explore-mode click).
   useEffect(() => {
     if (!channelRef.current) return;
-    channelRef.current.track({ displayName: myDisplayName, role: myRole, exploreMode: myExploreMode }).catch(() => {});
-  }, [myExploreMode, myDisplayName, myRole]);
+    channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable }).catch(() => {});
+    // Depend on the SERIALIZED array, not the array reference -- the
+    // caller reasonably passes a freshly-built array each render (e.g.
+    // Array.from(aSet)), which would otherwise re-track on every render
+    // even when the actual toggled set hasn't changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(myToggledDetectiveIds), myDisplayName, myRole, myPeekable]);
 
   useEffect(() => {
     const id = setInterval(() => forceTick((t) => t + 1), 1000);
@@ -116,7 +122,7 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
           backgroundTimeoutRef.current = null;
         }
         if (channelRef.current) {
-          channelRef.current.track({ displayName: myDisplayName, role: myRole, exploreMode: myExploreMode }).catch(() => {});
+          channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable }).catch(() => {});
         }
       }
     }

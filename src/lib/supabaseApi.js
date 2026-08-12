@@ -23,6 +23,11 @@ export async function createRoom({
   mapStationCount,
   turnTimerSeconds,
   planningTimeSeconds,
+  // extraDetectiveSeconds -- extra acting-phase time per detective
+  // beyond the first that a single player controls. null = not
+  // configured, which the client's turnSchedule.js treats as "one full
+  // base act window per extra detective".
+  extraDetectiveSeconds = null,
   featureOverrides = {},
   isPublic = false,
   roomName = null,
@@ -40,6 +45,7 @@ export async function createRoom({
     p_redistribute_roles_override: featureOverrides.redistributeRoles ?? null,
     p_turn_timer_seconds: turnTimerSeconds ?? null,
     p_planning_time_seconds: planningTimeSeconds ?? null,
+    p_extra_detective_seconds: extraDetectiveSeconds ?? null,
     p_map_station_count: mapStationCount ?? null,
     p_position_highlight_style_override: featureOverrides.positionHighlightStyle ?? null,
     p_destination_highlight_style_override: featureOverrides.destinationHighlightStyle ?? null,
@@ -243,6 +249,7 @@ export async function updateRoomSettings({
   mapStationCount,
   turnTimerSeconds,
   planningTimeSeconds,
+  extraDetectiveSeconds = null, // see createRoom above
   featureOverrides = {},
   isPublic = false,
   roomName = null,
@@ -257,6 +264,7 @@ export async function updateRoomSettings({
     p_map_station_count: mapStationCount ?? null,
     p_turn_timer_seconds: turnTimerSeconds ?? null,
     p_planning_time_seconds: planningTimeSeconds ?? null,
+    p_extra_detective_seconds: extraDetectiveSeconds ?? null,
     p_takeovers_override: featureOverrides.takeovers ?? null,
     p_takeover_reversal_override: featureOverrides.takeoverReversal ?? null,
     p_end_game_vote_override: featureOverrides.endGameVote ?? null,
@@ -341,6 +349,28 @@ export async function beginActingPhase({ roomId, callerPlayerId, callerSecret })
     p_caller_player_id: callerPlayerId,
     p_caller_secret: callerSecret,
   });
+}
+
+// setPlanningReady -- a detective player ticks/un-ticks "ready" during
+// the planning phase. The SERVER decides whether that completes a
+// unanimous vote and transitions to the acting phase -- deliberately not
+// trusted to the client, unlike peek/draw/explorer, because starting the
+// acting phase early actually costs teammates move time they were
+// entitled to. Returns the current counts so the caller can render
+// "Ready (X of Y)" without waiting for the next state refresh.
+export async function setPlanningReady({ roomId, playerId, callerSecret, ready }) {
+  const rows = await callRpc("set_planning_ready", {
+    p_room_id: roomId,
+    p_player_id: playerId,
+    p_secret: callerSecret,
+    p_ready: ready,
+  });
+  const row = rows?.[0];
+  return {
+    readyCount: row?.out_ready_count ?? 0,
+    connectedCount: row?.out_connected_count ?? 0,
+    began: !!row?.out_began,
+  };
 }
 
 // forceEndActingPhase -- called by any connected client when the shared

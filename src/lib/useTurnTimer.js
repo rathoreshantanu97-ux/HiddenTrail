@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import * as api from "./supabaseApi.js";
 import * as auth from "./accessControlApi.js";
 import { validMovesFor } from "./gameEngine.js";
-import { computeTurnSchedule } from "./turnSchedule.js";
+import { computeTurnSchedule, actingWindowSeconds } from "./turnSchedule.js";
 
 // ---------------------------------------------------------------------------
 // useTurnTimer — for multiplayer games with a per-room turn timer set.
@@ -35,8 +35,24 @@ import { computeTurnSchedule } from "./turnSchedule.js";
 // force_end_acting_phase) are BOTH explicitly written as idempotent no-ops
 // if the phase has already moved on by the time they run.
 // ---------------------------------------------------------------------------
-export function useTurnTimer({ roomId, myPlayerId, myPlayerSecret, map, match, onMrXMove, onPassMrxTurn, onBeginActingPhase, onForceEndActingPhase }) {
+export function useTurnTimer({
+  roomId,
+  myPlayerId,
+  myPlayerSecret,
+  map,
+  match,
+  // maxDetectivesForAnyOnePlayer -- how many detectives the BUSIEST
+  // single player in this room controls. Sizes the shared acting window
+  // (see actingWindowSeconds in turnSchedule.js), since each player works
+  // through their own detectives sequentially inside that one window.
+  maxDetectivesForAnyOnePlayer = 1,
+  onMrXMove,
+  onPassMrxTurn,
+  onBeginActingPhase,
+  onForceEndActingPhase,
+}) {
   const [actSeconds, setActSeconds] = useState(null);
+  const [extraDetectiveSeconds, setExtraDetectiveSeconds] = useState(null);
   const [bufferSecondsInput, setBufferSecondsInput] = useState(null); // the host's OWN planning-time number (room.planning_time_seconds), before ratio/bounds are applied
   const [ratios, setRatios] = useState(null);
   const [bounds, setBounds] = useState(null);
@@ -52,6 +68,7 @@ export function useTurnTimer({ roomId, myPlayerId, myPlayerSecret, map, match, o
         if (cancelled) return;
         setActSeconds(room?.turn_timer_seconds ?? null);
         setBufferSecondsInput(room?.planning_time_seconds ?? null);
+        setExtraDetectiveSeconds(room?.extra_detective_seconds ?? null);
         setRatios({
           mrxTimeRatio: cfg.mrxTimeRatio,
           extraSeatTimeRatio: cfg.extraSeatTimeRatio,
@@ -68,8 +85,18 @@ export function useTurnTimer({ roomId, myPlayerId, myPlayerSecret, map, match, o
   }, [roomId]);
 
   const schedule = useMemo(
-    () => (actSeconds && ratios && bounds ? computeTurnSchedule(actSeconds, bufferSecondsInput, ratios, bounds) : null),
-    [actSeconds, bufferSecondsInput, ratios, bounds]
+    () => (actSeconds && ratios && bounds ? computeTurnSchedule(actSeconds, bufferSecondsInput, ratios, bounds, extraDetectiveSeconds) : null),
+    [actSeconds, bufferSecondsInput, ratios, bounds, extraDetectiveSeconds]
+  );
+
+  // The acting phase's real total length -- base act time plus the
+  // configured top-up for each detective beyond the first held by the
+  // busiest single player. Everyone in the room sees this SAME countdown
+  // (it's one shared phase); per-player sub-turn progress is shown
+  // separately in GameBoard.
+  const actingTotalSeconds = useMemo(
+    () => actingWindowSeconds(schedule, maxDetectivesForAnyOnePlayer),
+    [schedule, maxDetectivesForAnyOnePlayer]
   );
 
   useEffect(() => {
@@ -131,9 +158,9 @@ export function useTurnTimer({ roomId, myPlayerId, myPlayerSecret, map, match, o
       }
 
       if (match.roundPhase === "acting") {
-        if (!match.actingPhaseStartedAt || !schedule.actSeconds) return;
+        if (!match.actingPhaseStartedAt || !actingTotalSeconds) return;
         const elapsed = (now - new Date(match.actingPhaseStartedAt).getTime()) / 1000;
-        const remaining = Math.max(0, Math.ceil(schedule.actSeconds - elapsed));
+        const remaining = Math.max(0, Math.ceil(actingTotalSeconds - elapsed));
         setSecondsRemaining(remaining);
         setPhaseLabel("acting");
         tryExpire(remaining, submitForceEndActingPhase);
@@ -145,7 +172,7 @@ export function useTurnTimer({ roomId, myPlayerId, myPlayerSecret, map, match, o
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule, match?.roundPhase, match?.turnStartedAt, match?.detectivePhaseStartedAt, match?.actingPhaseStartedAt, match?.phase]);
+  }, [schedule, actingTotalSeconds, match?.roundPhase, match?.turnStartedAt, match?.detectivePhaseStartedAt, match?.actingPhaseStartedAt, match?.phase]);
 
   // submitRandomMrxMove -- unchanged in spirit from before: Mr.X's own
   // turn still has exactly one actor, so a random-legal-move fallback on
@@ -178,6 +205,12 @@ export function useTurnTimer({ roomId, myPlayerId, myPlayerSecret, map, match, o
     actingActive: phaseLabel === "acting",
     bufferSeconds: schedule?.bufferSeconds ?? null,
     mrxSeconds: schedule?.mrxSeconds ?? null,
-    actSeconds: schedule?.actSeconds ?? null,
+    // actSeconds is now the ACTING PHASE'S FULL LENGTH (sized for the
+    // busiest player), not the bare per-detective base -- that's what the
+    // timer bar needs as its denominator, since it's what's actually
+    // counting down. The unscaled base is still available separately.
+    actSeconds: actingTotalSeconds ?? null,
+    baseActSeconds: schedule?.actSeconds ?? null,
+    extraSeatSeconds: schedule?.extraSeatSeconds ?? null,
   };
 }

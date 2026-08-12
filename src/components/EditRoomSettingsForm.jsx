@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useActiveMaps } from "../lib/useActiveMaps.js";
 import { useMapWithOverrides } from "../lib/useMapWithOverrides.js";
 import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
-import { computeTurnSchedule } from "../lib/turnSchedule.js";
+import { computeTurnSchedule, actingWindowSeconds } from "../lib/turnSchedule.js";
 import * as auth from "../lib/accessControlApi.js";
 import * as api from "../lib/supabaseApi.js";
 import { styles } from "./GameBoard.jsx";
@@ -36,6 +36,10 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
   const [numDetectives, setNumDetectives] = useState(currentNumDetectives);
   const [turnTimerSeconds, setTurnTimerSeconds] = useState(null);
   const [planningTimeSeconds, setPlanningTimeSeconds] = useState(null);
+  // null = "not configured", which the schedule treats as one full base
+  // act window per extra detective. Kept as a separate concept from 0
+  // ("no extra time at all"), which is a legitimate deliberate choice.
+  const [extraDetectiveSeconds, setExtraDetectiveSeconds] = useState(null);
   const [publicConfig, setPublicConfig] = useState({
     turnTimerMin: 30,
     turnTimerMax: 300,
@@ -77,6 +81,12 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
         // either field afterward to opt out.
         setTurnTimerSeconds(room.turn_timer_seconds ?? cfg.turnTimerMin);
         setPlanningTimeSeconds(room.planning_time_seconds ?? cfg.planningTimeMin);
+        // Unlike the two fields above, this one is deliberately NOT
+        // defaulted to a concrete number when unset: leaving it blank is
+        // the meaningful default ("give each extra detective a full act
+        // window"), and pre-filling a number would silently bake in a
+        // different, smaller value the host never chose.
+        setExtraDetectiveSeconds(room.extra_detective_seconds ?? null);
         setIsPublic(!!room.is_public);
         setRoomName(room.room_name || "");
         setFeatureOverrides({
@@ -120,6 +130,7 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
         mapStationCount: selectedMap ? Object.keys(selectedMap.stations).length : null,
         turnTimerSeconds,
         planningTimeSeconds,
+        extraDetectiveSeconds: extraDetectiveSeconds === "" || extraDetectiveSeconds == null ? null : parseInt(extraDetectiveSeconds, 10),
         featureOverrides,
         isPublic,
         roomName: isPublic ? roomName.trim() : null,
@@ -441,6 +452,63 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
             </label>
           )}
 
+          {publicConfig && turnTimerSeconds && (
+            <label style={styles.featureOverrideRow}>
+              <span>
+                Extra acting time per additional detective (seconds) — when one player controls several detectives, they act on them one after another inside the shared acting phase, so the phase is lengthened by this much for each detective beyond their first. Blank means a full act window each.
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  type="button"
+                  aria-label="Decrease extra detective time by 5 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={() => {
+                    const base = parseInt(turnTimerSeconds, 10) || 0;
+                    const current = extraDetectiveSeconds === null || extraDetectiveSeconds === "" ? base : parseInt(extraDetectiveSeconds, 10) || 0;
+                    setExtraDetectiveSeconds(Math.max(0, current - 5));
+                  }}
+                >
+                  −
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder={`Same as act time (${parseInt(turnTimerSeconds, 10) || 0}s)`}
+                  style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+                  value={extraDetectiveSeconds ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "" || /^\d*$/.test(v)) {
+                      setExtraDetectiveSeconds(v === "" ? null : v);
+                    }
+                  }}
+                  onBlur={() => {
+                    if (extraDetectiveSeconds === null || extraDetectiveSeconds === "") {
+                      setExtraDetectiveSeconds(null);
+                      return;
+                    }
+                    // Server enforces the same 0..turnTimerMax range --
+                    // clamping here just avoids a pointless round trip.
+                    const n = Math.max(0, Math.min(publicConfig.turnTimerMax, parseInt(extraDetectiveSeconds, 10) || 0));
+                    setExtraDetectiveSeconds(n);
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Increase extra detective time by 5 seconds"
+                  style={styles.timerStepBtn}
+                  onClick={() => {
+                    const base = parseInt(turnTimerSeconds, 10) || 0;
+                    const current = extraDetectiveSeconds === null || extraDetectiveSeconds === "" ? base : parseInt(extraDetectiveSeconds, 10) || 0;
+                    setExtraDetectiveSeconds(Math.min(publicConfig.turnTimerMax, current + 5));
+                  }}
+                >
+                  +
+                </button>
+              </div>
+            </label>
+          )}
+
           {publicConfig && turnTimerSeconds && (() => {
             // Host sets these TWO numbers above directly -- everything
             // else here is a READ-ONLY preview, derived the exact same
@@ -451,12 +519,19 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
             const n = parseInt(turnTimerSeconds, 10);
             if (!n) return null;
             const buf = planningTimeSeconds ? parseInt(planningTimeSeconds, 10) : null;
+            const extra = extraDetectiveSeconds === null || extraDetectiveSeconds === "" ? null : parseInt(extraDetectiveSeconds, 10);
             const schedule = computeTurnSchedule(
               n,
               buf,
               { mrxTimeRatio: publicConfig.mrxTimeRatio, extraSeatTimeRatio: publicConfig.extraSeatTimeRatio },
-              { mrxSecondsMin: publicConfig.mrxSecondsMin, mrxSecondsMax: publicConfig.mrxSecondsMax }
+              { mrxSecondsMin: publicConfig.mrxSecondsMin, mrxSecondsMax: publicConfig.mrxSecondsMax },
+              extra
             );
+            // Worst case for THIS room: one player could end up holding
+            // every detective seat, so that's the longest the acting
+            // phase could ever run. The live game sizes it from the
+            // actual seat allocation instead (see App.jsx).
+            const worstCaseActing = actingWindowSeconds(schedule, numDetectives);
             return (
               <div style={styles.timerSchedulePreview}>
                 <div style={styles.timerSchedulePreviewTitle}>How this plays out each round</div>
@@ -466,7 +541,12 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
                 ) : (
                   <div>2. No shared planning window — detectives go straight to the acting phase.</div>
                 )}
-                <div>3. Detectives' acting phase: up to {schedule.actSeconds}s, shared by the WHOLE team — every detective may move independently, in any order, as soon as this phase opens (no more waiting for teammates to go one at a time). A player controlling several detectives simply moves each of theirs within this same window.</div>
+                <div>
+                  3. Detectives' acting phase: {schedule.actSeconds}s if every player controls exactly one detective, up to {worstCaseActing}s if a single
+                  player ends up holding all {numDetectives} (base {schedule.actSeconds}s + {schedule.extraSeatSeconds}s per extra detective). All players act
+                  at the same time inside this one shared window; a player holding several detectives moves theirs one after another, and the window is sized
+                  so the busiest player can get through all of theirs.
+                </div>
               </div>
             );
           })()}

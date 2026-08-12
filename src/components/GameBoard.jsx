@@ -118,15 +118,21 @@ export default function GameBoard({
   onPassTurn, // (actor) => void -- PASS-AND-PLAY ONLY (single shared device, still fully sequential turnIdx-walking). Multiplayer uses onPassMrxTurn/onPassDetectiveTurn instead (see the 3-phase acting model below).
   onPassMrxTurn, // () => void -- multiplayer only: Mr.X genuinely has zero legal moves
   onPassDetectiveTurn, // (detId) => void -- multiplayer only: a specific detective genuinely has zero legal moves (or chooses not to move) during the acting phase
-  onBeginActingPhase, // () => void -- multiplayer only: ends the shared planning window early (any detective may trigger it -- see the "Begin acting phase" button)
+  onBeginActingPhase, // () => void -- multiplayer only: ends the shared planning window early. Now only the TIMEOUT path uses this (see useTurnTimer.js); the in-game control is the unanimous ready vote below.
+  onSetPlanningReady, // (ready: boolean) => void -- multiplayer only: tick/un-tick MY "ready to act" vote. The SERVER decides when the vote is unanimous and flips the phase.
+  connectedDetectivePlayerIds = [], // playerIds of detective-controlling players currently online (multiplayer only) -- the denominator for "Ready (X of Y)"
   extraHeaderContent, // shares a row with the "Play 2x card" button (e.g. Pause/End Game in multiplayer, End Game in pass-and-play) -- kept small/short controls only, since it's meant to sit alongside the 2x button without wrapping badly
   extraHeaderContentBelow, // renders as its OWN row, below the 2x/Pause/End-Game row -- for bulkier controls that shouldn't crowd that first row (e.g. multiplayer's Takeover Reversal / Redistribute Roles votes, and the TakeoverPanel)
   belowTicketsContent, // e.g. chat in multiplayer -- renders AFTER the log/tickets panels, per the agreed sidebar order (votes -> huddle -> explorer -> log -> tickets -> chat)
   onExploreModeChange, // (detectiveIds: number[]) => void -- reports this client's own EXTRA toggled-on detective ids (beyond their own, which are always shown by default) upward, so App.jsx can broadcast them via Presence
   onPeekableChange, // (peekable: boolean) => void -- reports this client's own "let teammates peek at my screen" preference upward, for the same Presence broadcast
-  onStrokesChange, // (strokes: Stroke[]) => void -- reports this client's own drawing strokes upward, broadcast via Presence, so a peeking teammate can see them live
-  onRemoteDraw, // (targetPlayerId, action) => void -- fires a draw action AT a specific other player's board (used while peeking them), via a one-off Presence broadcast rather than persistent state
+  onStrokesChange, // (strokes: Stroke[]) => void -- reports this client's own drawing strokes upward, so App.jsx can answer a peer's strokes_request with the current set
+  onRemoteDraw, // (targetPlayerId, action) => void -- fires a draw action AT a specific other player's board (used while peeking them), via a one-off Realtime broadcast rather than persistent state
   onRegisterRemoteStrokeHandler, // (handler: (payload) => void) => void -- called once on mount so App.jsx can wire incoming remote-draw events (from a teammate peeking ME) into this component's own stroke state
+  onRegisterPeerEventHandlers, // ({onStrokesSync, onPeekOff}) => void -- same handoff pattern, for the two broadcast events that drive peek rendering (see usePresence.js)
+  onBroadcastStrokes, // (strokes) => void -- push MY current strokes to the room so active peekers re-render live. Replaces the old Presence-payload delivery, which silently dropped oversized/coalesced updates.
+  onRequestPeerStrokes, // (targetPlayerId) => void -- ask a player for their current strokes the moment I start peeking them, so I don't wait for their next edit
+  onBroadcastPeekOff, // () => void -- tell the room I've revoked peek permission, releasing active peekers immediately
   detectivePlayersRoster = [], // [{playerId, displayName, detectiveIds: number[]}] -- every detective-seat player (not Mr.X), multiplayer only, used for the "peek into a player's screen" panel and for showing a peeked player's OWN highlights (which aren't separately broadcast, since they're deterministic from this same roster)
   presenceState = {}, // playerId -> {displayName, role, toggledDetectiveIds, strokes} -- live Presence payloads (multiplayer only), used to read a peeked player's EXTRA toggles and strokes
   myPlayerId = null, // this client's own player id (multiplayer only) -- used to exclude yourself from the peek list
@@ -176,24 +182,37 @@ export default function GameBoard({
   const EDGE_MARGIN_TOP = EDGE_MARGIN_TOP_BY_MAP[map?.id] ?? EDGE_MARGIN_TOP_DEFAULT;
   const [pan, setPan] = useState({ x: -EDGE_MARGIN_OTHER, y: -EDGE_MARGIN_TOP });
   const [pendingMove, setPendingMove] = useState(null);
-  // selectedActingDetId -- multiplayer's 3-phase acting model only: which
-  // of MY OWN not-yet-acted detectives I've currently selected as "the
-  // piece I'm about to move" (click its token to select, click again to
-  // deselect). Several of my own pieces can be genuinely available to
-  // move at once during the acting phase, so there's no single implicit
-  // "active" one the way pass-and-play's turnIdx-walking model has.
-  const [selectedActingDetId, setSelectedActingDetId] = useState(null);
-  // toggledIds: the FULL set of detectives currently highlighted on this
-  // client's board -- own AND others', all equally togglable by clicking
-  // their token (see handleStationClick). Seeded with your own
-  // detectives once they're known (see the seeding effect below) so
-  // "shown by default" still holds without making own detectives a
-  // special un-toggleable case -- a real complaint with the earlier
-  // version, where clicking your own piece did nothing.
+  // NOTE (v3.21): selectedActingDetId and the whole tap-to-arm model it
+  // supported are GONE. During the acting phase, a player no longer picks
+  // which of their detectives to move -- they get automatic, sequential
+  // sub-turns over their own detectives in ascending seat order (see
+  // myCurrentActingDetId below). Nothing needs selecting, so there is
+  // nothing to hold in state.
+  //
+  // toggledIds: the set of detectives whose REACHABLE DESTINATIONS are
+  // currently revealed on this client's board, toggled by clicking a
+  // piece (see handleStationClick). Deliberately NOT seeded in
+  // multiplayer anymore: during planning, every detective's ORIGIN is
+  // shown by default through a separate path (planningOriginIds below),
+  // and destinations are strictly opt-in per click, so a seeded set would
+  // just dump every teammate's full destination fan onto the board at
+  // once. Pass-and-play keeps its original seeding (one device, one
+  // player, no "teammate" concept to declutter for).
   const [toggledIds, setToggledIds] = useState(() => new Set());
   const seededOwnRef = React.useRef(false);
   const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
   const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
+  // peekedStrokes -- the drawing of whoever I'm currently peeking, fed
+  // ONLY by explicit "strokes_sync" broadcasts (see usePresence.js), no
+  // longer read out of their Presence payload. peekedStrokesOwnerId
+  // guards against a stale set from a previously-peeked player briefly
+  // rendering over the newly-peeked one before their first sync lands.
+  const [peekedStrokes, setPeekedStrokes] = useState([]);
+  const [peekedStrokesOwnerId, setPeekedStrokesOwnerId] = useState(null);
+  // The broadcast handlers below are installed once, so they must read
+  // the CURRENT peek target through a ref rather than a stale closure.
+  const peekedPlayerIdRef = React.useRef(peekedPlayerId);
+  peekedPlayerIdRef.current = peekedPlayerId;
 
   // Peeking is only OFFERED during the shared pre-think buffer (see the
   // panel's own gating below) -- but the buffer can end mid-peek (it's a
@@ -206,17 +225,29 @@ export default function GameBoard({
     if (!preThinkActive && peekedPlayerId) setPeekedPlayerId(null);
   }, [preThinkActive, peekedPlayerId]);
 
-  // Real bug fix: if the player currently being peeked opts OUT of
-  // peekable mid-peek, the DATA sources (strokesToRender,
-  // highlightedDetectiveIds) already correctly went blank via
-  // peekedPlayerIsPeekable's live check further below -- but the peek
-  // ITSELF was never released, so the peeker stayed stuck looking at a
-  // now-empty board, still locked out of their own clicks (peeking blocks
-  // board interaction), instead of being dropped back to their own
-  // screen the instant the opt-out takes effect, as explicitly requested.
+  // BELT-AND-BRACES BACKUP ONLY (v3.21). Releasing a peek when the
+  // peeked player opts out is now driven PRIMARILY by an explicit
+  // "peek_off" broadcast (see the handler registration below) -- this
+  // Presence-state-diffing effect proved unreliable in practice, because
+  // it depends on a Presence sync actually landing and on the changed
+  // `peekable` field surviving payload coalescing. It's kept because it
+  // costs nothing and covers the case where a peeker joins/reloads while
+  // the other player is ALREADY opted out (no broadcast in flight to
+  // catch), but it is no longer the mechanism being relied on.
   useEffect(() => {
     if (peekedPlayerId && presenceState[peekedPlayerId]?.peekable === false) setPeekedPlayerId(null);
   }, [peekedPlayerId, presenceState]);
+
+  // Whenever the peek TARGET changes: drop any previous target's drawing
+  // immediately, then ask the new target to push theirs. Without this
+  // request, a peeker starting mid-round would see a blank board until
+  // the peeked player happened to draw something new.
+  useEffect(() => {
+    setPeekedStrokes([]);
+    setPeekedStrokesOwnerId(null);
+    if (peekedPlayerId && onRequestPeerStrokes) onRequestPeerStrokes(peekedPlayerId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peekedPlayerId]);
 
   // ---------------------------------------------------------------------
   // FREEHAND DRAWING -- a quick, disposable "let me show you my
@@ -319,6 +350,29 @@ export default function GameBoard({
   handleIncomingRemoteStrokeRef.current = handleIncomingRemoteStroke;
   useEffect(() => {
     onRegisterRemoteStrokeHandler && onRegisterRemoteStrokeHandler((payload) => handleIncomingRemoteStrokeRef.current(payload));
+    // The two broadcast-driven peek events. Both read the live peek
+    // target through peekedPlayerIdRef, since these handlers are
+    // installed exactly once and would otherwise capture the target
+    // value from mount time (i.e. null, forever).
+    onRegisterPeerEventHandlers &&
+      onRegisterPeerEventHandlers({
+        // A player pushed their current drawing. Apply it only if
+        // they're the player I'm actually looking at right now.
+        onStrokesSync: (payload) => {
+          if (payload?.senderPlayerId && payload.senderPlayerId === peekedPlayerIdRef.current) {
+            setPeekedStrokes(payload.strokes || []);
+            setPeekedStrokesOwnerId(payload.senderPlayerId);
+          }
+        },
+        // A player revoked peek permission. If that's who I'm peeking,
+        // drop out immediately -- this is the PRIMARY release path (the
+        // Presence-diff effect above is only a backup).
+        onPeekOff: (payload) => {
+          if (payload?.senderPlayerId && payload.senderPlayerId === peekedPlayerIdRef.current) {
+            setPeekedPlayerId(null);
+          }
+        },
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -381,11 +435,15 @@ export default function GameBoard({
     return `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)} ` + points.slice(1).map((p) => `L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
   }
 
-  // Report our own strokes upward the same way as the explore toggles --
-  // only on stroke COMPLETION (myStrokes changes), never on every
-  // in-progress point, to keep Presence broadcast traffic reasonable.
+  // Report our own strokes upward (so App.jsx can answer a peer's
+  // strokes_request with the current set) AND push them to the room as
+  // an explicit broadcast, which is what any active peeker actually
+  // renders from now. Fires on stroke COMPLETION / undo / erase / clear
+  // -- i.e. every myStrokes change -- but never per in-progress point,
+  // keeping traffic to a handful of messages per round.
   useEffect(() => {
     onStrokesChange && onStrokesChange(myStrokes);
+    onBroadcastStrokes && onBroadcastStrokes(myStrokes);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myStrokes]);
 
@@ -413,6 +471,13 @@ export default function GameBoard({
   // teammate's peek list, live.
   useEffect(() => {
     onPeekableChange && onPeekableChange(myPeekable);
+    // PRIMARY opt-out mechanism: turning peeking OFF fires an explicit
+    // broadcast so anyone currently peeking me is released on the spot,
+    // rather than waiting on a Presence state diff to reach them.
+    // Turning it back ON needs no broadcast -- nobody is peeking me at
+    // that moment by definition, and the Presence payload (which still
+    // carries `peekable`) is what re-adds me to everyone's peek list.
+    if (!myPeekable && onBroadcastPeekOff) onBroadcastPeekOff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myPeekable]);
   const routeExplorerEnabled = useFeatureEnabled("route_explorer_enabled", roomId);
@@ -568,41 +633,58 @@ export default function GameBoard({
   // (see gameEngine.js/localGameStore.js, UNCHANGED -- simultaneous
   // action makes no sense on one shared device anyway). Multiplayer now
   // runs the 3-phase model instead (mrx -> planning -> acting), read off
-  // match.roundPhase (see matchStateAdapter.js), where the 'acting' phase
-  // has NO single current actor -- any of a player's own not-yet-acted
-  // detectives (match.detectivesActed) may be individually SELECTED (see
-  // selectedActingDetId below, set by clicking your own token) and then
-  // moved, independent of what any other player is doing at the same
-  // moment.
+  // match.roundPhase (see matchStateAdapter.js).
+  //
+  // ACTING PHASE, v3.21 -- SEQUENTIAL PER-PLAYER SUB-TURNS. The phase
+  // itself is still simultaneous ACROSS players: everyone's sequence
+  // runs concurrently, nobody waits on anybody else. But WITHIN one
+  // player, their own detectives now act one at a time, in fixed
+  // ascending seat order. This replaces the old tap-a-piece-to-arm-it
+  // model entirely: there is exactly one "current" detective for me at
+  // any moment -- the lowest-id own detective not yet in
+  // match.detectivesActed -- and it advances automatically the instant
+  // that one moves or passes. No extra server state is needed for this;
+  // detectives_acted already carries everything required.
   // ---------------------------------------------------------------------
   const isPassAndPlay = myRole === null;
   const roundPhaseMp = !isPassAndPlay ? match.roundPhase : null;
   const detectivesActedSet = new Set((match.detectivesActed || []).map(Number));
-  // myActingDetectiveIds -- multiplayer only, only meaningful during
-  // 'acting': which of MY OWN detectives haven't moved (or passed) yet
-  // this round, i.e. which of my pieces are actually selectable right now.
-  const myActingDetectiveIds =
+  // myUnactedDetectiveIds -- my own detectives still to act this round,
+  // ascending. The FIRST of these is whose sub-turn it currently is.
+  const myUnactedDetectiveIds =
     !isPassAndPlay && iAmDetective && roundPhaseMp === "acting"
-      ? myOwnDetectives.map((d) => d.id).filter((id) => !detectivesActedSet.has(id))
+      ? myOwnDetectives
+          .map((d) => d.id)
+          .filter((id) => !detectivesActedSet.has(id))
+          .sort((a, b) => a - b)
       : [];
+  const myCurrentActingDetId = myUnactedDetectiveIds.length > 0 ? myUnactedDetectiveIds[0] : null;
+  // Sub-turn progress, for the "detective X of Y" readout near the timer.
+  // Y counts every detective I control; X is however many I've finished
+  // plus the one in progress (capped at Y once I'm completely done).
+  const myTotalDetectiveCount = myOwnDetectives.length;
+  const myActedDetectiveCount = myOwnDetectives.filter((d) => detectivesActedSet.has(d.id)).length;
+  const mySubTurnIndex = Math.min(myActedDetectiveCount + (myCurrentActingDetId != null ? 1 : 0), myTotalDetectiveCount);
 
   const actor = isPassAndPlay ? currentActor(match) : roundPhaseMp === "mrx" ? "mrx" : null;
   const isMrXTurn = isPassAndPlay ? actor === "mrx" : roundPhaseMp === "mrx";
   // activeDetective: pass-and-play keeps its old meaning (whoever's turn
-  // it literally is, per turnOrder). Multiplayer's acting phase has no
-  // single "whose turn" -- this becomes "whichever of MY OWN not-yet-
-  // acted detectives I've currently SELECTED to move" (selectedActingDetId,
-  // set by clicking that piece's own token -- see handleStationClick).
-  // Every downstream consumer of activeDetective (legalTargets, the turn
-  // indicator ring, the Pass Turn button, etc.) keeps working unmodified
-  // either way, since both cases resolve to exactly "the one piece that's
-  // currently valid to click-and-move."
+  // it literally is, per turnOrder). Multiplayer now resolves to MY OWN
+  // current sub-turn detective -- no selection step, it just IS the next
+  // one in my sequence. Every downstream consumer (legalTargets, the
+  // turn-indicator ring, the origin/destination rings, the Pass button)
+  // keeps working completely unmodified, because both cases still mean
+  // exactly "the one piece that's currently valid to click and move" --
+  // which is precisely why the automatic origin + full-destination
+  // display asked for here needs no new rendering code at all: it's the
+  // same isLegal/isCurrentTurnStation path pass-and-play has always used,
+  // just pointed at a different detective.
   const activeDetective = isPassAndPlay
     ? actor && actor !== "mrx"
       ? match.detectives[parseInt(actor.slice(1), 10)]
       : null
-    : myActingDetectiveIds.includes(selectedActingDetId)
-      ? match.detectives.find((d) => d.id === selectedActingDetId)
+    : myCurrentActingDetId != null
+      ? match.detectives.find((d) => d.id === myCurrentActingDetId)
       : null;
 
   // Defensive safeguard: clear any leftover "Selected [station]..."
@@ -619,12 +701,21 @@ export default function GameBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actor, activeDetective?.id, match.round]);
 
-  // Selection resets whenever we leave the acting phase (planning starts
-  // a fresh round, or the round ends) -- a stale selection from a
-  // previous round's acting phase should never carry forward.
+  // (The old "clear stale acting selection on phase change" effect is
+  // gone with selectedActingDetId itself -- the current sub-turn is
+  // derived fresh from match.detectivesActed every render, so there is no
+  // stored selection that could ever go stale.)
+
+  // Destination toggles are per-round exploration, not a durable
+  // preference: clear them when the round changes so last round's fan of
+  // revealed destinations doesn't linger over a board where every piece
+  // has since moved. Pass-and-play is excluded -- its toggles are seeded
+  // to "all detectives" by design and are meant to stay that way.
   useEffect(() => {
-    if (roundPhaseMp !== "acting") setSelectedActingDetId(null);
-  }, [roundPhaseMp, match.round]);
+    if (isPassAndPlay) return;
+    setToggledIds(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match.round, isPassAndPlay]);
 
   const isMyTurnToAct = isPassAndPlay ? !isSpectator && controlsSeat(actor) : isMrXTurn ? iAmMrX : !!activeDetective;
   // myDetective is "whichever of my detectives is currently the relevant
@@ -633,10 +724,17 @@ export default function GameBoard({
   // above -- already guaranteed to be mine by construction in both cases).
   const myDetective = iAmDetective && activeDetective ? activeDetective : null;
 
-  // Seed toggledIds with your own detectives ONCE they're known -- gives
-  // the "shown by default" behavior without making own detectives a
-  // special non-togglable case; after this one seed, it's entirely
-  // player-controlled (including deselecting your own).
+  // PASS-AND-PLAY ONLY seeding (v3.21). This used to also seed a
+  // multiplayer player's own detectives into toggledIds, which is what
+  // made "shown by default" work back when toggledIds drove BOTH origins
+  // and destinations. It no longer does: during planning, every
+  // detective's origin renders unconditionally (planningOriginIds below,
+  // not gated on any toggle or on the route_explorer flag), and
+  // toggledIds now means only "whose destinations have I explicitly
+  // asked to see." Seeding it in multiplayer would therefore dump my own
+  // detectives' full destination fans onto the board before I asked for
+  // them, which is exactly the seeding behavior this rework removes.
+  // Pass-and-play is untouched and still seeds every detective.
   // MOVED HERE, below myOwnDetectives' own declaration -- it used to sit
   // much earlier in the component (right after toggledIds' own useState),
   // but its dependency array read `myOwnDetectives.length`, which was a
@@ -652,12 +750,9 @@ export default function GameBoard({
     if (myRole === null && match.detectives.length > 0) {
       setToggledIds(new Set(match.detectives.map((d) => d.id)));
       seededOwnRef.current = true;
-    } else if (myOwnDetectives.length > 0) {
-      setToggledIds(new Set(myOwnDetectives.map((d) => d.id)));
-      seededOwnRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myOwnDetectives.length, match.detectives.length, myRole]);
+  }, [match.detectives.length, myRole]);
 
   const MIN_ZOOM = 1;
   const MAX_ZOOM = 4;
@@ -816,7 +911,15 @@ export default function GameBoard({
   // strokesToRender: whichever board is actually "in view" right now --
   // your own strokes normally, or the peeked player's live strokes while
   // peeking (never both, since you're looking at one board at a time).
-  const strokesToRender = peekedPlayerId ? (peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.strokes || [] : []) : myStrokes;
+  // The peeked set comes from broadcast-delivered state (peekedStrokes),
+  // NOT from their Presence payload as it used to -- see usePresence.js.
+  // peekedStrokesOwnerId must match, so a set that arrived for a
+  // previously-peeked player can't leak onto the new one.
+  const strokesToRender = peekedPlayerId
+    ? peekedPlayerIsPeekable && peekedStrokesOwnerId === peekedPlayerId
+      ? peekedStrokes
+      : []
+    : myStrokes;
 
   // The set of detectives currently highlighted on THIS client's board:
   // your own full toggled set normally, or -- while peeking -- EXACTLY
@@ -829,6 +932,29 @@ export default function GameBoard({
     : peekedPlayerId
       ? new Set(peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.toggledDetectiveIds || [] : [])
       : toggledIds;
+
+  // ---------------------------------------------------------------------
+  // PLANNING-PHASE DEFAULT ORIGINS (v3.21). During the shared planning
+  // window, EVERY detective's current position gets a position-style
+  // indicator, unconditionally -- not just your own, and not dependent on
+  // anything having been toggled on. Detective positions are fully public
+  // information in this game, so there is nothing to gate here; the point
+  // is simply that the team can see the whole board's state while
+  // planning together without anyone having to click anything.
+  //
+  // Deliberately NOT gated on routeExplorerEnabled: that admin toggle
+  // governs seeing OTHER players' derived information (their reachable
+  // destinations), not positions that are already visible as tokens.
+  // Clicking a piece to reveal its DESTINATIONS is what the toggle gates,
+  // and that check lives in handleStationClick, unchanged.
+  //
+  // Multiplayer only, and only for a detective-perspective viewer.
+  // Pass-and-play never enters this branch (isPassAndPlay short-circuits),
+  // so its behavior is completely untouched.
+  const planningOriginIds =
+    !isPassAndPlay && roundPhaseMp === "planning" && (iAmDetective || isSpectator)
+      ? new Set(match.detectives.map((d) => d.id))
+      : new Set();
 
   // reachableByDetectiveId: stationId -> [{detId, color}] for every
   // currently-highlighted detective that can reach it -- built once so
@@ -865,20 +991,11 @@ export default function GameBoard({
     // handlers, which route around this function entirely via the SVG's
     // own pointer handlers, gated separately on drawMode).
     if (peekedPlayerId) return;
-    // --- Simultaneous acting phase (multiplayer only): clicking one of
-    // YOUR OWN not-yet-acted detectives SELECTS it as the piece you're
-    // about to move -- click it again (or click a different own piece)
-    // to change your mind. Takes priority over the explore-toggle block
-    // below since, during 'acting', showDetectiveHighlights is already
-    // false anyway (the explorer is buffer-only -- see v3.18), so without
-    // this branch a click here would otherwise silently do nothing.
-    if (!isPassAndPlay && iAmDetective && roundPhaseMp === "acting") {
-      const detForSelect = match.detectives.find((d) => d.pos === station);
-      if (detForSelect && myActingDetectiveIds.includes(detForSelect.id)) {
-        setSelectedActingDetId((prev) => (prev === detForSelect.id ? null : detForSelect.id));
-        return;
-      }
-    }
+    // (v3.21: the tap-to-arm branch that used to sit here is gone. During
+    // the acting phase there is nothing to select -- your current
+    // sub-turn detective is determined automatically, and its origin and
+    // full legal-destination set are already displayed. Clicking your own
+    // piece is now a no-op rather than a selection toggle.)
     // --- Route explorer v2: clicking a station where a PIECE currently
     // stands toggles that piece's highlight, independent of whose turn
     // it is -- available any time, exactly like the old explorer. This
@@ -983,7 +1100,9 @@ export default function GameBoard({
   function commitDetectiveMove(detId, to, mode) {
     setPendingMove(null);
     setMessage("");
-    setSelectedActingDetId(null); // that piece has now acted -- clear the selection so nothing stays "armed" against a piece that's already moved
+    // No selection to clear anymore -- once the server records this
+    // detective in detectives_acted, myCurrentActingDetId automatically
+    // advances to my next unacted detective (or null if I'm done).
     onDetectiveMove(detId, to, mode);
   }
 
@@ -1208,17 +1327,55 @@ export default function GameBoard({
             </div>
           )}
 
-          {/* Begin acting phase early -- multiplayer only, shown during
-              the shared planning window. Per explicit design decision,
-              ANY detective may trigger this (no unanimous-consent
-              tracking) -- this is a purely cooperative, no-stakes
-              convenience for a team that's genuinely done thinking early,
-              same trust level already extended to the rest of the
-              explorer/peek/draw features in this room. */}
-          {!isPassAndPlay && iAmDetective && preThinkActive && (
+          {/* READY VOTE (v3.21) -- replaces the old "Begin acting phase
+              now" button, which let ANY single detective end the shared
+              planning window for everyone. That was fine as a trust-based
+              convenience in principle, but in practice it cost teammates
+              thinking time they were entitled to, so it's now a unanimous
+              vote ENFORCED SERVER-SIDE (see the set_planning_ready RPC).
+              The client only renders the tally; it never decides the
+              transition. Detective players only -- never Mr.X, never
+              spectators. The natural planning-timer expiry still ends the
+              phase on its own via begin_acting_phase, so a team that
+              never all tick ready is not stuck. */}
+          {!isPassAndPlay && iAmDetective && preThinkActive && (() => {
+            const readyIds = (match.planningReadyPlayers || []).map(String);
+            const iAmReady = myPlayerId != null && readyIds.includes(String(myPlayerId));
+            // Denominator: detective-controlling players currently
+            // online. A player who has dropped is excluded here for the
+            // same reason the server excludes them -- they must not be
+            // able to block the vote indefinitely. Falls back to 1 (just
+            // me) before the roster/presence data has loaded.
+            const totalVoters = Math.max(connectedDetectivePlayerIds.length, 1);
+            const readyVoters = readyIds.filter((pid) => connectedDetectivePlayerIds.map(String).includes(pid)).length;
+            return (
+              <div style={styles.rowCenter}>
+                <label style={{ ...styles.peekToggleRow, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={iAmReady}
+                    onChange={(e) => onSetPlanningReady && onSetPlanningReady(e.target.checked)}
+                  />
+                  Ready to act ({readyVoters} of {totalVoters})
+                </label>
+              </div>
+            );
+          })()}
+
+          {/* Per-sub-turn pass. During the acting phase a player works
+              through their own detectives one at a time, so "pass" has to
+              be available for EACH of them individually, not only when a
+              detective happens to have zero legal moves (that narrower
+              case is still handled by the Pass Turn button above, which
+              covers Mr.X and pass-and-play too). Passing marks just this
+              detective as acted and advances me to my next one. */}
+          {!isPassAndPlay && iAmDetective && actingActive && activeDetective && !pendingMove && legalTargets.size > 0 && (
             <div style={styles.rowCenter}>
-              <button style={styles.primaryBtn} onClick={() => onBeginActingPhase && onBeginActingPhase()}>
-                Begin acting phase now
+              <button
+                style={{ ...styles.primaryBtn, background: "#fff", color: "#111", border: "1.5px solid #ddd" }}
+                onClick={() => onPassDetectiveTurn && onPassDetectiveTurn(activeDetective.id)}
+              >
+                Skip {detectiveName(activeDetective.id)}'s move
               </button>
             </div>
           )}
@@ -1459,11 +1616,24 @@ export default function GameBoard({
                         🕵️ Detectives are planning their move…
                       </span>
                     ) : !isPassAndPlay && actingActive ? (
-                      // Simultaneous acting phase: everyone's up at once,
-                      // same "team moment" framing as planning, just
-                      // labeled for the doing rather than the thinking.
+                      // Acting phase: every PLAYER is up at once (the
+                      // round-level countdown is shared and shown to
+                      // everyone), but each player moves their own
+                      // detectives one at a time -- so a detective player
+                      // also gets their OWN "detective X of Y" progress
+                      // and whose move it currently is. Mr.X and
+                      // spectators see only the neutral team-level label,
+                      // never anyone's sub-turn state.
                       <span style={styles.mapTopBarBufferLabel}>
-                        🏃 Detectives are moving — everyone may act now
+                        🏃 Detectives are moving
+                        {iAmDetective && myTotalDetectiveCount > 0 && (
+                          <>
+                            {" — "}
+                            {activeDetective
+                              ? `your detective ${mySubTurnIndex} of ${myTotalDetectiveCount}: ${detectiveName(activeDetective.id)}`
+                              : `all ${myTotalDetectiveCount} of your detectives have acted`}
+                          </>
+                        )}
                       </span>
                     ) : isMrXTurn ? (
                       <span>{mrxName()}'s Turn</span>
@@ -1736,10 +1906,23 @@ export default function GameBoard({
                 // highlight) -- skipped when it's already the active
                 // mover's own turn-indicator station, to avoid drawing
                 // two rings on top of each other.
+                // Union of two sources: a detective whose destinations
+                // I've explicitly toggled on, AND (during planning) every
+                // detective by default -- see planningOriginIds. Still
+                // skipped when this is already the active mover's own
+                // turn-indicator station, to avoid stacking two rings.
                 const originDetective =
-                  detHere && highlightedDetectiveIds.has(detHere.id) && !(!isMrXTurn && activeDetective && detHere.id === activeDetective.id)
+                  detHere &&
+                  (highlightedDetectiveIds.has(detHere.id) || planningOriginIds.has(detHere.id)) &&
+                  !(!isMrXTurn && activeDetective && detHere.id === activeDetective.id)
                     ? detHere
                     : null;
+                // Acted-this-round detectives are dimmed and inert during
+                // the acting phase -- a clear "this one is done" signal
+                // that also keeps the board readable once several pieces
+                // have moved. Public info (detectives_acted is public), so
+                // this is shown to every viewer, not just the controller.
+                const isActedThisRound = !isPassAndPlay && roundPhaseMp === "acting" && detHere && detectivesActedSet.has(detHere.id);
                 // Turn indicator: for a detective's turn, this is visible
                 // to EVERYONE (their position is always public). For
                 // Mr.X's own turn, a SEPARATE private indicator is shown
@@ -1796,7 +1979,16 @@ export default function GameBoard({
                 };
 
                 return (
-                  <g key={id} onClick={() => handleStationClick(numId)} style={{ cursor: isLegal ? "pointer" : "default" }}>
+                  <g
+                    key={id}
+                    onClick={() => handleStationClick(numId)}
+                    style={{
+                      cursor: isLegal ? "pointer" : "default",
+                      // Dim + fully non-interactive for a detective that
+                      // has already acted this round.
+                      ...(isActedThisRound ? { opacity: 0.45, pointerEvents: "none" } : {}),
+                    }}
+                  >
                     <circle cx={x} cy={y} r={2.6 * sizeScale} fill="transparent" />
                     {isLegal && (
                       <HighlightRing x={x} y={y} radius={nodeR + 0.7} color="#1a1a1a" strokeWidth={0.25} dashed style={highlightDestinationStyle} />
@@ -1853,7 +2045,7 @@ export default function GameBoard({
                           than inside HighlightRing since it animates a
                           DIFFERENT element (the station's own fill, not
                           a separate ring). */}
-                      {highlightPositionStyle === "blink" && (isCurrentTurnStation || isMrXOwnTurnIndicator) && (
+                      {highlightPositionStyle === "blink" && (isCurrentTurnStation || isMrXOwnTurnIndicator || originDetective) && (
                         <animate attributeName="opacity" values="1;0.35;1" dur="1s" repeatCount="indefinite" />
                       )}
                     </circle>

@@ -232,6 +232,26 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     }
   }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
 
+  // setPlanningReady -- see supabaseApi.js. Errors ARE swallowed to a
+  // console log here for the same reason as beginActingPhase: the common
+  // failure is a benign race (the planning window ended between render
+  // and click), which is a no-op server-side, not something to alarm the
+  // player about.
+  const setPlanningReady = useCallback(
+    async (ready) => {
+      if (!roomId || !myPlayerId) return null;
+      try {
+        const res = await api.setPlanningReady({ roomId, playerId: myPlayerId, callerSecret: myPlayerSecret, ready });
+        await refreshMatch();
+        return res;
+      } catch (e) {
+        console.error("setPlanningReady failed:", e);
+        return null;
+      }
+    },
+    [roomId, myPlayerId, myPlayerSecret, refreshMatch]
+  );
+
   const forceEndActingPhase = useCallback(async () => {
     if (!roomId || !myPlayerId) return;
     try {
@@ -264,6 +284,7 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     passMrxTurn,
     passDetectiveTurn,
     beginActingPhase,
+    setPlanningReady,
     forceEndActingPhase,
     beginTurnScreen,
     resetToSetup,

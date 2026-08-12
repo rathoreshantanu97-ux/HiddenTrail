@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { MAPS } from "./maps/index.js";
 import { detectiveLabel } from "./maps/mapSchema.js";
 import { applyMapOverride } from "./lib/useMapWithOverrides.js";
@@ -275,6 +275,19 @@ export default function App({ account, onLogout }) {
   // hook now needs the seat-ownership data (role -> player) to apportion
   // detective act-window time correctly for multi-seat players.
   const [mpPlayersList, setMpPlayersList] = useState([]);
+  // How many detectives the BUSIEST single player controls. Sizes the
+  // shared acting window, because every player works through their own
+  // detectives sequentially inside that one window (see turnSchedule.js's
+  // actingWindowSeconds). Mr.X and any role-less row are excluded.
+  const mpMaxDetectivesForAnyOnePlayer = useMemo(() => {
+    let max = 1;
+    for (const p of mpPlayersList) {
+      if (!p.role || p.role === "mrx") continue;
+      const n = p.role.split(",").filter((s) => /^d\d+$/.test(s)).length;
+      if (n > max) max = n;
+    }
+    return max;
+  }, [mpPlayersList]);
   const {
     secondsRemaining: mpSecondsRemaining,
     turnTimerSeconds: mpTurnTimerSeconds,
@@ -288,6 +301,7 @@ export default function App({ account, onLogout }) {
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     map: getEffectiveMap(liveMapId),
     match: supabaseStore.match,
+    maxDetectivesForAnyOnePlayer: mpMaxDetectivesForAnyOnePlayer,
     onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(getEffectiveMap(liveMapId), to, edgeMode, ticketUsed),
     // BUG FIX (unchanged reasoning from before): without this, Mr.X's
     // timer expiring with genuinely zero legal moves left the game
@@ -304,14 +318,21 @@ export default function App({ account, onLogout }) {
 
   const [mpToggledDetectiveIds, setMpToggledDetectiveIds] = useState([]); // this client's own EXTRA (non-own) route-explorer toggles, reported up from GameBoard so they can be broadcast via Presence
   const [mpPeekable, setMpPeekable] = useState(true); // this client's own "let teammates peek at my screen" preference, reported up from GameBoard
-  const [mpStrokes, setMpStrokes] = useState([]); // this client's own drawing strokes, reported up from GameBoard so they can be broadcast via Presence (for a peeking teammate)
+  const [mpStrokes, setMpStrokes] = useState([]); // this client's own drawing strokes, reported up from GameBoard
+  // Latest own strokes, in a ref -- needed because the strokes_request
+  // handler (someone just started peeking me) has to answer with the
+  // CURRENT value at the moment the request arrives, and the handler is
+  // installed once rather than re-created per render.
+  const mpStrokesRef = useRef(mpStrokes);
+  mpStrokesRef.current = mpStrokes;
   // GameBoard registers its own stroke-applying function here on mount
   // (see onRegisterRemoteStrokeHandler) -- a ref, not state, since this
   // is a plain function handoff, not a value the rest of App.jsx reads or
-  // re-renders on.
+  // re-renders on. Same pattern for the two new broadcast handlers.
   const remoteStrokeHandlerRef = useRef(null);
+  const peerEventHandlersRef = useRef({});
 
-  const { onlinePlayerIds, isInactive, presenceState, sendRemoteStroke } = usePresence({
+  const { onlinePlayerIds, isInactive, presenceState, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff } = usePresence({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     myPlayerId: mpPlayerId,
     myDisplayName: mpDisplayName,
@@ -319,9 +340,20 @@ export default function App({ account, onLogout }) {
     gracePeriodSeconds: 25, // TODO: read from admin config once wired through App-level state
     myToggledDetectiveIds: mpToggledDetectiveIds,
     myPeekable: mpPeekable,
-    myStrokes: mpStrokes,
     onRemoteStroke: (payload) => remoteStrokeHandlerRef.current && remoteStrokeHandlerRef.current(payload),
+    // Strokes and peek-revocation now arrive as explicit broadcasts
+    // rather than being inferred from Presence state -- see the header
+    // comment in usePresence.js for why.
+    onStrokesSync: (payload) => peerEventHandlersRef.current.onStrokesSync && peerEventHandlersRef.current.onStrokesSync(payload),
+    onStrokesRequest: () => sendStrokesSyncRef.current && sendStrokesSyncRef.current(mpStrokesRef.current),
+    onPeekOff: (payload) => peerEventHandlersRef.current.onPeekOff && peerEventHandlersRef.current.onPeekOff(payload),
   });
+
+  // sendStrokesSync is produced BY the same hook call whose options
+  // reference it (the strokes_request responder), so it can't be named
+  // directly there -- this ref closes that ordering loop.
+  const sendStrokesSyncRef = useRef(null);
+  sendStrokesSyncRef.current = sendStrokesSync;
 
   useEffect(() => {
     if (appMode !== "multiplayer" || mpStage !== "playing" || !mpRoomId) return;
@@ -1059,7 +1091,16 @@ export default function App({ account, onLogout }) {
       if (detectiveIds.length === 0) continue;
       detectivePlayersRoster.push({
         playerId: p.id,
-        displayName: detectiveIds.length === 1 ? detectiveName(detectiveIds[0]) : detectiveIds.map((id) => detectiveName(id)).join(" & "),
+        // DEDUPE, deliberately: detectiveName(id) falls back to the
+        // controlling PLAYER's real display name on any map that doesn't
+        // give each detective its own character name (the common case --
+        // only themed maps like Westeros do). For a player holding
+        // several seats on such a map, every id resolves to the SAME
+        // string, so the naive join produced "Priya & Priya & Priya".
+        // Collapsing identical names first fixes that while still
+        // showing several genuinely distinct character names ("Arya &
+        // Jon") on a themed map, where the ids really do differ.
+        displayName: Array.from(new Set(detectiveIds.map((id) => detectiveName(id)))).join(" & "),
         detectiveIds,
       });
     }
@@ -1092,6 +1133,10 @@ export default function App({ account, onLogout }) {
         onStrokesChange={setMpStrokes}
         onRemoteDraw={(targetPlayerId, action) => sendRemoteStroke(targetPlayerId, action)}
         onRegisterRemoteStrokeHandler={(handler) => (remoteStrokeHandlerRef.current = handler)}
+        onRegisterPeerEventHandlers={(handlers) => (peerEventHandlersRef.current = handlers)}
+        onBroadcastStrokes={(strokes) => sendStrokesSync(strokes)}
+        onRequestPeerStrokes={(targetPlayerId) => sendStrokesRequest(targetPlayerId)}
+        onBroadcastPeekOff={() => sendPeekOff()}
         presenceState={presenceState}
         detectivePlayersRoster={detectivePlayersRoster}
         myPlayerId={mpPlayerId}
@@ -1101,6 +1146,13 @@ export default function App({ account, onLogout }) {
         onPassMrxTurn={() => supabaseStore.passMrxTurn()}
         onPassDetectiveTurn={(detId) => supabaseStore.passDetectiveTurn(detId)}
         onBeginActingPhase={() => supabaseStore.beginActingPhase()}
+        onSetPlanningReady={(ready) => supabaseStore.setPlanningReady(ready)}
+        // Detective-controlling players currently online, per Presence.
+        // Used only to render the ready tally's denominator -- the SERVER
+        // computes its own connected set from players.last_seen_at when
+        // actually deciding the vote, so a brief disagreement between the
+        // two is cosmetic, never a correctness issue.
+        connectedDetectivePlayerIds={detectivePlayersRoster.filter((p) => onlinePlayerIds.has(p.playerId)).map((p) => p.playerId)}
         extraHeaderContent={
           <>
             <RulebookButton compact onClick={() => setShowRulebook(true)} />

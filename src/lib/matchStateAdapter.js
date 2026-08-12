@@ -72,6 +72,12 @@ export function rowToMatch(gsRow, myMrxPosition) {
     roundPhase: gsRow.round_phase,
     actingPhaseStartedAt: gsRow.acting_phase_started_at,
     detectivesActed: gsRow.detectives_acted || [],
+    // planningReadyPlayers -- player ids (as strings) who've ticked
+    // "ready" during the current planning phase. Server-owned: the
+    // server, not the client, decides when this constitutes unanimity
+    // and flips the phase (see the set_planning_ready RPC). The client
+    // only reads it to render "Ready (X of Y)".
+    planningReadyPlayers: gsRow.planning_ready_players || [],
   };
 }
 

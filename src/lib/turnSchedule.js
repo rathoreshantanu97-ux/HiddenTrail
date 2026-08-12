@@ -34,10 +34,16 @@
 //     decision, mrxSeconds in this mode is simply actSeconds itself --
 //     same length as everyone else's turn, still clamped to the admin
 //     bounds as a safety net.
-//   - extraSeatSeconds = ceil(actSeconds * extraSeatTimeRatio) -- a
-//     player's SECOND (and further) detective seat this round only gets
-//     this smaller top-up, not another full act window, since the actual
-//     thinking already happened during the buffer.
+//   - extraSeatSeconds -- how much EXTRA time the shared acting window
+//     gets for each detective beyond the first that a single player
+//     controls. Now a per-room, host-configurable number
+//     (rooms.extra_detective_seconds), not a ratio-derived one: when the
+//     room leaves it unset (null), it defaults to the full base
+//     actSeconds, i.e. a player with three detectives gets three full
+//     act windows' worth of room inside the shared phase. The older
+//     ratio-derived value (ceil(actSeconds * extraSeatTimeRatio)) is
+//     retained ONLY as the fallback shown in admin previews where no
+//     room-level value exists to read; see extraSeatSecondsFromRatio.
 //
 // ROUNDING: every derived value is rounded UP (Math.ceil) before any
 // clamping, per explicit instruction -- a player should never end up with
@@ -62,7 +68,11 @@ function clamp(n, min, max) {
 }
 
 // computeTurnSchedule -- pure function, no I/O.
-export function computeTurnSchedule(actSeconds, bufferSeconds, ratios = {}, bounds = {}) {
+// extraDetectiveSeconds: the room's own configured top-up per additional
+// detective controlled by one player (rooms.extra_detective_seconds).
+// null/undefined means "not configured" -> defaults to the full base
+// actSeconds, per the agreed default for this field.
+export function computeTurnSchedule(actSeconds, bufferSeconds, ratios = {}, bounds = {}, extraDetectiveSeconds = null) {
   const r = { ...DEFAULT_SCHEDULE_RATIOS, ...ratios };
   const b = { ...DEFAULT_SCHEDULE_BOUNDS, ...bounds };
   if (!actSeconds || actSeconds <= 0) {
@@ -77,16 +87,31 @@ export function computeTurnSchedule(actSeconds, bufferSeconds, ratios = {}, boun
   // comment on mrxSeconds above for why.
   const mrxSecondsRaw = effectiveBuffer ? Math.ceil(effectiveBuffer * r.mrxTimeRatio) : actSeconds;
   const mrxSeconds = clamp(mrxSecondsRaw, b.mrxSecondsMin, b.mrxSecondsMax);
-  const extraSeatSeconds = Math.ceil(actSeconds * r.extraSeatTimeRatio);
-  return { actSeconds, bufferSeconds: effectiveBuffer, mrxSeconds, extraSeatSeconds };
+  const extraSeatSecondsFromRatio = Math.ceil(actSeconds * r.extraSeatTimeRatio);
+  // Room-configured value wins; unset (null/undefined) falls back to a
+  // FULL base act window per extra detective. 0 is a legitimate,
+  // deliberate configuration ("no extra time at all"), so it must not be
+  // treated as "unset" -- hence the explicit null check rather than a
+  // truthiness test.
+  const extraSeatSeconds =
+    extraDetectiveSeconds != null && extraDetectiveSeconds >= 0 ? extraDetectiveSeconds : actSeconds;
+  return { actSeconds, bufferSeconds: effectiveBuffer, mrxSeconds, extraSeatSeconds, extraSeatSecondsFromRatio };
 }
 
-// actSecondsForSeatIndex -- how long THIS specific seat's own act window
-// should be, given it's the Nth (0-indexed) seat this SAME player is
-// moving this round. Seat 0 (their first seat this round) gets the full
-// base; every seat after that gets only the smaller extraSeatSeconds
-// top-up, not another full base.
-export function actSecondsForSeatIndex(schedule, seatIndexForPlayer) {
-  if (!schedule.actSeconds) return null;
-  return seatIndexForPlayer === 0 ? schedule.actSeconds : schedule.extraSeatSeconds;
+// actingWindowSeconds -- the TOTAL length of the shared acting phase.
+// The phase runs concurrently for every player, but each player works
+// through their OWN detectives sequentially inside it (see GameBoard's
+// sub-turn model), so the window has to be long enough for whichever
+// single player has the most detectives to get through all of theirs:
+//
+//   base act time + extraSeatSeconds * (maxDetectivesForAnyOnePlayer - 1)
+//
+// A player with fewer detectives simply finishes early and waits -- the
+// window is deliberately sized for the slowest case, not averaged, since
+// cutting the busiest player off mid-sequence would be a correctness
+// problem, not just an inconvenience.
+export function actingWindowSeconds(schedule, maxDetectivesForAnyOnePlayer) {
+  if (!schedule || !schedule.actSeconds) return null;
+  const n = Math.max(1, maxDetectivesForAnyOnePlayer || 1);
+  return schedule.actSeconds + (schedule.extraSeatSeconds || 0) * (n - 1);
 }

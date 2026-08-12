@@ -27,7 +27,47 @@ import { supabase } from "./supabaseClient.js";
 // same as "actually disconnected," rather than sitting in a false
 // "still here" status indefinitely.
 // ---------------------------------------------------------------------------
-export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePeriodSeconds = 25, myToggledDetectiveIds = [], myPeekable = true, myStrokes = [], onRemoteStroke }) {
+//
+// STROKES ARE NO LONGER CARRIED BY PRESENCE (v3.21). They used to ride
+// along in the tracked payload above, which made a peeker's view of a
+// peeked player's drawing depend on Presence's periodic, size-limited,
+// silently-lossy state sync -- the single root cause of the long-running
+// "my drawing never showed up for whoever was peeking me" bug (a payload
+// over Presence's per-client limit is rejected outright, and a
+// coalesced sync can drop an intermediate state entirely). Strokes now
+// travel exclusively over explicit Realtime BROADCAST events on this
+// same channel -- the identical mechanism peek-and-draw ("stroke") has
+// always used successfully:
+//   - "strokes_sync"    {senderPlayerId, strokes} -- pushed by a player
+//                       every time their own stroke set changes. Anyone
+//                       currently peeking that sender applies it directly.
+//   - "strokes_request" {targetPlayerId, fromPlayerId} -- sent when a
+//                       peek STARTS, so the peeker gets the current
+//                       drawing immediately rather than waiting for the
+//                       next change. The target answers with strokes_sync.
+//   - "peek_off"        {senderPlayerId} -- pushed the instant a player
+//                       turns their "let teammates peek" toggle off, so
+//                       active peekers are released immediately instead
+//                       of waiting on a Presence state diff (which proved
+//                       unreliable in practice). The Presence-diff effect
+//                       in GameBoard.jsx is kept as a backup, not the
+//                       primary path.
+// Presence itself still carries roster/online-status and the
+// route-explorer toggles, which are small, idempotent, and genuinely
+// "current state" rather than a stream of edits.
+export function usePresence({
+  roomId,
+  myPlayerId,
+  myDisplayName,
+  myRole,
+  gracePeriodSeconds = 25,
+  myToggledDetectiveIds = [],
+  myPeekable = true,
+  onRemoteStroke,
+  onStrokesSync,
+  onStrokesRequest,
+  onPeekOff,
+}) {
   const [onlinePlayerIds, setOnlinePlayerIds] = useState(new Set());
   // playerId -> their full tracked presence payload (displayName, role,
   // and now toggledDetectiveIds) -- exposed so consumers (like the "peek
@@ -52,6 +92,14 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
   // ref rather than closing over a stale copy.
   const onRemoteStrokeRef = useRef(onRemoteStroke);
   onRemoteStrokeRef.current = onRemoteStroke;
+  // Same ref-indirection reasoning as onRemoteStrokeRef above, for the
+  // three new broadcast events (see the header comment).
+  const onStrokesSyncRef = useRef(onStrokesSync);
+  onStrokesSyncRef.current = onStrokesSync;
+  const onStrokesRequestRef = useRef(onStrokesRequest);
+  onStrokesRequestRef.current = onStrokesRequest;
+  const onPeekOffRef = useRef(onPeekOff);
+  onPeekOffRef.current = onPeekOff;
 
   useEffect(() => {
     if (!supabase || !roomId || !myPlayerId) return;
@@ -70,6 +118,32 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
     channel.on("broadcast", { event: "stroke" }, ({ payload }) => {
       if (payload?.targetPlayerId === myPlayerId && onRemoteStrokeRef.current) {
         onRemoteStrokeRef.current(payload);
+      }
+    });
+
+    // strokes_sync -- a player pushing their CURRENT full stroke set to
+    // the room. Room-wide like every broadcast, so each client decides
+    // for itself whether it cares (GameBoard only applies it when the
+    // sender is the player it's actively peeking). Ignore our own echo.
+    channel.on("broadcast", { event: "strokes_sync" }, ({ payload }) => {
+      if (payload?.senderPlayerId && payload.senderPlayerId !== myPlayerId && onStrokesSyncRef.current) {
+        onStrokesSyncRef.current(payload);
+      }
+    });
+
+    // strokes_request -- someone just STARTED peeking me and wants my
+    // current drawing right now, rather than waiting for my next edit.
+    channel.on("broadcast", { event: "strokes_request" }, ({ payload }) => {
+      if (payload?.targetPlayerId === myPlayerId && onStrokesRequestRef.current) {
+        onStrokesRequestRef.current(payload);
+      }
+    });
+
+    // peek_off -- a player revoked peek permission. Primary, immediate
+    // release path for anyone currently peeking them.
+    channel.on("broadcast", { event: "peek_off" }, ({ payload }) => {
+      if (payload?.senderPlayerId && payload.senderPlayerId !== myPlayerId && onPeekOffRef.current) {
+        onPeekOffRef.current(payload);
       }
     });
 
@@ -99,7 +173,7 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
 
     channel.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await channel.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable, strokes: myStrokes });
+        await channel.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable });
       }
     });
 
@@ -116,17 +190,17 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
   // changes, not on every explore-mode click).
   useEffect(() => {
     if (!channelRef.current) return;
-    // Errors here (e.g. a payload over Presence's size limit) used to be
-    // silently swallowed, which is exactly why a too-large stroke set
-    // failing to sync was invisible even in the console -- now logged so
-    // a real sync failure is at least diagnosable.
-    channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable, strokes: myStrokes }).catch((e) => console.error("Presence track failed:", e));
+    // Errors here are still logged rather than swallowed. With strokes
+    // no longer riding along (they broadcast separately now -- see the
+    // header comment), this payload is small and bounded, so a
+    // size-limit rejection is no longer a realistic failure mode.
+    channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable }).catch((e) => console.error("Presence track failed:", e));
     // Depend on the SERIALIZED array/objects, not their references -- the
     // caller reasonably passes freshly-built arrays each render (e.g.
     // Array.from(aSet)), which would otherwise re-track on every render
     // even when nothing actually changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(myToggledDetectiveIds), myDisplayName, myRole, myPeekable, JSON.stringify(myStrokes)]);
+  }, [JSON.stringify(myToggledDetectiveIds), myDisplayName, myRole, myPeekable]);
 
   useEffect(() => {
     const id = setInterval(() => forceTick((t) => t + 1), 1000);
@@ -177,5 +251,40 @@ export function usePresence({ roomId, myPlayerId, myDisplayName, myRole, gracePe
     channelRef.current.send({ type: "broadcast", event: "stroke", payload: { targetPlayerId, ...action } }).catch((e) => console.error("Remote stroke broadcast failed:", e));
   }, []);
 
-  return { onlinePlayerIds, presenceState, isInactive, sendRemoteStroke };
+  // sendStrokesSync -- push MY current full stroke set to the room, so
+  // any client peeking me re-renders it immediately. Full snapshot, not
+  // a delta: idempotent, order-independent, and self-healing if any
+  // single broadcast is ever missed.
+  const sendStrokesSync = useCallback(
+    (strokes) => {
+      if (!channelRef.current || !myPlayerId) return;
+      channelRef.current
+        .send({ type: "broadcast", event: "strokes_sync", payload: { senderPlayerId: myPlayerId, strokes } })
+        .catch((e) => console.error("Strokes sync broadcast failed:", e));
+    },
+    [myPlayerId]
+  );
+
+  // sendStrokesRequest -- ask a specific player to push me their current
+  // strokes right now (sent the moment a peek starts).
+  const sendStrokesRequest = useCallback(
+    (targetPlayerId) => {
+      if (!channelRef.current || !myPlayerId || !targetPlayerId) return;
+      channelRef.current
+        .send({ type: "broadcast", event: "strokes_request", payload: { targetPlayerId, fromPlayerId: myPlayerId } })
+        .catch((e) => console.error("Strokes request broadcast failed:", e));
+    },
+    [myPlayerId]
+  );
+
+  // sendPeekOff -- tell the room I've revoked peek permission, so active
+  // peekers drop out of my board immediately.
+  const sendPeekOff = useCallback(() => {
+    if (!channelRef.current || !myPlayerId) return;
+    channelRef.current
+      .send({ type: "broadcast", event: "peek_off", payload: { senderPlayerId: myPlayerId } })
+      .catch((e) => console.error("Peek-off broadcast failed:", e));
+  }, [myPlayerId]);
+
+  return { onlinePlayerIds, presenceState, isInactive, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff };
 }

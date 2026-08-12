@@ -732,11 +732,21 @@ export default function GameBoard({
   }
 
   // showDetectiveHighlights: whether explore highlights are appropriate
-  // for THIS client to see at all. Pass-and-play (myRole === null, one
-  // shared device) only while it ISN'T Mr.X's own private turn, to avoid
-  // handing Mr.X free intel about detective destinations on the same
-  // device.
-  const showDetectiveHighlights = iAmDetective || isSpectator || (myRole === null && !isMrXTurn);
+  // for THIS client to see at all. Real design fix, per explicit request:
+  // the multi-detective explorer (own detectives shown by default, click
+  // any piece to toggle any other detective's highlight too) is now ONLY
+  // available during the shared pre-think buffer -- the "team is thinking
+  // together" moment it was actually built for. Once an individual act
+  // window starts (preThinkActive false, some specific detective's own
+  // turn to actually move), this reverts to the ORIGINAL, simpler
+  // behavior: only the ACTIVE detective's own legal-move ring and turn
+  // indicator show (isLegal / isCurrentTurnStation, both computed
+  // independently of this flag, further down) -- no exploring any other
+  // detective's origin/destination while someone's actually mid-move.
+  // Pass-and-play has no buffer phase at all (preThinkActive is never
+  // wired for it), so this correctly keeps the explorer off there too,
+  // falling back to the same plain active-detective ring it always had.
+  const showDetectiveHighlights = preThinkActive && (iAmDetective || isSpectator || myRole === null);
 
   // If the peeked player turns their privacy toggle off WHILE being
   // peeked, this immediately stops surfacing their data (presenceState
@@ -987,7 +997,7 @@ export default function GameBoard({
               on/off). This short hint replaces the old control row, so
               the mechanic is still discoverable without cluttering the
               sidebar with buttons. */}
-          {iAmDetective && routeExplorerEnabled && match.detectives.some((d) => !myOwnDetectives.some((md) => md.id === d.id)) && (
+          {iAmDetective && preThinkActive && routeExplorerEnabled && match.detectives.some((d) => !myOwnDetectives.some((md) => md.id === d.id)) && (
             <div style={styles.exploreHint}>💡 Click any teammate's piece on the map to see their reachable stations too.</div>
           )}
 

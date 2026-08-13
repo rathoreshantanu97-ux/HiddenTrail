@@ -3706,6 +3706,15 @@ export const styles = {
     maxWidth: 220,
   },
   turnTimerBarTrack: {
+    // v3.31: the TRACK is always the same physical width in every phase
+    // and for every player's individual acting pool. Nothing here is
+    // derived from the number of seconds in the round -- flex:1 makes
+    // it take the whole remaining row, and only the FILL's percentage
+    // (remaining / total-for-this-round) changes, so a 15s pool simply
+    // drains three times faster than a 45s one across the same bar.
+    // The sibling countdown label is fixed-width (see below) so that a
+    // 3-digit reading like "120s" can't steal room from the track and
+    // make the bar appear to shrink between phases.
     flex: 1,
     height: 12, // v3.30: taller -- this is the bar the whole top strip is built around
 
@@ -3722,7 +3731,15 @@ export const styles = {
     fontSize: 16,
     fontWeight: 800,
     color: "#3a3a36",
-    minWidth: 40,
+    // v3.31: FIXED width (not minWidth) + no shrinking, wide enough for
+    // a 3-digit "120s". Previously this was minWidth:40, so a long
+    // planning countdown grew the label and squeezed the flex:1 track,
+    // which made the bar visibly resize between phases even though its
+    // fill was already purely percentage-based. Tabular figures stop
+    // the same jitter happening tick-to-tick (e.g. 11s -> 10s).
+    width: 46,
+    flex: "0 0 46px",
+    fontVariantNumeric: "tabular-nums",
     textAlign: "right",
   },
   roomCodeLabel: { fontSize: 11, color: "#aaa", marginTop: 2, letterSpacing: 0.5 },

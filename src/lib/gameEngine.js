@@ -80,6 +80,14 @@ export function formatLogEntry(entry, theme) {
       return `${mrxName()} captured at ${stationLabel(payload.to)}! Detectives win.`;
     case "mrx_move":
       return `${mrxName()} moved (${modeLabel(payload.mode)} ticket)${payload.revealedAt != null ? ` \u2014 REVEALED at station ${payload.revealedAt}` : ""}.`;
+    // v3.25 -- multiplayer only: Mr.X chose (or, on a timeout, was made)
+    // to stay on his current station for a whole round. Stated plainly
+    // and openly, by design: that he didn't move is information the
+    // detectives are meant to have.
+    case "mrx_stayed":
+      return `${mrxName()} did not move this round${payload.byTimeout ? " (ran out of time)" : ""}${
+        payload.ticket ? ` \u2014 forfeited a ${modeLabel(payload.ticket)} ticket` : " \u2014 no tickets left to forfeit"
+      }${payload.revealedAt != null ? ` \u2014 REVEALED at station ${payload.revealedAt}` : ""}.`;
     case "mrx_walked_into_detective":
       return `${mrxName()} moved onto a detective's station! Detectives win.`;
     case "double_move_activated":
@@ -418,7 +426,9 @@ export function buildReplayTimeline(match) {
   const rawMoves = [];
   for (const entry of match.mrX.positionLog) {
     if (entry.round === 0) continue; // the initial placement, not a move
-    rawMoves.push({ round: entry.round, actor: "mrx", pos: entry.pos, mode: entry.mode });
+    // entry.ticket is only present on v3.25 "stay" entries (the ticket
+    // forfeited for standing still); it's undefined for ordinary moves.
+    rawMoves.push({ round: entry.round, actor: "mrx", pos: entry.pos, mode: entry.mode, ticket: entry.ticket });
   }
   for (const d of match.detectives) {
     for (const entry of d.history) {
@@ -479,8 +489,12 @@ export function buildReplayTimeline(match) {
   for (const move of rawMoves) {
     if (move.actor === "mrx") {
       mrXPos = move.pos;
-      if (mrXTickets[move.mode] != null) {
-        mrXTickets = { ...mrXTickets, [move.mode]: mrXTickets[move.mode] - 1 };
+      // v3.25: a "stay" entry has no travel mode -- its forfeited ticket
+      // type (if any) is carried separately in move.ticket, so the
+      // replay's ticket snapshot still tracks his real holdings.
+      const spent = move.mode === "stay" ? move.ticket : move.mode;
+      if (spent && mrXTickets[spent] != null) {
+        mrXTickets = { ...mrXTickets, [spent]: mrXTickets[spent] - 1 };
       }
     } else {
       detectivePositions[move.detId] = move.pos;
@@ -493,6 +507,7 @@ export function buildReplayTimeline(match) {
       round: move.round,
       actor: move.actor,
       mode: move.mode,
+      ticket: move.ticket,
       mrXPos,
       detectivePositions: { ...detectivePositions },
       mrXTickets: { ...mrXTickets },

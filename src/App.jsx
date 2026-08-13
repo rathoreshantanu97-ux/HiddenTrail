@@ -302,12 +302,14 @@ export default function App({ account, onLogout }) {
     map: getEffectiveMap(liveMapId),
     match: supabaseStore.match,
     maxDetectivesForAnyOnePlayer: mpMaxDetectivesForAnyOnePlayer,
-    onMrXMove: (to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(getEffectiveMap(liveMapId), to, edgeMode, ticketUsed),
-    // BUG FIX (unchanged reasoning from before): without this, Mr.X's
-    // timer expiring with genuinely zero legal moves left the game
-    // stalled forever -- wired to the same passMrxTurn the manual "Pass
-    // Turn" button already uses.
-    onPassMrxTurn: () => supabaseStore.passMrxTurn(),
+    // v3.25: Mr.X's timer expiring no longer submits a random legal move
+    // on his behalf. He stays on his current station, forfeits one
+    // ticket of his cheapest held type, and the round is logged openly
+    // as a non-move -- the same server-side action his voluntary "Stay
+    // Here" uses (see mrx_stay_internal). This also covers the old
+    // "zero legal moves left" stall case that onPassMrxTurn existed for,
+    // since staying put is always available.
+    onForceEndMrxTurn: () => supabaseStore.forceEndMrxTurn(),
     // NEW for the 3-phase model: the planning window's own natural
     // expiry now calls the exact same RPC as the team's "ready" button
     // (see GameBoard.jsx), and the acting window's expiry hands control
@@ -1183,6 +1185,10 @@ export default function App({ account, onLogout }) {
         onMrXMove={(to, edgeMode, ticketUsed) => supabaseStore.submitMrXMove(map, to, edgeMode, ticketUsed)}
         onActivateDoubleMove={() => supabaseStore.activateDoubleMove()}
         onPassMrxTurn={() => supabaseStore.passMrxTurn()}
+        // v3.25: Mr.X's voluntary "Stay Here", taken by clicking his own
+        // station and confirming in the normal move popup. Multiplayer
+        // only -- pass-and-play never receives this prop.
+        onMrxStayHere={() => supabaseStore.mrxStayHere()}
         onPassDetectiveTurn={(detId) => supabaseStore.passDetectiveTurn(detId)}
         onBeginActingPhase={() => supabaseStore.beginActingPhase()}
         onSetPlanningReady={(ready) => supabaseStore.setPlanningReady(ready)}

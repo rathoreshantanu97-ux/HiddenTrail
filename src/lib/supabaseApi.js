@@ -333,6 +333,33 @@ export async function passMrxTurn({ roomId, callerPlayerId, callerSecret }) {
   });
 }
 
+// mrxStayHere (v3.25) -- Mr.X deliberately stays on his current station
+// for this round. Costs one ticket of his cheapest held type
+// (taxi -> bus -> underground; nothing at all if he holds none of those)
+// and is recorded OPENLY in the travel log as a non-move round, by
+// design -- a fugitive who doesn't move is information the trackers are
+// entitled to. Server-side authority: mrx_stay_here -> mrx_stay_internal.
+export async function mrxStayHere({ roomId, callerPlayerId, callerSecret }) {
+  await callRpc("mrx_stay_here", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+  });
+}
+
+// forceEndMrxTurn (v3.25) -- the TIMEOUT counterpart of mrxStayHere.
+// Callable by any player in the room (Mr.X may be the one who's
+// disconnected), idempotent no-op if his turn already ended. Runs the
+// EXACT same server-side implementation as the voluntary action, so the
+// two paths can never diverge -- see mrx_stay_internal.
+export async function forceEndMrxTurn({ roomId, callerPlayerId, callerSecret }) {
+  await callRpc("force_end_mrx_turn", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+  });
+}
+
 // passDetectiveTurn -- a detective with genuinely zero legal moves (or
 // who simply doesn't want to move) marks themselves done for this
 // round's acting phase, independent of everyone else.

@@ -176,6 +176,36 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     }
   }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
 
+  // mrxStayHere (v3.25) -- Mr.X's VOLUNTARY "stay put" action, taken
+  // from the move-confirmation overlay by clicking his own station.
+  // Errors ARE surfaced here (unlike the timeout counterpart below):
+  // this is a deliberate click, so a failure is something the player
+  // needs to see rather than a benign race.
+  const mrxStayHere = useCallback(async () => {
+    if (!roomId || !myPlayerId) return;
+    try {
+      await api.mrxStayHere({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
+      await refreshMatch();
+    } catch (e) {
+      setError(e.message);
+      throw e;
+    }
+  }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
+
+  // forceEndMrxTurn (v3.25) -- the timer-expiry path for Mr.X's turn.
+  // Every connected client's timer fires this, so it races routinely and
+  // is a server-side no-op after the first one lands; errors are logged,
+  // not surfaced, exactly like beginActingPhase/forceEndActingPhase.
+  const forceEndMrxTurn = useCallback(async () => {
+    if (!roomId || !myPlayerId) return;
+    try {
+      await api.forceEndMrxTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
+      await refreshMatch();
+    } catch (e) {
+      console.error("forceEndMrxTurn failed:", e);
+    }
+  }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
+
   // passDetectiveTurn -- a detective marks themselves done for this
   // round's acting phase without moving (zero legal moves, or simply
   // choosing not to act).
@@ -282,6 +312,8 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     submitMrXMove,
     activateDoubleMove,
     passMrxTurn,
+    mrxStayHere,
+    forceEndMrxTurn,
     passDetectiveTurn,
     beginActingPhase,
     setPlanningReady,

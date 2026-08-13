@@ -80,6 +80,11 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
   function stepDescription(s) {
     if (s.actor === null) return "Starting positions";
     if (s.actor === "mrx") {
+      // v3.25: a "stay" step is not a move at all -- describe it as the
+      // non-move it was, rather than as travel by an unknown mode.
+      if (s.mode === "stay") {
+        return `${mrxLabel} did not move${s.ticket ? ` (forfeited a ${activeMode[s.ticket]?.label || s.ticket} ticket)` : ""}`;
+      }
       return `${mrxLabel} moved (${s.mode === "black" ? "Black" : activeMode[s.mode]?.label || s.mode})`;
     }
     const detId = parseInt(s.actor.slice(1), 10);

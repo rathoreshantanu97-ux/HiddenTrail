@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import * as api from "./supabaseApi.js";
 import * as auth from "./accessControlApi.js";
-import { validMovesFor } from "./gameEngine.js";
 import { computeTurnSchedule, actingWindowSeconds } from "./turnSchedule.js";
 
 // ---------------------------------------------------------------------------
 // useTurnTimer — for multiplayer games with a per-room turn timer set.
 // THREE-PHASE MODEL (mrx -> planning -> acting), replacing the old
 // per-seat sequential walk:
-//   - 'mrx': Mr.X's own turn, unchanged in spirit -- single actor, auto-
-//     random-move fallback on expiry, same as before.
+//   - 'mrx': Mr.X's own turn -- single actor. On expiry (v3.25) he now
+//     STAYS PUT and forfeits one ticket, via force_end_mrx_turn, instead
+//     of being auto-relocated by a random legal move as in v3.24 and
+//     earlier. Same server-side implementation as his voluntary
+//     "Stay Here" action, so the two can't drift apart.
 //   - 'planning': the shared buffer, unchanged in spirit -- nobody may
 //     move yet. On expiry (or when the team signals ready early, see
 //     GameBoard.jsx), any connected client calls begin_acting_phase.
@@ -24,16 +26,15 @@ import { computeTurnSchedule, actingWindowSeconds } from "./turnSchedule.js";
 //     needed anymore (the old seatIndexWithinPlayer/extraSeatSeconds
 //     machinery is gone entirely -- one shared clock for the whole team).
 //
-// IMPORTANT ARCHITECTURAL NOTE (unchanged from before): the server has NO
-// independent knowledge of the map's graph -- for Mr.X's own auto-move
-// fallback, this hook has ANY currently-connected client compute the
-// random move locally and submit it through the EXACT SAME move RPC a
-// normal move would use, so the server's own validation still fully
-// applies. Multiple clients detecting the same expiry simultaneously is
-// safe -- only the first RPC to actually land succeeds, the RPCs used for
-// the planning->acting and acting->mrx transitions (begin_acting_phase,
-// force_end_acting_phase) are BOTH explicitly written as idempotent no-ops
-// if the phase has already moved on by the time they run.
+// IMPORTANT ARCHITECTURAL NOTE: the server has NO independent knowledge
+// of the map's graph. As of v3.25 that no longer matters for ANY of the
+// three timeout paths -- none of them needs to pick a destination
+// anymore (Mr.X stays put; detectives stay put), so all three are plain
+// server-side state transitions. Every one of the three RPCs involved
+// (force_end_mrx_turn, begin_acting_phase, force_end_acting_phase) is
+// explicitly written as an idempotent no-op if the phase has already
+// moved on, so it is safe that EVERY connected client fires them the
+// moment it sees the same expiry.
 // ---------------------------------------------------------------------------
 export function useTurnTimer({
   roomId,
@@ -46,8 +47,10 @@ export function useTurnTimer({
   // (see actingWindowSeconds in turnSchedule.js), since each player works
   // through their own detectives sequentially inside that one window.
   maxDetectivesForAnyOnePlayer = 1,
-  onMrXMove,
-  onPassMrxTurn,
+  // onForceEndMrxTurn (v3.25) -- fired when MR.X's own window expires.
+  // See submitMrxTimeout below: he stays put and forfeits a ticket,
+  // rather than being teleported by a random auto-move as before.
+  onForceEndMrxTurn,
   onBeginActingPhase,
   onForceEndActingPhase,
 }) {
@@ -144,7 +147,7 @@ export function useTurnTimer({
         const remaining = Math.max(0, Math.ceil(schedule.mrxSeconds - elapsed));
         setSecondsRemaining(remaining);
         setPhaseLabel("mrx");
-        tryExpire(remaining, submitRandomMrxMove);
+        tryExpire(remaining, submitMrxTimeout);
         return;
       }
 
@@ -185,25 +188,29 @@ export function useTurnTimer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule, actingTotalSeconds, match?.roundPhase, match?.turnStartedAt, match?.detectivePhaseStartedAt, match?.actingPhaseStartedAt, match?.phase]);
 
-  // submitRandomMrxMove -- unchanged in spirit from before: Mr.X's own
-  // turn still has exactly one actor, so a random-legal-move fallback on
-  // expiry still makes sense the same way it always did.
-  function submitRandomMrxMove() {
-    if (!map || !match) return;
-    // v3.22: filter out detective-occupied stations. The server now
-    // REJECTS such a move outright (see make_mrx_move), so an unfiltered
-    // random pick could land on one, be refused, and leave Mr.X's turn
-    // stuck with the guard already consumed -- i.e. the round would
-    // stall. Same rule the human-facing legal-move ring uses.
-    const occupied = new Set((match.detectives || []).map((d) => d.pos));
-    const moves = validMovesFor(map, match.mrX.pos, match.mrX.tickets, true).filter((m) => !occupied.has(m.to));
-    if (moves.length === 0) {
-      if (onPassMrxTurn) onPassMrxTurn();
-      return;
-    }
-    const pick = moves[Math.floor(Math.random() * moves.length)];
-    const ticketToUse = match.mrX.tickets[pick.mode] > 0 ? pick.mode : "black";
-    onMrXMove(pick.to, pick.mode, ticketToUse);
+  // submitMrxTimeout (v3.25) -- REPLACES the old submitRandomMrxMove.
+  //
+  // Mr.X's timer expiring no longer relocates him to a random legal
+  // station. He now simply STAYS WHERE HE IS, forfeits one ticket of his
+  // cheapest held type, and the round is recorded openly in the travel
+  // log as a non-move. Rationale (an explicit design decision, not a
+  // bug): a random teleport was both arbitrary and silently
+  // indistinguishable from a chosen move, whereas standing still is
+  // exactly what a real fugitive who fails to act does -- and the fact
+  // that he stood still is legitimately informative to his pursuers.
+  //
+  // This calls the SAME server-side implementation as Mr.X's voluntary
+  // "Stay Here" action (mrx_stay_here and force_end_mrx_turn both run
+  // mrx_stay_internal), so the two paths cannot diverge in ticket cost
+  // or logging. It also means the timeout no longer needs any map/graph
+  // knowledge on the client at all -- unlike the old random-move
+  // fallback, which had to compute legal moves locally.
+  //
+  // Any connected client may fire it (Mr.X himself is often the one who
+  // has dropped); it's an idempotent server-side no-op once his turn has
+  // already ended, exactly like the acting-phase timeout handler.
+  function submitMrxTimeout() {
+    if (onForceEndMrxTurn) onForceEndMrxTurn();
   }
 
   function submitBeginActingPhase() {

@@ -97,6 +97,24 @@ const EDGE_MARGIN_OTHER = 0.5;
 // Any mode not in this list (shouldn't happen for a valid map) sorts
 // after everything named here, rather than being dropped.
 const TICKET_DISPLAY_ORDER = ["taxi", "bus", "underground", "black", "double"];
+// STAY_TICKET_ORDER (v3.25) -- the order a forfeited ticket is taken in
+// when a piece stays put: cheapest fare first. Deliberately identical to
+// the ordering the server uses for BOTH ticket penalties (Mr.X's
+// stay/timeout in mrx_stay_internal and the detectives' acting-phase
+// timeout in force_end_acting_phase), so what the confirm popup promises
+// is exactly what the server will take. black/double are excluded on
+// purpose -- they're special powers, not fare.
+const STAY_TICKET_ORDER = ["taxi", "bus", "underground"];
+
+// cheapestHeldTicket -- which ticket type a stay-put action would
+// actually cost right now, or null if the piece holds none of the
+// chargeable types (in which case staying is free, matching the
+// server's "nothing left to deduct" branch).
+export function cheapestHeldTicket(tickets) {
+  if (!tickets) return null;
+  return STAY_TICKET_ORDER.find((m) => (tickets[m] || 0) > 0) || null;
+}
+
 function sortTicketEntries(ticketsObj) {
   return Object.entries(ticketsObj).sort(([a], [b]) => {
     const ai = TICKET_DISPLAY_ORDER.indexOf(a);
@@ -117,6 +135,7 @@ export default function GameBoard({
   onActivateDoubleMove,
   onPassTurn, // (actor) => void -- PASS-AND-PLAY ONLY (single shared device, still fully sequential turnIdx-walking). Multiplayer uses onPassMrxTurn/onPassDetectiveTurn instead (see the 3-phase acting model below).
   onPassMrxTurn, // () => void -- multiplayer only: Mr.X genuinely has zero legal moves
+  onMrxStayHere, // () => void -- multiplayer only (v3.25): Mr.X deliberately stays on his current station. Costs one ticket of his cheapest held type and is logged openly as a non-move round. Never passed in pass-and-play.
   onPassDetectiveTurn, // (detId) => void -- multiplayer only: a specific detective genuinely has zero legal moves (or chooses not to move) during the acting phase
   onBeginActingPhase, // () => void -- multiplayer only: ends the shared planning window early. Now only the TIMEOUT path uses this (see useTurnTimer.js); the in-game control is the unanimous ready vote below.
   onSetPlanningReady, // (ready: boolean) => void -- multiplayer only: tick/un-tick MY "ready to act" vote. The SERVER decides when the vote is unanimous and flips the phase.
@@ -1412,6 +1431,29 @@ export default function GameBoard({
     // handlers, which route around this function entirely via the SVG's
     // own pointer handlers, gated separately on drawMode).
     if (peekedPlayerId) return;
+    // -----------------------------------------------------------------
+    // STAY HERE (v3.25) -- clicking the station YOU ARE ALREADY STANDING
+    // ON, during your own turn, opens the SAME move-confirmation popup a
+    // real destination does, offering "Stay Here" instead of a travel
+    // option. This replaces the old standalone skip/pass button for the
+    // voluntary case: staying put is a move-shaped decision, so it's
+    // made with the same gesture (tap a station -> confirm/cancel) as
+    // every other move, in the same place on screen.
+    //
+    // MULTIPLAYER ONLY, and checked BEFORE the route-explorer branch
+    // below, since your own spotlighted piece's station would otherwise
+    // be swallowed by the highlight toggle. Pass-and-play (myRole ===
+    // null) is deliberately excluded entirely and keeps its own existing
+    // controls, per the standing constraint on that mode.
+    // -----------------------------------------------------------------
+    if (!isPassAndPlay && isMyTurnToAct && !preThinkActive) {
+      const myStation = isMrXTurn ? match.mrX.pos : activeDetective ? activeDetective.pos : null;
+      if (myStation != null && station === myStation) {
+        setPendingMove({ to: station, stay: true, availableModes: [] });
+        setMessage("");
+        return;
+      }
+    }
     // (v3.21: the tap-to-arm branch that used to sit here is gone. During
     // the acting phase there is nothing to select -- your current
     // sub-turn detective is determined automatically, and its origin and
@@ -1535,6 +1577,26 @@ export default function GameBoard({
     // detective in detectives_acted, myCurrentActingDetId automatically
     // advances to my next unacted detective (or null if I'm done).
     onDetectiveMove(detId, to, mode);
+  }
+
+  // commitStay (v3.25) -- confirming the "Stay Here" popup. Two
+  // different server actions behind one identical gesture:
+  //   Mr.X      -> mrx_stay_here: he keeps his station, forfeits one
+  //                ticket of his cheapest held type, and the round is
+  //                recorded in the travel log as an OPEN non-move. Same
+  //                RPC internals as his turn timing out, by design.
+  //   detective -> pass_detective_turn: the existing, unchanged pass.
+  //                Costs nothing (only the acting-phase TIMEOUT charges
+  //                a detective a ticket) and simply advances the player
+  //                to their next unacted detective.
+  function commitStay() {
+    setPendingMove(null);
+    setMessage("");
+    if (isMrXTurn) {
+      if (onMrxStayHere) onMrxStayHere();
+    } else if (activeDetective) {
+      if (onPassDetectiveTurn) onPassDetectiveTurn(activeDetective.id);
+    }
   }
 
   function commitMrXMove(edgeMode, ticketUsed) {
@@ -1732,7 +1794,23 @@ export default function GameBoard({
             </div>
           )}
 
-          {/* Pass Turn moved here (previously sat at the very BOTTOM of
+          {/* NO-LEGAL-MOVES PASS. v3.25 narrowed this to the only two
+              cases that still need a button:
+                - pass-and-play, which is untouched by the new click-your-
+                  own-station "Stay Here" flow entirely (that flow is
+                  multiplayer-only, by standing constraint), and
+                - multiplayer Mr.X with genuinely zero legal moves, which
+                  is a materially DIFFERENT action from staying put: this
+                  pass is free, whereas Stay Here forfeits a ticket. He
+                  shouldn't be charged for a position he can't move out
+                  of, so the free escape hatch stays.
+              Multiplayer DETECTIVES no longer see it at all: a detective
+              with no legal moves is already auto-passed (see the
+              auto-pass effect above), and a detective who simply doesn't
+              want to move now clicks their own station instead -- which
+              is what removed the standalone skip button below.
+
+              Original note, still true: this sat at the very BOTTOM of
               the sidebar, after chat -- the last thing in the whole
               panel) per explicit request: it's a genuinely urgent,
               time-sensitive action (you're stuck and need to act to keep
@@ -1740,7 +1818,7 @@ export default function GameBoard({
               read-only information like the travel log or chat. Grouped
               with the other action controls (2x/Pause/End-Game,
               Takeover, explore-mode) rather than left at the bottom. */}
-          {isMyTurnToAct && !pendingMove && legalTargets.size === 0 && (
+          {isMyTurnToAct && !pendingMove && legalTargets.size === 0 && (isPassAndPlay || isMrXTurn) && (
             <div style={styles.rowCenter}>
               <div style={styles.passTurnNote}>
                 No legal moves available from your current station with your remaining tickets.
@@ -1798,23 +1876,13 @@ export default function GameBoard({
             );
           })()}
 
-          {/* Per-sub-turn pass. During the acting phase a player works
-              through their own detectives one at a time, so "pass" has to
-              be available for EACH of them individually, not only when a
-              detective happens to have zero legal moves (that narrower
-              case is still handled by the Pass Turn button above, which
-              covers Mr.X and pass-and-play too). Passing marks just this
-              detective as acted and advances me to my next one. */}
-          {!isPassAndPlay && iAmDetective && actingActive && activeDetective && !pendingMove && legalTargets.size > 0 && (
-            <div style={styles.rowCenter}>
-              <button
-                style={{ ...styles.primaryBtn, background: "#fff", color: "#111", border: "1.5px solid #ddd" }}
-                onClick={() => onPassDetectiveTurn && onPassDetectiveTurn(activeDetective.id)}
-              >
-                Skip {detectiveName(activeDetective.id)}'s move
-              </button>
-            </div>
-          )}
+          {/* (v3.25) The standalone "Skip <detective>'s move" button that
+              used to live here is GONE. Voluntarily staying put is now
+              expressed the same way every other move is: tap the station
+              the piece is standing on and confirm in the move popup (see
+              the STAY HERE branch in handleStationClick). Same underlying
+              pass_detective_turn RPC, same effect -- just no longer a
+              separate control detached from the board. */}
 
           <div style={styles.allTicketsPanel}>
             <div style={styles.travelLogTitle}>Everyone's tickets</div>
@@ -1920,6 +1988,13 @@ export default function GameBoard({
                   // not just past ones).
                   const belongsToRevealRound = match.revealRounds.includes(moveNum);
                   const isFuture = !entry;
+                  // v3.25: a round Mr.X spent standing still is recorded
+                  // with mode "stay" and is shown as such ON PURPOSE --
+                  // never dressed up as an ordinary ticket move. It gets
+                  // a muted, dashed, greyed cell with a "—" instead of a
+                  // colored ticket letter, so a glance at the log tells
+                  // you which rounds he actually travelled.
+                  const isStay = !!entry && (entry.mode === "stay" || entry.stayed);
                   return (
                     <div
                       key={moveNum}
@@ -1927,10 +2002,15 @@ export default function GameBoard({
                         ...styles.logBoardCell,
                         ...(belongsToRevealRound ? styles.logBoardCellReveal : {}),
                         ...(isFuture ? styles.logBoardCellFuture : {}),
+                        ...(isStay ? styles.logBoardCellStay : {}),
                       }}
                       title={
                         entry
-                          ? `Move ${moveNum} (round ${entry.round}): ${activeMode[entry.mode].label}${belongsToRevealRound ? " — reveal move" : ""}`
+                          ? isStay
+                            ? `Move ${moveNum} (round ${entry.round}): DID NOT MOVE — ${mrxName()} stayed put${
+                                entry.ticket ? ` and forfeited a ${activeMode[entry.ticket]?.label || entry.ticket} ticket` : ""
+                              }${entry.byTimeout ? " (ran out of time)" : ""}${belongsToRevealRound ? " — reveal move" : ""}`
+                            : `Move ${moveNum} (round ${entry.round}): ${activeMode[entry.mode]?.label || entry.mode}${belongsToRevealRound ? " — reveal move" : ""}`
                           : `Move ${moveNum}${belongsToRevealRound ? " — reveal move (upcoming)" : ""}: not yet played`
                       }
                     >
@@ -1938,11 +2018,13 @@ export default function GameBoard({
                         {moveNum}
                         {entry ? ` · R${entry.round}` : ""}
                       </div>
-                      {entry ? (
+                      {entry && isStay ? (
+                        <div style={styles.logBoardStayTag}>—</div>
+                      ) : entry ? (
                         <div
                           style={{
                             ...styles.logBoardModeTag,
-                            background: activeMode[entry.mode].color,
+                            background: activeMode[entry.mode]?.color || "#ccc",
                             color: entry.mode === "black" ? "#fff" : "#1a1a1a",
                           }}
                         >
@@ -2769,6 +2851,37 @@ export default function GameBoard({
             {isMyTurnToAct && pendingMove && (() => {
               const [sx, sy] = map.stations[pendingMove.to];
               const screenPos = svgPointToScreenPoint(sx, sy);
+              // STAY HERE (v3.25) -- same popup component, same
+              // position, same confirm/cancel gesture as a real move;
+              // only the title and the single option differ. The cost
+              // line is computed from the piece's CURRENT tickets with
+              // the same cheapest-first rule the server applies, so it
+              // never promises something different from what's taken.
+              if (pendingMove.stay) {
+                const stayer = isMrXTurn ? match.mrX : activeDetective;
+                if (!stayer) return null;
+                const costMode = isMrXTurn ? cheapestHeldTicket(stayer.tickets) : null;
+                const costLabel = isMrXTurn
+                  ? costMode
+                    ? `uses 1 ${activeMode[costMode].label} ticket`
+                    : "no tickets left to forfeit"
+                  : "no ticket cost";
+                return (
+                  <MovePopup
+                    x={screenPos.x}
+                    y={screenPos.y}
+                    fallback={screenPos.fallback}
+                    openDirection={screenPos.openDirection}
+                    title={
+                      isMrXTurn
+                        ? `Stay at ${stationLabel(pendingMove.to)} — ${costLabel}. The travel log will openly show this round as a non-move.`
+                        : `${detectiveName(activeDetective.id)} stays at ${stationLabel(pendingMove.to)} — ${costLabel}.`
+                    }
+                    options={[{ key: "stay", label: "Stay Here", accent: "#5a5a5a", onClick: commitStay }]}
+                    onClose={() => setPendingMove(null)}
+                  />
+                );
+              }
               if (isMrXTurn) {
                 // Build one option per genuinely available mode to this
                 // destination (fixes the old single-edge bug: previously
@@ -3309,6 +3422,25 @@ export const styles = {
   },
   logBoardCellFuture: {
     opacity: 0.55,
+  },
+  // STAY CELL (v3.25) -- a round Mr.X did not move. Reads as a
+  // deliberate gap in the trail rather than as a travelled leg: no
+  // ticket color at all, a dashed grey border and a flat grey fill, so
+  // it's distinguishable from both a played move and an unplayed future
+  // slot at a glance, without needing the tooltip.
+  logBoardCellStay: {
+    border: "1.5px dashed #b3b3b3",
+    background: "#efefef",
+  },
+  logBoardStayTag: {
+    fontSize: 11,
+    fontWeight: 800,
+    borderRadius: 4,
+    marginTop: 2,
+    padding: "1px 0",
+    color: "#6b6b6b",
+    background: "#e2e2e2",
+    letterSpacing: 1,
   },
   logBoardRoundNum: { fontSize: 7, color: "#8a8375", fontWeight: 700, lineHeight: 1.1 },
   logBoardModeTag: {

@@ -49,12 +49,24 @@ export default function EndedScreen({ map, match, mrxName, detectiveName, onNewG
                   key={i}
                   style={{
                     ...styles.travelLogChip,
-                    background: entry.mode ? activeMode[entry.mode].color : "#ddd",
-                    color: entry.mode === "black" ? "#fff" : "#1a1a1a",
+                    // v3.25: "stay" rounds (Mr.X stood still) get the
+                    // same muted grey treatment as the live travel log,
+                    // never a ticket color -- the revealed route should
+                    // make the standing-still rounds obvious too.
+                    background: entry.mode === "stay" ? "#e2e2e2" : entry.mode ? activeMode[entry.mode].color : "#ddd",
+                    color: entry.mode === "black" ? "#fff" : entry.mode === "stay" ? "#6b6b6b" : "#1a1a1a",
+                    ...(entry.mode === "stay" ? { border: "1.5px dashed #b3b3b3" } : {}),
                   }}
-                  title={entry.mode ? `Round ${entry.round}: ${activeMode[entry.mode].label}` : "Start"}
+                  title={
+                    entry.mode === "stay"
+                      ? `Round ${entry.round}: did not move${entry.ticket ? ` (forfeited a ${activeMode[entry.ticket]?.label || entry.ticket} ticket)` : ""}`
+                      : entry.mode
+                        ? `Round ${entry.round}: ${activeMode[entry.mode]?.label || entry.mode}`
+                        : "Start"
+                  }
                 >
                   {entry.round === 0 ? "Start" : entry.round}: {map.names ? map.names[entry.pos] : `#${entry.pos}`}
+                  {entry.mode === "stay" ? " (stayed)" : ""}
                 </span>
               ))}
             </div>

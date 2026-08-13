@@ -1188,8 +1188,8 @@ export default function App({ account, onLogout }) {
         // v3.25: Mr.X's voluntary "Stay Here", taken by clicking his own
         // station and confirming in the normal move popup. Multiplayer
         // only -- pass-and-play never receives this prop.
-        onMrxStayHere={() => supabaseStore.mrxStayHere()}
-        onPassDetectiveTurn={(detId) => supabaseStore.passDetectiveTurn(detId)}
+        onMrxStayHere={(ticketMode) => supabaseStore.mrxStayHere(ticketMode ?? null)}
+        onPassDetectiveTurn={(detId, ticketMode) => supabaseStore.passDetectiveTurn(detId, ticketMode ?? null)}
         onBeginActingPhase={() => supabaseStore.beginActingPhase()}
         onSetPlanningReady={(ready) => supabaseStore.setPlanningReady(ready)}
         // Detective-controlling players currently online, per Presence.

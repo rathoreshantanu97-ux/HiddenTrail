@@ -84,8 +84,11 @@ export function formatLogEntry(entry, theme) {
     // to stay on his current station for a whole round. Stated plainly
     // and openly, by design: that he didn't move is information the
     // detectives are meant to have.
+    // v3.26: payload.byTimeout is deliberately NOT rendered -- a stay
+    // reads the same whether it was chosen or forced. (It stays in the
+    // payload for audit purposes only.)
     case "mrx_stayed":
-      return `${mrxName()} did not move this round${payload.byTimeout ? " (ran out of time)" : ""}${
+      return `${mrxName()} did not move this round${
         payload.ticket ? ` \u2014 forfeited a ${modeLabel(payload.ticket)} ticket` : " \u2014 no tickets left to forfeit"
       }${payload.revealedAt != null ? ` \u2014 REVEALED at station ${payload.revealedAt}` : ""}.`;
     case "mrx_walked_into_detective":
@@ -94,6 +97,17 @@ export function formatLogEntry(entry, theme) {
       return `${mrxName()} played a 2x (double move) card.`;
     case "turn_passed": {
       const label = payload.actor === "mrx" ? mrxName() : detectiveName(parseInt(String(payload.actor).slice(1), 10));
+      // v3.26 (multiplayer detectives): staying put costs a ticket, and
+      // the entry says only THAT it happened -- never whether the player
+      // chose it, was auto-passed for having no legal move, or ran the
+      // clock out. payload.stayed marks the new-style entries; pass-and-
+      // play's own applyPassTurn still writes the old bare payload and
+      // keeps its original wording.
+      if (payload.stayed) {
+        return `${label} did not move this round${
+          payload.ticket ? ` — forfeited a ${modeLabel(payload.ticket)} ticket` : " — no tickets left to forfeit"
+        }.`;
+      }
       return `${label} had no legal moves and passed their turn.`;
     }
     case "round_limit_reached":

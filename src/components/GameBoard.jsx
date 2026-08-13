@@ -1579,23 +1579,24 @@ export default function GameBoard({
     onDetectiveMove(detId, to, mode);
   }
 
-  // commitStay (v3.25) -- confirming the "Stay Here" popup. Two
-  // different server actions behind one identical gesture:
-  //   Mr.X      -> mrx_stay_here: he keeps his station, forfeits one
-  //                ticket of his cheapest held type, and the round is
-  //                recorded in the travel log as an OPEN non-move. Same
-  //                RPC internals as his turn timing out, by design.
-  //   detective -> pass_detective_turn: the existing, unchanged pass.
-  //                Costs nothing (only the acting-phase TIMEOUT charges
-  //                a detective a ticket) and simply advances the player
-  //                to their next unacted detective.
-  function commitStay() {
+  // commitStay (v3.25; symmetric + ticket choice in v3.26) -- confirming
+  // the "Stay Here" popup. Two server actions behind one identical
+  // gesture, and as of v3.26 they cost the same thing:
+  //   Mr.X      -> mrx_stay_here
+  //   detective -> pass_detective_turn
+  // Both keep the piece where it is and forfeit exactly one ticket. Since
+  // this is a DELIBERATE stay, the player names which chargeable type
+  // (taxi/bus/underground) to give up -- ticketMode -- picked from the
+  // same popup that picks a ticket for an ordinary multi-mode move. A
+  // timeout instead passes nothing and the server takes the cheapest held
+  // type; a piece holding none of those types pays nothing either way.
+  function commitStay(ticketMode) {
     setPendingMove(null);
     setMessage("");
     if (isMrXTurn) {
-      if (onMrxStayHere) onMrxStayHere();
+      if (onMrxStayHere) onMrxStayHere(ticketMode ?? null);
     } else if (activeDetective) {
-      if (onPassDetectiveTurn) onPassDetectiveTurn(activeDetective.id);
+      if (onPassDetectiveTurn) onPassDetectiveTurn(activeDetective.id, ticketMode ?? null);
     }
   }
 
@@ -1994,6 +1995,13 @@ export default function GameBoard({
                   // a muted, dashed, greyed cell with a "—" instead of a
                   // colored ticket letter, so a glance at the log tells
                   // you which rounds he actually travelled.
+                  //
+                  // v3.26: what the log must NOT say is WHY he stood
+                  // still. A deliberate stay and a timed-out one look
+                  // identical here -- same cell, same wording -- even
+                  // though entry.byTimeout still exists in the data. An
+                  // observer of a trail can't tell stillness from
+                  // hesitation, and neither can this log.
                   const isStay = !!entry && (entry.mode === "stay" || entry.stayed);
                   return (
                     <div
@@ -2007,9 +2015,9 @@ export default function GameBoard({
                       title={
                         entry
                           ? isStay
-                            ? `Move ${moveNum} (round ${entry.round}): DID NOT MOVE — ${mrxName()} stayed put${
-                                entry.ticket ? ` and forfeited a ${activeMode[entry.ticket]?.label || entry.ticket} ticket` : ""
-                              }${entry.byTimeout ? " (ran out of time)" : ""}${belongsToRevealRound ? " — reveal move" : ""}`
+                            ? `Move ${moveNum} (round ${entry.round}): did not move this round${
+                                entry.ticket ? ` — forfeited a ${activeMode[entry.ticket]?.label || entry.ticket} ticket` : ""
+                              }${belongsToRevealRound ? " — reveal move" : ""}`
                             : `Move ${moveNum} (round ${entry.round}): ${activeMode[entry.mode]?.label || entry.mode}${belongsToRevealRound ? " — reveal move" : ""}`
                           : `Move ${moveNum}${belongsToRevealRound ? " — reveal move (upcoming)" : ""}: not yet played`
                       }
@@ -2851,21 +2859,30 @@ export default function GameBoard({
             {isMyTurnToAct && pendingMove && (() => {
               const [sx, sy] = map.stations[pendingMove.to];
               const screenPos = svgPointToScreenPoint(sx, sy);
-              // STAY HERE (v3.25) -- same popup component, same
-              // position, same confirm/cancel gesture as a real move;
-              // only the title and the single option differ. The cost
-              // line is computed from the piece's CURRENT tickets with
-              // the same cheapest-first rule the server applies, so it
-              // never promises something different from what's taken.
+              // STAY HERE (v3.25; ticket choice v3.26) -- same popup
+              // component, same position, same confirm/cancel gesture as
+              // a real move. Staying costs one ticket for BOTH roles now,
+              // and because this is a deliberate stay the player picks
+              // WHICH chargeable type to give up -- one option per type
+              // they actually hold, exactly like the ticket picker for an
+              // ordinary move that several modes could pay for. If they
+              // hold none of taxi/bus/underground there's nothing to take
+              // and a single free "Stay Here" option is offered instead,
+              // matching the server's "nothing left to deduct" branch.
               if (pendingMove.stay) {
                 const stayer = isMrXTurn ? match.mrX : activeDetective;
                 if (!stayer) return null;
-                const costMode = isMrXTurn ? cheapestHeldTicket(stayer.tickets) : null;
-                const costLabel = isMrXTurn
-                  ? costMode
-                    ? `uses 1 ${activeMode[costMode].label} ticket`
-                    : "no tickets left to forfeit"
-                  : "no ticket cost";
+                const payableModes = STAY_TICKET_ORDER.filter((m) => (stayer.tickets?.[m] || 0) > 0);
+                const who = isMrXTurn ? mrxName() : detectiveName(activeDetective.id);
+                const stayOptions =
+                  payableModes.length > 0
+                    ? payableModes.map((mode) => ({
+                        key: `stay-${mode}`,
+                        label: `Stay — forfeit a ${activeMode[mode].label} ticket`,
+                        accent: "#5a5a5a",
+                        onClick: () => commitStay(mode),
+                      }))
+                    : [{ key: "stay", label: "Stay Here", accent: "#5a5a5a", onClick: () => commitStay(null) }];
                 return (
                   <MovePopup
                     x={screenPos.x}
@@ -2873,11 +2890,11 @@ export default function GameBoard({
                     fallback={screenPos.fallback}
                     openDirection={screenPos.openDirection}
                     title={
-                      isMrXTurn
-                        ? `Stay at ${stationLabel(pendingMove.to)} — ${costLabel}. The travel log will openly show this round as a non-move.`
-                        : `${detectiveName(activeDetective.id)} stays at ${stationLabel(pendingMove.to)} — ${costLabel}.`
+                      payableModes.length > 0
+                        ? `${who} stays at ${stationLabel(pendingMove.to)} — choose a ticket to forfeit:`
+                        : `${who} stays at ${stationLabel(pendingMove.to)} — no tickets left to forfeit.`
                     }
-                    options={[{ key: "stay", label: "Stay Here", accent: "#5a5a5a", onClick: commitStay }]}
+                    options={stayOptions}
                     onClose={() => setPendingMove(null)}
                   />
                 );

@@ -181,10 +181,12 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
   // Errors ARE surfaced here (unlike the timeout counterpart below):
   // this is a deliberate click, so a failure is something the player
   // needs to see rather than a benign race.
-  const mrxStayHere = useCallback(async () => {
+  // v3.26: ticketMode is the type the player picked to forfeit; null =>
+  // let the server take the cheapest held one.
+  const mrxStayHere = useCallback(async (ticketMode = null) => {
     if (!roomId || !myPlayerId) return;
     try {
-      await api.mrxStayHere({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
+      await api.mrxStayHere({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, ticketMode });
       await refreshMatch();
     } catch (e) {
       setError(e.message);
@@ -208,12 +210,15 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
 
   // passDetectiveTurn -- a detective marks themselves done for this
   // round's acting phase without moving (zero legal moves, or simply
-  // choosing not to act).
+  // choosing not to act). v3.26: this costs a ticket now, just like
+  // Mr.X's stay -- ticketMode is the player's chosen type when they used
+  // the Stay Here popup, or null for the automatic no-legal-moves pass
+  // (cheapest held type, server-side).
   const passDetectiveTurn = useCallback(
-    async (detId) => {
+    async (detId, ticketMode = null) => {
       if (!roomId || !myPlayerId) return;
       try {
-        await api.passDetectiveTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, detId });
+        await api.passDetectiveTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, detId, ticketMode });
         await refreshMatch();
       } catch (e) {
         setError(e.message);

@@ -333,17 +333,19 @@ export async function passMrxTurn({ roomId, callerPlayerId, callerSecret }) {
   });
 }
 
-// mrxStayHere (v3.25) -- Mr.X deliberately stays on his current station
-// for this round. Costs one ticket of his cheapest held type
-// (taxi -> bus -> underground; nothing at all if he holds none of those)
-// and is recorded OPENLY in the travel log as a non-move round, by
-// design -- a fugitive who doesn't move is information the trackers are
-// entitled to. Server-side authority: mrx_stay_here -> mrx_stay_internal.
-export async function mrxStayHere({ roomId, callerPlayerId, callerSecret }) {
+// mrxStayHere (v3.25, ticket choice added in v3.26) -- Mr.X deliberately
+// stays on his current station for this round. Costs one ticket:
+// ticketMode names WHICH chargeable type (taxi/bus/underground) he gives
+// up, since this is a deliberate choice; null falls back to cheapest-held
+// and nothing at all is taken if he holds none of those. Recorded in the
+// travel log as a non-move round, WITHOUT distinguishing it from a
+// timed-out one. Server authority: mrx_stay_here -> mrx_stay_internal.
+export async function mrxStayHere({ roomId, callerPlayerId, callerSecret, ticketMode = null }) {
   await callRpc("mrx_stay_here", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
     p_caller_secret: callerSecret,
+    p_ticket_mode: ticketMode,
   });
 }
 
@@ -363,12 +365,19 @@ export async function forceEndMrxTurn({ roomId, callerPlayerId, callerSecret }) 
 // passDetectiveTurn -- a detective with genuinely zero legal moves (or
 // who simply doesn't want to move) marks themselves done for this
 // round's acting phase, independent of everyone else.
-export async function passDetectiveTurn({ roomId, callerPlayerId, callerSecret, detId }) {
+//
+// v3.26: this is no longer free. Staying put costs a ticket for
+// detectives exactly as it does for Mr.X. ticketMode names the chargeable
+// type (taxi/bus/underground) the player picked in the Stay Here popup;
+// null (the auto-pass-on-no-legal-moves path) means cheapest-held, and a
+// detective holding none of those types still pays nothing.
+export async function passDetectiveTurn({ roomId, callerPlayerId, callerSecret, detId, ticketMode = null }) {
   await callRpc("pass_detective_turn", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
     p_caller_secret: callerSecret,
     p_det_id: detId,
+    p_ticket_mode: ticketMode,
   });
 }
 

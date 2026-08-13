@@ -6,6 +6,10 @@ import MovePopup from "./MovePopup.jsx";
 import { useMoveAnimation } from "../lib/useMoveAnimation.js";
 import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 import { MODE_DEFAULT, modeChipLetter } from "../maps/mapSchema.js";
+// bonusForTally -- the client-side mirror of the server's
+// stay_tally_bonuses() rule, kept in matchStateAdapter.js so exactly one
+// copy of it exists on this side of the wire (v3.28).
+import { bonusForTally } from "../lib/matchStateAdapter.js";
 import {
   currentActor,
   validMovesFor,
@@ -169,6 +173,12 @@ export default function GameBoard({
   // only advances when they actually move or pass. See the acting-phase
   // block further down.)
   roomCode = null, // multiplayer only -- shown persistently so a disconnected player can be told the code to rejoin
+  // v3.28 -- {x, y}: the room's two INDEPENDENT stay-reward thresholds,
+  // already resolved (defaults applied) by resolveStayThresholds in
+  // matchStateAdapter.js. Multiplayer only; null in pass-and-play, which
+  // has no stay-reward mechanic at all and is left completely untouched.
+  // Nothing below assumes any relationship between x and y.
+  stayThresholds = null,
 }) {
   const { positionStyle: highlightPositionStyle, destinationStyle: highlightDestinationStyle } = useHighlightStyles(roomId); // each independently 'ring' | 'rotating' | 'blink' | 'static' | 'none'
   const { getProgress } = useMoveAnimation(match.detectives);
@@ -222,6 +232,15 @@ export default function GameBoard({
   // once. Pass-and-play keeps its original seeding (one device, one
   // player, no "teammate" concept to declutter for).
   const [toggledIds, setToggledIds] = useState(() => new Set());
+  // v3.28 -- PLANNING-PHASE VIEW FILTER. Purely a PERSONAL, client-side
+  // preference: it narrows which detectives get a default origin
+  // indicator on MY board during the planning phase, and nothing else.
+  // It is never broadcast, never sent to the server, and has no effect on
+  // anyone else's board or on what is legal. Default is deliberately
+  // "all" -- the whole point of the planning phase is seeing the team's
+  // full position, so narrowing it is an opt-in decluttering choice, not
+  // the starting state.
+  const [planningOriginScope, setPlanningOriginScope] = useState("all"); // "all" | "mine"
   const seededOwnRef = React.useRef(false);
   const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
   const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
@@ -1162,6 +1181,23 @@ export default function GameBoard({
   // note) -- but it doesn't need to: a pass is unconditionally legal for
   // a detective that hasn't acted yet, so nothing here can produce a
   // state the server would refuse, and a client can never get stuck.
+  //
+  // v3.28 -- ZERO TICKETS OF EVERY TYPE. A piece holding literally no
+  // chargeable ticket can neither move (every edge costs a fare) nor pay
+  // to stay, so there is no action of any kind available to it. This is
+  // NOT a second, competing auto-pass mechanism: for a DETECTIVE it is
+  // already a strict subset of "no legal moves" (validMovesFor is
+  // ticket-aware, so zero tickets always yields an empty legalTargets),
+  // and it therefore flows through the exact same autoPassKey and the
+  // same fired-once ref below -- there is nothing that can double-fire.
+  // It is spelled out separately only because it also has to cover the
+  // one case the detective path never did: MR.X, who up to now was shown
+  // a manual "Pass Turn" button instead. His free-pass button is
+  // deliberately LEFT IN PLACE for the different case of "boxed in but
+  // still holding tickets" -- that is a real decision he may want a
+  // moment over, and auto-firing it would be a behavior regression.
+  // Nothing is deducted on either path: there is nothing to deduct.
+  const hasNoChargeableTicket = (tickets) => !tickets || STAY_TICKET_ORDER.every((m) => (tickets[m] || 0) <= 0);
   const noMoveAutoPassedRef = React.useRef(null);
   const autoPassKey =
     !isPassAndPlay && iAmDetective && actingActive && activeDetective && legalTargets.size === 0
@@ -1175,6 +1211,24 @@ export default function GameBoard({
     if (onPassDetectiveTurnRef.current) onPassDetectiveTurnRef.current(detId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPassKey]);
+
+  // Mr.X's own zero-tickets auto-pass. Separate ref and key from the
+  // detective one above because the two can never be true for the same
+  // client at the same time (a client is one role), so they can never
+  // race each other; keeping them apart just makes each one's "fire
+  // exactly once per round" bookkeeping independent and obvious.
+  const mrxAutoPassedRef = React.useRef(null);
+  const mrxZeroTicketAutoPassKey =
+    !isPassAndPlay && iAmMrX && isMrXTurn && isMyTurnToAct && !pendingMove && hasNoChargeableTicket(match.mrX?.tickets)
+      ? `mrx|${match.round}|${match.mrX?.travelLog?.length ?? 0}`
+      : null;
+  useEffect(() => {
+    if (!mrxZeroTicketAutoPassKey) return;
+    if (mrxAutoPassedRef.current === mrxZeroTicketAutoPassKey) return;
+    mrxAutoPassedRef.current = mrxZeroTicketAutoPassKey;
+    if (onPassMrxTurn) onPassMrxTurn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mrxZeroTicketAutoPassKey]);
 
   // ---------------------------------------------------------------------
   // ROUTE EXPLORER v2 -- redesigned around "click a piece on the map to
@@ -1292,9 +1346,16 @@ export default function GameBoard({
   // Multiplayer only, and only for a detective-perspective viewer.
   // Pass-and-play never enters this branch (isPassAndPlay short-circuits),
   // so its behavior is completely untouched.
+  //
+  // v3.28: narrowed by the personal planningOriginScope filter above.
+  // "mine" restricts it to the detectives THIS client actually controls
+  // -- which for a spectator is nobody, so the filter is offered only to
+  // an actual detective player and a spectator always sees "all".
   const planningOriginIds =
     !isPassAndPlay && roundPhaseMp === "planning" && (iAmDetective || isSpectator)
-      ? new Set(match.detectives.map((d) => d.id))
+      ? new Set(
+          (iAmDetective && planningOriginScope === "mine" ? myOwnDetectives : match.detectives).map((d) => d.id)
+        )
       : new Set();
 
   // reachableByDetectiveId: stationId -> [{detId, color}] for every
@@ -1511,6 +1572,58 @@ export default function GameBoard({
 
   const isWesteros = map.id === "westeros";
 
+  // ---------------------------------------------------------------------
+  // STAY-TALLY WIDGET + BONUS FLASH (v3.28, items 3 and 4)
+  //
+  // Both are shown to EVERY multiplayer viewer -- detectives, Mr.X and
+  // spectators alike. This is deliberate and is NOT the same class of
+  // information as the detective-only ready-vote / sub-turn / pending-
+  // players UI: those reveal what a specific detective player is doing
+  // right now, whereas this is a public game-mechanic counter and a
+  // public game-mechanic event. Mr.X obviously has to know what he
+  // earned, and the detectives have to be able to see the cost of
+  // standing still -- that visible pressure IS the mechanic.
+  //
+  // Everything is derived from the room's configured X/Y rather than
+  // assumed, so a room set to X=2, Y=7 shows "2 stays to a Black
+  // ticket", then at 12 correctly shows "2 stays to a 2x card" (14 being
+  // the first tally that is a multiple of both). No ratio is implied
+  // anywhere.
+  const stayTally = !isPassAndPlay ? (match.detectiveStayTally ?? 0) : 0;
+  const stayNextBonus = (() => {
+    if (isPassAndPlay || !stayThresholds) return null;
+    const { x, y } = stayThresholds;
+    if (!(x >= 1)) return null;
+    for (let t = stayTally + 1; t <= stayTally + 2 * x * y + x; t++) {
+      const type = bonusForTally(t, x, y);
+      if (type) return { at: t, type, staysAway: t - stayTally };
+    }
+    return null;
+  })();
+
+  // The flash itself. lastStayBonus.seq is the tally value at the moment
+  // of the grant, which only ever increases, so comparing it against the
+  // last one we showed is enough to tell a genuinely NEW award from the
+  // same one re-rendering. Auto-clears after a few seconds ("brief"),
+  // and is additionally bounded to the round it happened in, so a client
+  // that joins or refreshes mid-game is never shown a stale celebration
+  // from several rounds ago as if it just occurred.
+  const lastStayBonus = !isPassAndPlay ? match.lastStayBonus : null;
+  const [flashedBonusSeq, setFlashedBonusSeq] = useState(null);
+  const [bonusFlash, setBonusFlash] = useState(null);
+  useEffect(() => {
+    if (!lastStayBonus || lastStayBonus.seq == null) return;
+    if (lastStayBonus.round !== match.round) return;
+    if (flashedBonusSeq === lastStayBonus.seq) return;
+    setFlashedBonusSeq(lastStayBonus.seq);
+    setBonusFlash(lastStayBonus);
+    const t = setTimeout(() => setBonusFlash(null), 9000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastStayBonus?.seq, lastStayBonus?.round, match.round]);
+
+  const bonusTypeLabel = (t) => (t === "double" ? "2x (double move) card" : "Black ticket");
+
   return (
     <div style={styles.pagePlaying}>
       <div style={styles.playingLayoutSidebar}>
@@ -1533,6 +1646,67 @@ export default function GameBoard({
               ))}
             </div>
           </div>
+
+          {/* Keyframes for the bonus flash. Declared here, next to its
+              only consumer, rather than in a global stylesheet -- this is
+              the only animated HTML element in the whole board (every
+              other animation on screen is SVG, handled inside
+              HighlightRing), so a global rule would be one more
+              action-at-a-distance for no benefit. */}
+          <style>{`
+            @keyframes htStayBonusFlash {
+              0%, 100% { background: #fff5d6; border-color: #e0b436; }
+              50%      { background: #ffe9a8; border-color: #b8860b; }
+            }
+          `}</style>
+
+          {/* BONUS FLASH (v3.28 item 4). Visible to detectives, Mr.X and
+              spectators -- see the long note above the state that drives
+              it for why this is deliberately NOT gated the way the
+              detective-only ready-vote UI is. */}
+          {bonusFlash && (
+            <div style={styles.stayBonusFlash} role="status">
+              🎟️ {mrxName()} gained a {bonusTypeLabel(bonusFlash.type)} from the team's stays
+              {typeof bonusFlash.tally === "number" ? ` (stay #${bonusFlash.tally})` : ""}.
+            </div>
+          )}
+
+          {/* STAY-TALLY WIDGET (v3.28 item 3). Compact, and slotted into
+              the EXISTING sidebar structure on purpose -- the full
+              layout reorganization is explicitly a separate piece of
+              work, so this does not move anything that was already
+              here. Same audience as the flash above. */}
+          {!isPassAndPlay && stayThresholds && (
+            <div style={styles.stayTallyPanel}>
+              <div style={styles.stayTallyHead}>
+                <span style={styles.stayTallyLabel}>Team stays</span>
+                <span style={styles.stayTallyCount}>{stayTally}</span>
+              </div>
+              {stayNextBonus ? (
+                <>
+                  <div style={styles.stayTallyNext}>
+                    {stayNextBonus.staysAway} more {stayNextBonus.staysAway === 1 ? "stay" : "stays"} → {mrxName()} gets a{" "}
+                    <strong>{bonusTypeLabel(stayNextBonus.type)}</strong>
+                  </div>
+                  {/* Progress toward the NEXT award specifically, not
+                      toward some fixed X -- with independent X and Y the
+                      gap between consecutive awards is not constant, so
+                      the bar is measured against this award's own gap. */}
+                  <div style={styles.stayTallyBarOuter}>
+                    <div
+                      style={{
+                        ...styles.stayTallyBarInner,
+                        width: `${Math.max(4, Math.round(((stayThresholds.x - stayNextBonus.staysAway) / stayThresholds.x) * 100))}%`,
+                        background: stayNextBonus.type === "double" ? "#8e44ad" : "#1a1a1a",
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div style={styles.stayTallyNext}>No further rewards configured.</div>
+              )}
+            </div>
+          )}
 
           {(isMrXTurn && isMyTurnToAct && !pendingMove) || extraHeaderContent ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
@@ -1589,6 +1763,39 @@ export default function GameBoard({
               on/off). This short hint replaces the old control row, so
               the mechanic is still discoverable without cluttering the
               sidebar with buttons. */}
+          {/* PLANNING-PHASE VIEW FILTER (v3.28 item 5). Sits directly
+              with the other highlight controls, since that is exactly
+              what it is. Purely personal and purely client-side -- see
+              planningOriginScope's declaration. Offered only to a
+              detective player, only during the planning phase (the only
+              time default origins are drawn at all), and only when there
+              IS someone else to filter out; a solo-seat player would just
+              get a control with no observable effect. */}
+          {!isPassAndPlay &&
+            iAmDetective &&
+            roundPhaseMp === "planning" &&
+            match.detectives.some((d) => !myOwnDetectives.some((md) => md.id === d.id)) && (
+              <div style={styles.viewFilterRow}>
+                <span style={styles.viewFilterLabel}>Show positions for:</span>
+                {[
+                  { key: "all", label: "All detectives" },
+                  { key: "mine", label: "My detectives" },
+                ].map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    style={{
+                      ...styles.viewFilterBtn,
+                      ...(planningOriginScope === opt.key ? styles.viewFilterBtnActive : {}),
+                    }}
+                    onClick={() => setPlanningOriginScope(opt.key)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
           {iAmDetective && preThinkActive && routeExplorerEnabled && match.detectives.some((d) => !myOwnDetectives.some((md) => md.id === d.id)) && (
             <div style={styles.exploreHint}>💡 Click any teammate's piece on the map to see their reachable stations too.</div>
           )}
@@ -2505,6 +2712,45 @@ export default function GameBoard({
                         <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.6s" repeatCount="indefinite" />
                       </circle>
                     )}
+                    {/* v3.28 -- THE ORIGIN STATION IS ITSELF A DESTINATION.
+                        Since v3.25, clicking the station your own active
+                        piece is standing on is a real, ticket-costing
+                        action ("Stay Here"), which makes that station a
+                        legitimate target of this turn -- but it is not
+                        in legalTargets (validMovesFor only ever returns
+                        stations you TRAVEL to), so it never got the
+                        destination treatment and read as "not a place
+                        you can choose."
+
+                        It now renders BOTH indicators, STACKED, not one
+                        instead of the other: the position/origin ring
+                        below still says "this is where the piece is,"
+                        and this destination ring says "and it is one of
+                        the things you may pick." Drawn at a different
+                        radius from the position ring so the two remain
+                        individually legible whatever styles the room has
+                        configured, and skipped entirely when the
+                        destination style is "none" (an explicit admin
+                        choice to have no destination indicator at all,
+                        which this must not quietly override).
+
+                        Multiplayer only -- pass-and-play never enters the
+                        click-your-own-station stay flow at all, so
+                        advertising it there would be a lie. */}
+                    {!isPassAndPlay &&
+                      isMyTurnToAct &&
+                      (isCurrentTurnStation || isMrXOwnTurnIndicator) &&
+                      highlightDestinationStyle !== "none" && (
+                        <HighlightRing
+                          x={x}
+                          y={y}
+                          radius={nodeR + 0.7}
+                          color={isMrXOwnTurnIndicator ? "#1a1a1a" : activeDetective.color}
+                          strokeWidth={0.25}
+                          dashed
+                          style={highlightDestinationStyle}
+                        />
+                      )}
                     {isCurrentTurnStation && highlightPositionStyle !== "blink" && (
                       <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={activeDetective.color} strokeWidth={0.4} style={highlightPositionStyle} />
                     )}
@@ -2841,14 +3087,46 @@ export default function GameBoard({
                 // a type the UI never mentioned.
                 const payableModes = connectedHeld.length > 0 ? connectedHeld : heldModes;
                 const who = isMrXTurn ? mrxName() : detectiveName(activeDetective.id);
-                const stayOptions =
-                  payableModes.length > 0
-                    ? payableModes.map((mode) => ({
-                        key: `stay-${mode}`,
-                        label: `Stay — forfeit a ${activeMode[mode].label} ticket`,
-                        accent: "#5a5a5a",
-                        onClick: () => commitStay(mode),
-                      }))
+                // v3.28 -- BLACK TICKET AS STAY FARE, MR.X ONLY.
+                //
+                // Black is a WILDCARD, so unlike taxi/bus/underground it
+                // is deliberately NOT filtered by which modes actually
+                // connect to this station. That restriction exists
+                // because a fare you could not have travelled on is not a
+                // fare -- and a black ticket is not a mode-specific fare
+                // at all, which is exactly what makes it a wildcard
+                // everywhere else in the game too.
+                //
+                // Offered ONLY here, on the VOLUNTARY stay path. A
+                // timeout stay never names a ticket type, and the
+                // server's cheapest-connected-normal fallback never picks
+                // black, so a timeout can never silently burn one -- see
+                // mrx_stay_internal. Detectives never see this option
+                // because they never hold black tickets in the first
+                // place; the isMrXTurn guard makes that explicit rather
+                // than relying on the ticket count happening to be zero.
+                const canPayWithBlack = isMrXTurn && (stayer.tickets?.black || 0) > 0;
+                const stayOptions = [
+                  ...payableModes.map((mode) => ({
+                    key: `stay-${mode}`,
+                    label: `Stay — forfeit a ${activeMode[mode].label} ticket`,
+                    accent: "#5a5a5a",
+                    onClick: () => commitStay(mode),
+                  })),
+                  ...(canPayWithBlack
+                    ? [
+                        {
+                          key: "stay-black",
+                          label: `Stay — forfeit a Black ticket (${stayer.tickets.black})`,
+                          accent: "#1a1a1a",
+                          onClick: () => commitStay("black"),
+                        },
+                      ]
+                    : []),
+                ];
+                const stayOptionsFinal =
+                  stayOptions.length > 0
+                    ? stayOptions
                     : [{ key: "stay", label: "Stay Here", accent: "#5a5a5a", onClick: () => commitStay(null) }];
                 return (
                   <MovePopup
@@ -2857,11 +3135,11 @@ export default function GameBoard({
                     fallback={screenPos.fallback}
                     openDirection={screenPos.openDirection}
                     title={
-                      payableModes.length > 0
+                      stayOptions.length > 0
                         ? `${who} stays at ${stationLabel(pendingMove.to)} — choose a ticket to forfeit:`
                         : `${who} stays at ${stationLabel(pendingMove.to)} — no tickets left to forfeit.`
                     }
-                    options={stayOptions}
+                    options={stayOptionsFinal}
                     onClose={() => setPendingMove(null)}
                   />
                 );
@@ -3319,6 +3597,44 @@ export const styles = {
     gap: 4,
     alignItems: "flex-end",
   },
+  // v3.28 -- stay tally + bonus flash + planning view filter.
+  stayBonusFlash: {
+    border: "1px solid #e0b436",
+    background: "#fff5d6",
+    borderRadius: 10,
+    padding: "8px 10px",
+    fontSize: 12.5,
+    fontWeight: 600,
+    color: "#5a4300",
+    marginBottom: 8,
+    animation: "htStayBonusFlash 0.9s ease-in-out 6",
+  },
+  stayTallyPanel: {
+    border: "1px solid #e2ddcf",
+    background: "#fbfaf6",
+    borderRadius: 10,
+    padding: "7px 10px",
+    marginBottom: 8,
+  },
+  stayTallyHead: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 },
+  stayTallyLabel: { fontSize: 11, fontWeight: 700, letterSpacing: 0.3, textTransform: "uppercase", color: "#8a8375" },
+  stayTallyCount: { fontSize: 17, fontWeight: 800, color: "#1a1a1a", lineHeight: 1 },
+  stayTallyNext: { fontSize: 11.5, color: "#666", marginTop: 3 },
+  stayTallyBarOuter: { height: 4, borderRadius: 3, background: "#e6e2d6", marginTop: 5, overflow: "hidden" },
+  stayTallyBarInner: { height: "100%", borderRadius: 3, transition: "width 0.3s ease" },
+  viewFilterRow: { display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 8 },
+  viewFilterLabel: { fontSize: 11.5, color: "#777" },
+  viewFilterBtn: {
+    border: "1px solid #d7d2c4",
+    background: "#fff",
+    color: "#555",
+    borderRadius: 999,
+    padding: "3px 9px",
+    fontSize: 11.5,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  viewFilterBtnActive: { background: "#1a1a1a", color: "#fff", borderColor: "#1a1a1a" },
   zoomBtn: {
     width: 34,
     height: 34,

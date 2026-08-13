@@ -78,7 +78,72 @@ export function rowToMatch(gsRow, myMrxPosition) {
     // and flips the phase (see the set_planning_ready RPC). The client
     // only reads it to render "Ready (X of Y)".
     planningReadyPlayers: gsRow.planning_ready_players || [],
+    // v3.28 -- CUMULATIVE DETECTIVE-STAY TALLY. Every detective stay
+    // action of the whole game, summed server-side (see
+    // pass_detective_turn / expire_acting_pools / force_end_acting_phase).
+    // Fully public on purpose: it is a game-mechanic counter, not
+    // position information, so detectives AND Mr.X both read it.
+    detectiveStayTally: gsRow.detective_stay_tally ?? 0,
+    // lastStayBonus -- {type, types?, tally, round, x, y, seq} for the
+    // most recent bonus grant, or null if none has happened yet. Drives
+    // the one-round flash banner. `seq` is the tally value at grant time,
+    // which is strictly monotonic, so the client can tell "a NEW bonus"
+    // from "the same old one re-rendered" without any extra bookkeeping.
+    lastStayBonus: gsRow.last_stay_bonus ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// STAY-BONUS CONFIG + PROGRESS (v3.28)
+//
+// The two thresholds live on the ROOM (rooms.stay_black_threshold /
+// stay_double_threshold), not on the game state, because they are
+// admin-configurable settings rather than per-game progress. Both are
+// nullable, meaning "use the default" -- and the defaults are resolved
+// here EXACTLY as the server's resolve_stay_thresholds() does, so the
+// widget can never disagree with what the server will actually grant.
+//
+// X and Y are INDEPENDENT arbitrary integers. Nothing here assumes Y is
+// a multiple of X, or larger than X, or related to it in any way:
+// X=2,Y=7 is a valid configuration and is handled by the same modulo
+// walk the server uses.
+// ---------------------------------------------------------------------------
+export function resolveStayThresholds(room) {
+  const numDet = room?.num_detectives ?? 3;
+  const x = Math.max(1, room?.stay_black_threshold ?? numDet);
+  const y = Math.max(1, room?.stay_double_threshold ?? x * 3);
+  return { x, y };
+}
+
+// bonusForTally: what a stay landing on exactly `tally` would grant, or
+// null. Mirrors stay_tally_bonuses() in SQL: a reward happens ONLY at a
+// multiple of X, and such a multiple grants "double" instead of "black"
+// when it is also a multiple of Y. A multiple of Y that is not a
+// multiple of X grants nothing at all.
+export function bonusForTally(tally, x, y) {
+  if (!(x >= 1) || tally < 1) return null;
+  if (tally % x !== 0) return null;
+  if (y >= 1 && tally % y === 0) return "double";
+  return "black";
+}
+
+// stayBonusInfo: everything the tally widget needs, derived rather than
+// hardcoded, so it adapts to whatever X/Y the room is configured with.
+export function stayBonusInfo(match, room) {
+  const { x, y } = resolveStayThresholds(room);
+  const tally = match?.detectiveStayTally ?? 0;
+  // Scan forward for the next tally value that grants anything. Bounded
+  // by 2*x*y + x, which is comfortably past the first common multiple of
+  // any valid X/Y pair, so this always terminates and always finds one.
+  let next = null;
+  for (let t = tally + 1; t <= tally + 2 * x * y + x; t++) {
+    const b = bonusForTally(t, x, y);
+    if (b) {
+      next = { at: t, type: b, staysAway: t - tally };
+      break;
+    }
+  }
+  return { x, y, tally, next };
 }
 
 // At game end, the server appends a `reveal_full_route` log entry

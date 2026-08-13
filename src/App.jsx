@@ -25,6 +25,7 @@ import SpectatorScreen from "./components/SpectatorScreen.jsx";
 import RulebookView from "./components/RulebookView.jsx";
 import RulebookButton from "./components/RulebookButton.jsx";
 import { useRoomStatus } from "./lib/useRoomStatus.js";
+import { resolveStayThresholds } from "./lib/matchStateAdapter.js";
 import { usePresence } from "./lib/usePresence.js";
 import { useDelayedEndedTransition } from "./lib/useDelayedEndedTransition.js";
 import { useTurnTimer } from "./lib/useTurnTimer.js";
@@ -1172,6 +1173,13 @@ export default function App({ account, onLogout }) {
         detectiveName={detectiveName}
         detectivePlayerNames={detectivePlayerNames}
         roomCode={mpRoomCode}
+        // v3.28 -- the room's two stay-reward thresholds, resolved
+        // (defaults applied) by the same helper the widget's own
+        // arithmetic uses. Read from the LIVE room row, so an admin
+        // editing them is reflected on every client without a rejoin.
+        // Multiplayer only; pass-and-play's GameBoard never gets this
+        // prop and keeps no stay-reward mechanic at all.
+        stayThresholds={liveRoom ? resolveStayThresholds(liveRoom) : null}
         secondsRemaining={mpSecondsRemaining}
         turnTimerSeconds={mpTurnTimerSeconds}
         timerPhase={mpPhaseLabel}

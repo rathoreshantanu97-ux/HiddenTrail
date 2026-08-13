@@ -43,6 +43,17 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
   // v3.22 -- per-detective sub-turn cap (rooms.detective_cap_seconds).
   // null/blank means "same as the base act time."
   const [detectiveCapSeconds, setDetectiveCapSeconds] = useState(null);
+  // v3.28 -- the two stay-reward thresholds. X (black) and Y (double) are
+  // FULLY INDEPENDENT arbitrary integers: nothing requires Y to be a
+  // multiple of X, larger than X, or related to it at all. X=2 with Y=7
+  // is a perfectly valid configuration and behaves exactly as the rule
+  // reads (black at every multiple of 2 except those also multiples of
+  // 7 -- so 14 is the first double). Both are PRE-FILLED with their
+  // defaults (X = detective count, Y = 3X) rather than left blank, per
+  // the explicit request that the defaults be visible but freely
+  // editable; a blank field falls back to the same defaults server-side.
+  const [stayBlackThreshold, setStayBlackThreshold] = useState(null);
+  const [stayDoubleThreshold, setStayDoubleThreshold] = useState(null);
   const [publicConfig, setPublicConfig] = useState({
     turnTimerMin: 30,
     turnTimerMax: 300,
@@ -91,6 +102,13 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
         // different, smaller value the host never chose.
         setExtraDetectiveSeconds(room.extra_detective_seconds ?? null);
         setDetectiveCapSeconds(room.detective_cap_seconds ?? null);
+        // Pre-fill with the room's stored value, or -- when it has never
+        // been overridden -- with the same default the server would
+        // resolve, so the host sees the real numbers in effect rather
+        // than two empty boxes. Editing either one is independent of the
+        // other; changing X does NOT re-derive Y.
+        setStayBlackThreshold(room.stay_black_threshold ?? room.num_detectives ?? 3);
+        setStayDoubleThreshold(room.stay_double_threshold ?? (room.stay_black_threshold ?? room.num_detectives ?? 3) * 3);
         setIsPublic(!!room.is_public);
         setRoomName(room.room_name || "");
         setFeatureOverrides({
@@ -136,6 +154,8 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
         planningTimeSeconds,
         extraDetectiveSeconds: extraDetectiveSeconds === "" || extraDetectiveSeconds == null ? null : parseInt(extraDetectiveSeconds, 10),
         detectiveCapSeconds: detectiveCapSeconds === "" || detectiveCapSeconds == null ? null : parseInt(detectiveCapSeconds, 10),
+        stayBlackThreshold: stayBlackThreshold === "" || stayBlackThreshold == null ? null : parseInt(stayBlackThreshold, 10),
+        stayDoubleThreshold: stayDoubleThreshold === "" || stayDoubleThreshold == null ? null : parseInt(stayDoubleThreshold, 10),
         featureOverrides,
         isPublic,
         roomName: isPublic ? roomName.trim() : null,
@@ -577,6 +597,77 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
               </div>
             </label>
           )}
+
+          {/* v3.28 -- STAY-REWARD THRESHOLDS. The server keeps a single
+              running count of EVERY detective stay action across the
+              whole game (voluntary, auto-passed, or timed out; Mr.X's own
+              stays never count). Each time that count reaches a multiple
+              of X, Mr.X is granted a black ticket -- unless that same
+              count is ALSO a multiple of Y, in which case he gets a
+              double-move card instead. The two numbers are completely
+              independent: X=2 with Y=7 means black at 2,4,6,8,10,12 and
+              the first double at 14, with nothing at all happening at 7.
+              Deliberately NOT presented as "X and a multiple of X". */}
+          <label style={styles.featureOverrideRow}>
+            <span>
+              Detective stays per black ticket for Mr.&nbsp;X — every this-many stays by the detective team (counted across all detectives and all
+              rounds) earns Mr.&nbsp;X one black ticket. Blank uses the default of one per detective in the room.
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder={`Default (${numDetectives})`}
+              style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+              value={stayBlackThreshold ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "" || /^\d*$/.test(v)) setStayBlackThreshold(v === "" ? null : v);
+              }}
+              onBlur={() => {
+                if (stayBlackThreshold === null || stayBlackThreshold === "") return;
+                setStayBlackThreshold(Math.max(1, Math.min(999, parseInt(stayBlackThreshold, 10) || 1)));
+              }}
+            />
+          </label>
+
+          <label style={styles.featureOverrideRow}>
+            <span>
+              Detective stays per double-move card — when the running stay count hits a multiple of the number above AND a multiple of this one, Mr.&nbsp;X
+              gets a double-move card instead of a black ticket. Independent of the number above; it does not have to be a multiple of it. Blank uses
+              three times the black-ticket threshold.
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder={`Default (${(parseInt(stayBlackThreshold, 10) || numDetectives) * 3})`}
+              style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+              value={stayDoubleThreshold ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "" || /^\d*$/.test(v)) setStayDoubleThreshold(v === "" ? null : v);
+              }}
+              onBlur={() => {
+                if (stayDoubleThreshold === null || stayDoubleThreshold === "") return;
+                setStayDoubleThreshold(Math.max(1, Math.min(999, parseInt(stayDoubleThreshold, 10) || 1)));
+              }}
+            />
+          </label>
+
+          {/* Live preview of the ACTUAL reward sequence the two numbers
+              above produce. Derived by the same rule the server uses, not
+              a hand-written description, so a surprising configuration
+              (like X=2, Y=7) shows its real behavior instead of an
+              assumed one. */}
+          {(() => {
+            const x = Math.max(1, parseInt(stayBlackThreshold, 10) || numDetectives);
+            const y = Math.max(1, parseInt(stayDoubleThreshold, 10) || x * 3);
+            const seq = [];
+            for (let t = 1; t <= x * 8 && seq.length < 8; t++) {
+              if (t % x !== 0) continue;
+              seq.push(`${t}→${t % y === 0 ? "2x" : "black"}`);
+            }
+            return <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>First rewards at stay count: {seq.join(", ")}…</div>;
+          })()}
 
           {publicConfig && turnTimerSeconds && (() => {
             // Host sets these TWO numbers above directly -- everything

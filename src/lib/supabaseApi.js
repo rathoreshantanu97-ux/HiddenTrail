@@ -28,6 +28,12 @@ export async function createRoom({
   // configured, which the client's turnSchedule.js treats as "one full
   // base act window per extra detective".
   extraDetectiveSeconds = null,
+  // v3.28 -- the two stay-reward thresholds (see resolveStayThresholds in
+  // matchStateAdapter.js). Two INDEPENDENT integers; null on either means
+  // "use the default" (X = detective count, Y = 3X), which is resolved
+  // server-side so both ends always agree.
+  stayBlackThreshold = null,
+  stayDoubleThreshold = null,
   featureOverrides = {},
   isPublic = false,
   roomName = null,
@@ -53,6 +59,8 @@ export async function createRoom({
     p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
     p_draw_override: featureOverrides.draw ?? null,
     p_peek_override: featureOverrides.peek ?? null,
+    p_stay_black_threshold: stayBlackThreshold ?? null,
+    p_stay_double_threshold: stayDoubleThreshold ?? null,
     p_is_public: isPublic,
     p_room_name: roomName,
   });
@@ -256,6 +264,9 @@ export async function updateRoomSettings({
   // this one is "how long may this single detective sit on their move
   // before it auto-passes." null => default to the base act time.
   detectiveCapSeconds = null,
+  // v3.28 stay-reward thresholds -- see createRoom above.
+  stayBlackThreshold = null,
+  stayDoubleThreshold = null,
   featureOverrides = {},
   isPublic = false,
   roomName = null,
@@ -283,6 +294,8 @@ export async function updateRoomSettings({
     p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
     p_draw_override: featureOverrides.draw ?? null,
     p_peek_override: featureOverrides.peek ?? null,
+    p_stay_black_threshold: stayBlackThreshold ?? null,
+    p_stay_double_threshold: stayDoubleThreshold ?? null,
     p_is_public: isPublic,
     p_room_name: roomName,
   });

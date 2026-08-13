@@ -297,7 +297,6 @@ export default function App({ account, onLogout }) {
     mrxSeconds: mpMrxSeconds,
     bufferSeconds: mpBufferSeconds,
     actSeconds: mpActSeconds,
-    detectiveCapSeconds: mpDetectiveCapSeconds,
   } = useTurnTimer({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     map: getEffectiveMap(liveMapId),
@@ -340,7 +339,14 @@ export default function App({ account, onLogout }) {
   const mpPlayerIdRef = useRef(mpPlayerId);
   mpPlayerIdRef.current = mpPlayerId;
 
-  const { onlinePlayerIds, isInactive, presenceState, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff } = usePresence({
+  // Latest own "revealed destinations" detective id set, in a ref, for
+  // exactly the same reason mpStrokesRef exists: a strokes_request now
+  // also gets answered with the current reveal set (v3.24), and that
+  // handler is installed once rather than rebuilt per render.
+  const mpRevealIdsRef = useRef([]);
+  mpRevealIdsRef.current = mpToggledDetectiveIds;
+
+  const { onlinePlayerIds, isInactive, presenceState, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff, sendRevealSync } = usePresence({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     myPlayerId: mpPlayerId,
     myDisplayName: mpDisplayName,
@@ -363,8 +369,14 @@ export default function App({ account, onLogout }) {
     onStrokesRequest: (payload) => {
       if (!payload || payload.targetPlayerId !== mpPlayerIdRef.current) return;
       if (sendStrokesSyncRef.current) sendStrokesSyncRef.current(mpStrokesRef.current);
+      // A peek START asks for one thing but needs two: the drawing AND
+      // which detectives' destinations the peeked player currently has
+      // revealed (v3.24). Answering both off the one request keeps the
+      // peeker's first frame complete instead of half-populated.
+      if (sendRevealSyncRef.current) sendRevealSyncRef.current(mpRevealIdsRef.current);
     },
     onPeekOff: (payload) => peerEventHandlersRef.current.onPeekOff && peerEventHandlersRef.current.onPeekOff(payload),
+    onRevealSync: (payload) => peerEventHandlersRef.current.onRevealSync && peerEventHandlersRef.current.onRevealSync(payload),
   });
 
   // sendStrokesSync is produced BY the same hook call whose options
@@ -372,6 +384,8 @@ export default function App({ account, onLogout }) {
   // directly there -- this ref closes that ordering loop.
   const sendStrokesSyncRef = useRef(null);
   sendStrokesSyncRef.current = sendStrokesSync;
+  const sendRevealSyncRef = useRef(null);
+  sendRevealSyncRef.current = sendRevealSync;
 
   useEffect(() => {
     if (appMode !== "multiplayer" || mpStage !== "playing" || !mpRoomId) return;
@@ -1109,6 +1123,12 @@ export default function App({ account, onLogout }) {
       if (detectiveIds.length === 0) continue;
       detectivePlayersRoster.push({
         playerId: p.id,
+        // The controlling PLAYER's own display name, kept separate from
+        // `displayName` below (which is the detective/character naming
+        // used by the peek panel). The acting-phase "who still has to
+        // move" label wants the human's name -- "Priya (2/3)" -- not a
+        // list of their pieces.
+        playerDisplayName: p.display_name,
         // DEDUPE, deliberately: detectiveName(id) falls back to the
         // controlling PLAYER's real display name on any map that doesn't
         // give each detective its own character name (the common case --
@@ -1144,7 +1164,6 @@ export default function App({ account, onLogout }) {
         mrxSecondsForBar={mpMrxSeconds}
         bufferSecondsForBar={mpBufferSeconds}
         actSecondsForBar={mpActSeconds}
-        detectiveCapSeconds={mpDetectiveCapSeconds}
         roundPhase={supabaseStore.match?.roundPhase}
         detectivesActed={supabaseStore.match?.detectivesActed}
         onExploreModeChange={setMpToggledDetectiveIds}
@@ -1155,6 +1174,7 @@ export default function App({ account, onLogout }) {
         onRegisterPeerEventHandlers={(handlers) => (peerEventHandlersRef.current = handlers)}
         onBroadcastStrokes={(strokes) => sendStrokesSync(strokes)}
         onRequestPeerStrokes={(targetPlayerId) => sendStrokesRequest(targetPlayerId)}
+        onBroadcastReveal={(revealedDetectiveIds) => sendRevealSync(revealedDetectiveIds)}
         onBroadcastPeekOff={() => sendPeekOff()}
         presenceState={presenceState}
         detectivePlayersRoster={detectivePlayersRoster}

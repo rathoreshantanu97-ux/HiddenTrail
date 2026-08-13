@@ -53,7 +53,17 @@ export function useTurnTimer({
 }) {
   const [actSeconds, setActSeconds] = useState(null);
   const [extraDetectiveSeconds, setExtraDetectiveSeconds] = useState(null);
-  const [detectiveCapSecondsRaw, setDetectiveCapSecondsRaw] = useState(null); // rooms.detective_cap_seconds -- null means "same as the base act time"
+  // (v3.24: rooms.detective_cap_seconds is no longer read at all. The
+  // per-detective hard cap it powered -- a sub-clock that auto-passed a
+  // detective when IT expired -- is gone. There is now exactly ONE clock
+  // in the acting phase: the pooled per-round window, sized as before
+  // off the busiest player's detective count via extra_detective_seconds.
+  // A player's spotlight advances only when they actually move or pass;
+  // if the pool runs out with detectives unmoved, those detectives stay
+  // put and forfeit one ticket each, applied authoritatively server-side
+  // in force_end_acting_phase. The DB column and the host-facing field
+  // are left in place rather than ripped out, so no room's stored
+  // settings become invalid -- the value is simply inert now.)
   const [bufferSecondsInput, setBufferSecondsInput] = useState(null); // the host's OWN planning-time number (room.planning_time_seconds), before ratio/bounds are applied
   const [ratios, setRatios] = useState(null);
   const [bounds, setBounds] = useState(null);
@@ -70,7 +80,6 @@ export function useTurnTimer({
         setActSeconds(room?.turn_timer_seconds ?? null);
         setBufferSecondsInput(room?.planning_time_seconds ?? null);
         setExtraDetectiveSeconds(room?.extra_detective_seconds ?? null);
-        setDetectiveCapSecondsRaw(room?.detective_cap_seconds ?? null);
         setRatios({
           mrxTimeRatio: cfg.mrxTimeRatio,
           extraSeatTimeRatio: cfg.extraSeatTimeRatio,
@@ -219,15 +228,6 @@ export function useTurnTimer({
     // counting down. The unscaled base is still available separately.
     actSeconds: actingTotalSeconds ?? null,
     baseActSeconds: schedule?.actSeconds ?? null,
-    // detectiveCapSeconds (v3.22) -- the per-SUB-TURN deadline. Defaults
-    // to the base act window when the room hasn't configured one, which
-    // is exactly the "one act window per detective" intuition the pooled
-    // window is already sized around. GameBoard runs this countdown
-    // itself (it's per-player state -- whose sub-turn it is differs per
-    // client -- so there's no single server-side anchor to read) and
-    // auto-passes through the ordinary pass_detective_turn RPC on expiry,
-    // which stays the authority for whether the pass is legal at all.
-    detectiveCapSeconds: detectiveCapSecondsRaw != null && detectiveCapSecondsRaw > 0 ? detectiveCapSecondsRaw : (schedule?.actSeconds ?? null),
     extraSeatSeconds: schedule?.extraSeatSeconds ?? null,
   };
 }

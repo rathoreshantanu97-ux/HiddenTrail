@@ -131,6 +131,7 @@ export default function GameBoard({
   onRegisterRemoteStrokeHandler, // (handler: (payload) => void) => void -- called once on mount so App.jsx can wire incoming remote-draw events (from a teammate peeking ME) into this component's own stroke state
   onRegisterPeerEventHandlers, // ({onStrokesSync, onPeekOff}) => void -- same handoff pattern, for the two broadcast events that drive peek rendering (see usePresence.js)
   onBroadcastStrokes, // (strokes) => void -- push MY current strokes to the room so active peekers re-render live. Replaces the old Presence-payload delivery, which silently dropped oversized/coalesced updates.
+  onBroadcastReveal, // (revealedDetectiveIds) => void -- push MY current destination-reveal set to the room so active peekers mirror it live (v3.24). Same contract as onBroadcastStrokes.
   onRequestPeerStrokes, // (targetPlayerId) => void -- ask a player for their current strokes the moment I start peeking them, so I don't wait for their next edit
   onBroadcastPeekOff, // () => void -- tell the room I've revoked peek permission, releasing active peekers immediately
   detectivePlayersRoster = [], // [{playerId, displayName, detectiveIds: number[]}] -- every detective-seat player (not Mr.X), multiplayer only, used for the "peek into a player's screen" panel and for showing a peeked player's OWN highlights (which aren't separately broadcast, since they're deterministic from this same roster)
@@ -145,7 +146,10 @@ export default function GameBoard({
   mrxSecondsForBar = null, // Mr. X's full turn window (schedule.mrxSeconds) -- the denominator for the timer bar while timerPhase === "mrx"
   bufferSecondsForBar = null, // the shared pre-think buffer's full length (schedule.bufferSeconds) -- the denominator while timerPhase === "planning"
   actSecondsForBar = null, // the shared acting phase's full length (schedule.actSeconds) -- the denominator while timerPhase === "acting"
-  detectiveCapSeconds = null, // v3.22: max seconds for ONE detective's own sub-turn inside the acting phase (rooms.detective_cap_seconds, defaulted to the base act time upstream). Multiplayer only.
+  // (v3.24: detectiveCapSeconds is gone. The acting phase has exactly one
+  // clock again -- the pooled per-round window -- and a player's spotlight
+  // only advances when they actually move or pass. See the acting-phase
+  // block further down.)
   roomCode = null, // multiplayer only -- shown persistently so a disconnected player can be told the code to rejoin
 }) {
   const { positionStyle: highlightPositionStyle, destinationStyle: highlightDestinationStyle } = useHighlightStyles(roomId); // each independently 'ring' | 'rotating' | 'blink' | 'static' | 'none'
@@ -216,10 +220,40 @@ export default function GameBoard({
   // the request/reply round trip demoted to a refresh rather than being
   // the only way to ever get a first frame.
   const strokesSyncCacheRef = React.useRef(new Map());
+  // REVEAL SYNC (v3.24) -- the peeked player's own "which detectives'
+  // destinations have I clicked open" set, delivered over the same
+  // broadcast channel as strokes and cached the same way. Previously a
+  // peeker could only see this through the peeked player's PRESENCE
+  // payload (toggledDetectiveIds), which is coalescing and lossy -- so a
+  // click could easily never reach the peeker at all, or arrive seconds
+  // late. Presence is still read as the cold-start fallback (see
+  // highlightedDetectiveIds below); broadcast is now the live path.
+  const [peekedRevealIds, setPeekedRevealIds] = useState(null); // null = no broadcast snapshot for the current target yet
+  const [peekedRevealOwnerId, setPeekedRevealOwnerId] = useState(null);
+  const revealSyncCacheRef = React.useRef(new Map());
   // Action ids already applied, so a "stroke" payload delivered through
   // BOTH broadcast callbacks (see usePresence.js v3.23) is applied once.
   // Matters because "undo" and "erase" are not idempotent.
   const appliedStrokeActionIdsRef = React.useRef(new Set());
+  // PEEK-DRAW DELIVERY LEDGER (v3.24). actionId -> {targetPlayerId,
+  // action, attempts, strokeId, sentAt}. An entry lives here from the
+  // moment a peek-draw goes out until the OWNER of that board publishes
+  // a strokes_sync that proves it landed. See applyStrokeAction and the
+  // retry effect below for the full rationale -- in short, this is the
+  // first version of this feature that treats "sent" and "delivered" as
+  // different things, which is what the previous two fixes conflated.
+  const pendingPeekDrawsRef = React.useRef(new Map());
+  const confirmPeekDrawsRef = React.useRef(() => {});
+  confirmPeekDrawsRef.current = (ownerPlayerId, ownerStrokes) => {
+    if (pendingPeekDrawsRef.current.size === 0) return;
+    const strokeIds = new Set((ownerStrokes || []).map((s) => s.id));
+    for (const [actionId, entry] of Array.from(pendingPeekDrawsRef.current.entries())) {
+      if (entry.targetPlayerId !== ownerPlayerId) continue;
+      if (entry.strokeId ? strokeIds.has(entry.strokeId) : Date.now() > entry.sentAt) {
+        pendingPeekDrawsRef.current.delete(actionId);
+      }
+    }
+  };
   // The broadcast handlers below are installed once, so they must read
   // the CURRENT peek target through a ref rather than a stale closure.
   const peekedPlayerIdRef = React.useRef(peekedPlayerId);
@@ -272,7 +306,18 @@ export default function GameBoard({
     if (!peekedPlayerId) {
       setPeekedStrokes([]);
       setPeekedStrokesOwnerId(null);
+      setPeekedRevealIds(null);
+      setPeekedRevealOwnerId(null);
       return undefined;
+    }
+    // Same cached-snapshot-first treatment for the reveal set (v3.24).
+    const cachedReveal = revealSyncCacheRef.current.get(peekedPlayerId);
+    if (cachedReveal) {
+      setPeekedRevealIds(cachedReveal);
+      setPeekedRevealOwnerId(peekedPlayerId);
+    } else {
+      setPeekedRevealIds(null);
+      setPeekedRevealOwnerId(null);
     }
     const cached = strokesSyncCacheRef.current.get(peekedPlayerId);
     if (cached && cached.length > 0) {
@@ -335,6 +380,7 @@ export default function GameBoard({
     if (myStrokesRef.current.length > 0) setLastRoundStrokes(myStrokesRef.current);
     setMyStrokes([]);
     setLiveStrokePoints(null);
+    setRecalledStrokes([]); // v3.24: the recall layer is per-round too
   }, [preThinkActive]);
 
   const lastClearedRoundRef = React.useRef(null);
@@ -346,11 +392,25 @@ export default function GameBoard({
     if (myStrokesRef.current.length > 0) setLastRoundStrokes(myStrokesRef.current);
     setMyStrokes([]);
     setLiveStrokePoints(null);
+    setRecalledStrokes([]); // v3.24: the recall layer is per-round too
   }, [match?.round]);
 
+  // RECALL, v3.24 -- the recalled drawing is now its OWN layer, painted
+  // UNDERNEATH whatever has already been drawn this round, instead of
+  // being merged into myStrokes. Merging meant last round's lines
+  // interleaved with (and could sit on top of and obscure) the current
+  // round's work, which defeats the point: recall is context you glance
+  // back at, not something that should compete with what you're drawing
+  // now. Being a separate layer also means it's local-only and never
+  // broadcast -- it isn't part of your current drawing, so a peeker sees
+  // your CURRENT strokes exactly as before, unpolluted by your recall.
+  // Rendered first in the SVG (earlier paint order = lower) and dimmer.
+  const [recalledStrokes, setRecalledStrokes] = useState([]);
   function recallLastRoundStrokes() {
     if (lastRoundStrokes.length === 0) return;
-    setMyStrokes(lastRoundStrokes);
+    // Toggle: pressing again puts it away, which is what everyone tries
+    // first anyway.
+    setRecalledStrokes((prev) => (prev.length > 0 ? [] : lastRoundStrokes));
   }
 
   function pointFromEvent(e) {
@@ -375,13 +435,43 @@ export default function GameBoard({
   // OPTIMISTICALLY to the local peeked-board copy, so the mark is stable
   // from the moment it's drawn, and the owner's next strokes_sync (the
   // authority, a full idempotent snapshot) just confirms or corrects it.
+  //
+  // v3.24 -- THE ACTUAL PERSISTENCE FIX. The two earlier attempts both
+  // reasoned about what happens to a peek-draw AFTER it arrives (who
+  // routes it, who de-duplicates it, who caches it) and both silently
+  // assumed that a broadcast which was SENT was a broadcast that
+  // ARRIVED. That assumption is false: supabase-js resolves
+  // channel.send() to "error" and quietly falls back to a REST call
+  // whenever the channel isn't in the joined state, and nothing here
+  // ever inspected that result. A stroke drawn during a reconnect, a
+  // channel rebuild, or the first second after a tab wakes up went
+  // nowhere at all -- which is exactly the reported symptom (invisible
+  // to EVERYONE, including the board's owner, while the drawer's own
+  // optimistic copy survived only until the next snapshot overwrote it).
+  // So every peek-draw is now recorded as UNCONFIRMED and re-sent until
+  // the owner's own strokes_sync proves it landed. See
+  // pendingPeekDrawsRef / the retry effect below.
   function applyStrokeAction(action) {
     if (peekedPlayerId) {
       // actionId (v3.23): the receiving side may now be handed the same
       // payload through two different broadcast callbacks, so every
-      // action carries a unique id it can de-duplicate on.
+      // action carries a unique id it can de-duplicate on. That same id
+      // is what makes RE-SENDING safe (v3.24): the owner applies a given
+      // actionId at most once, so even "undo"/"erase" can be retried.
       const stamped = { ...action, actionId: `${Date.now()}-${Math.random()}` };
       onRemoteDraw && onRemoteDraw(peekedPlayerId, stamped);
+      pendingPeekDrawsRef.current.set(stamped.actionId, {
+        targetPlayerId: peekedPlayerId,
+        action: stamped,
+        attempts: 1,
+        // For an "add" we can confirm precisely (does the owner's
+        // snapshot contain this stroke id?). For undo/erase there is no
+        // such marker, so we settle for "the owner has published a
+        // snapshot since we sent it," which is a strictly weaker but
+        // still sound signal that our message reached a live client.
+        strokeId: action.kind === "add" && action.stroke ? action.stroke.id : null,
+        sentAt: Date.now(),
+      });
       // Optimistic local echo onto the board I'm looking at. Guarded on
       // ownership so it can never land on a previously-peeked player's
       // leftover set.
@@ -452,10 +542,31 @@ export default function GameBoard({
         // very first frame instead of waiting on a request/reply.
         onStrokesSync: (payload) => {
           if (!payload?.senderPlayerId) return;
-          strokesSyncCacheRef.current.set(payload.senderPlayerId, payload.strokes || []);
+          const strokes = payload.strokes || [];
+          strokesSyncCacheRef.current.set(payload.senderPlayerId, strokes);
+          // v3.24: an owner's snapshot is the CONFIRMATION signal for any
+          // peek-draw I sent at that owner. Anything of mine that this
+          // snapshot already contains is delivered for certain and can
+          // stop being retried; anything it doesn't contain gets sent
+          // again (see the retry effect below). This is the piece both
+          // previous attempts at this bug were missing -- they assumed a
+          // broadcast that was sent had arrived.
+          confirmPeekDrawsRef.current(payload.senderPlayerId, strokes);
           if (payload.senderPlayerId === peekedPlayerIdRef.current) {
-            setPeekedStrokes(payload.strokes || []);
+            setPeekedStrokes(strokes);
             setPeekedStrokesOwnerId(payload.senderPlayerId);
+          }
+        },
+        // A player pushed their current "revealed destinations" set
+        // (v3.24). Cached for everyone, applied only for whoever I'm
+        // actually peeking -- exactly the strokes_sync contract.
+        onRevealSync: (payload) => {
+          if (!payload?.senderPlayerId) return;
+          const ids = Array.isArray(payload.revealedDetectiveIds) ? payload.revealedDetectiveIds : [];
+          revealSyncCacheRef.current.set(payload.senderPlayerId, ids);
+          if (payload.senderPlayerId === peekedPlayerIdRef.current) {
+            setPeekedRevealIds(ids);
+            setPeekedRevealOwnerId(payload.senderPlayerId);
           }
         },
         // Second delivery path for peek-draws: usePresence now forwards
@@ -585,6 +696,30 @@ export default function GameBoard({
     return () => clearInterval(id);
   }, []);
 
+  // PEEK-DRAW RETRY (v3.24) -- the other half of the delivery ledger.
+  // Every 1.5s, anything still unconfirmed goes out again with the SAME
+  // actionId (safe: receivers de-duplicate on it). Gives up after 8
+  // attempts / ~12s, which is far longer than any realistic reconnect
+  // and well inside a single planning window, so a genuinely dead peer
+  // can't leave this looping forever.
+  const onRemoteDrawRef = React.useRef(onRemoteDraw);
+  onRemoteDrawRef.current = onRemoteDraw;
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (pendingPeekDrawsRef.current.size === 0) return;
+      for (const [actionId, entry] of Array.from(pendingPeekDrawsRef.current.entries())) {
+        if (entry.attempts >= 8) {
+          pendingPeekDrawsRef.current.delete(actionId);
+          console.warn("Peek-draw never confirmed by the board's owner; giving up:", actionId);
+          continue;
+        }
+        entry.attempts += 1;
+        if (onRemoteDrawRef.current) onRemoteDrawRef.current(entry.targetPlayerId, entry.action);
+      }
+    }, 1500);
+    return () => clearInterval(id);
+  }, []);
+
   function toggleDetectiveHighlight(detId) {
     setToggledIds((prev) => {
       const next = new Set(prev);
@@ -600,8 +735,29 @@ export default function GameBoard({
   // detectives now), so nothing lingers stale for others.
   useEffect(() => {
     onExploreModeChange && onExploreModeChange(Array.from(toggledIds));
+    // AND push it as an explicit broadcast (v3.24), which is what a
+    // peeker actually renders from. Presence still carries the same set
+    // for cold starts, but it is no longer the live path -- see the
+    // reveal-sync comment up top.
+    onBroadcastRevealRef.current && onBroadcastRevealRef.current(Array.from(toggledIds));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toggledIds]);
+
+  // Reveal-set heartbeat, mirroring the strokes heartbeat: re-announce
+  // periodically while I actually have something revealed, so a peeker
+  // who joined during a blip converges without needing me to click
+  // again. Silent (and free) when nothing is revealed.
+  const onBroadcastRevealRef = React.useRef(onBroadcastReveal);
+  onBroadcastRevealRef.current = onBroadcastReveal;
+  const toggledIdsRef = React.useRef(toggledIds);
+  toggledIdsRef.current = toggledIds;
+  useEffect(() => {
+    const id = setInterval(() => {
+      const current = toggledIdsRef.current;
+      if (current && current.size > 0 && onBroadcastRevealRef.current) onBroadcastRevealRef.current(Array.from(current));
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   // Report our own peek-privacy preference upward the same way -- default
   // ON (matches the old always-visible behavior), but a player can turn
@@ -863,74 +1019,70 @@ export default function GameBoard({
   const myDetective = iAmDetective && activeDetective ? activeDetective : null;
 
   // ---------------------------------------------------------------------
-  // PER-DETECTIVE SUB-TURN CAP (v3.22)
+  // ACTING-PHASE TIMING, v3.24 -- ONE POOL, NO SUB-CLOCK.
   //
-  // The acting phase has always had ONE pooled countdown for the whole
-  // round. That pool is still what actually bounds the round, but it is
-  // NOT the number a player is racing against on any given click: inside
-  // it, a player works through their own detectives one at a time, and
-  // nothing stopped a single detective from silently eating the entire
-  // pool while their teammates waited. This adds a second, per-SUB-TURN
-  // deadline: when it expires, that detective auto-passes in place
-  // (through the ordinary pass_detective_turn RPC -- same call the manual
-  // "Skip" button makes, so the server stays the authority on whether the
-  // pass is even legal) and the player advances to their next unacted
-  // detective exactly as a normal pass would.
+  // What was here before (v3.22/v3.23) was a second, per-DETECTIVE hard
+  // cap: each of your detectives got its own countdown inside the pooled
+  // window, and when that countdown hit zero the detective auto-passed on
+  // the spot. It has been removed entirely, by explicit decision. The
+  // acting phase now works like this:
   //
-  // Anchored CLIENT-SIDE, deliberately: whose sub-turn it is differs per
-  // client (it's derived from MY unacted detectives), so there is no
-  // single server timestamp that could anchor it for everyone. Only the
-  // player who owns the detective runs this clock, and the only thing it
-  // can do on expiry is submit a legal pass, so nothing here is
-  // security-relevant.
+  //   - Each player has ONE budget: the shared pooled acting window
+  //     (still sized off the busiest player's detective count via
+  //     extra_detective_seconds -- see actingWindowSeconds; that sizing
+  //     logic is deliberately unchanged).
+  //   - The spotlighted detective advances ONLY when the player actually
+  //     moves it or explicitly passes it. Nothing advances on a timer.
+  //     A player is free to spend the whole pool on one detective if
+  //     that's the call they want to make.
+  //   - If the pool runs out with detectives still unmoved, those
+  //     detectives do NOT move, get relocated, or act randomly. They
+  //     stay exactly where they are and each forfeits ONE ticket, taken
+  //     from the cheapest type they still hold (taxi -> bus ->
+  //     underground). A detective with none of any type simply pays
+  //     nothing. That penalty is applied SERVER-SIDE inside
+  //     force_end_acting_phase, so it is authoritative and identical for
+  //     every client regardless of who's timer fired first.
   //
-  // Multiplayer + detective-perspective only. Pass-and-play never enters
-  // this branch (it has no acting phase at all), and Mr.X / spectators
-  // have no sub-turn to cap.
+  // The one automatic advance that DOES remain is a different thing
+  // entirely and is not time-based: a detective with literally zero
+  // legal moves auto-passes the instant it's spotlighted (see the
+  // no-legal-moves effect below), because sitting there waiting for a
+  // click that cannot accomplish anything is just a stall.
   // ---------------------------------------------------------------------
-  const subTurnCapActive = !isPassAndPlay && iAmDetective && actingActive && !!activeDetective && detectiveCapSeconds != null && detectiveCapSeconds > 0;
-  const subTurnKey = subTurnCapActive ? `${match.round}|${activeDetective.id}` : null;
-  const [subTurnRawRemaining, setSubTurnRawRemaining] = useState(null);
-  const subTurnAnchorRef = React.useRef({ key: null, startedAt: 0 });
-  const subTurnPassedForRef = React.useRef(null); // guards against firing the auto-pass twice for the same sub-turn
   const onPassDetectiveTurnRef = React.useRef(onPassDetectiveTurn);
   onPassDetectiveTurnRef.current = onPassDetectiveTurn;
 
-  useEffect(() => {
-    if (!subTurnKey) {
-      subTurnAnchorRef.current = { key: null, startedAt: 0 };
-      setSubTurnRawRemaining(null);
-      return;
-    }
-    // New sub-turn (or new round) -> restart the clock from now.
-    if (subTurnAnchorRef.current.key !== subTurnKey) {
-      subTurnAnchorRef.current = { key: subTurnKey, startedAt: Date.now() };
-    }
-    const detIdAtStart = activeDetective.id;
-    const tick = () => {
-      const elapsed = (Date.now() - subTurnAnchorRef.current.startedAt) / 1000;
-      const remaining = Math.max(0, Math.ceil(detectiveCapSeconds - elapsed));
-      setSubTurnRawRemaining(remaining);
-      if (remaining <= 0 && subTurnPassedForRef.current !== subTurnKey) {
-        subTurnPassedForRef.current = subTurnKey; // mark BEFORE calling, so overlapping ticks can't double-fire
-        if (onPassDetectiveTurnRef.current) onPassDetectiveTurnRef.current(detIdAtStart);
-      }
-    };
-    tick();
-    const id = setInterval(tick, 500);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subTurnKey, detectiveCapSeconds]);
+  // PENDING PLAYERS (v3.24) -- who still has detectives left to move in
+  // the acting phase, as "<name> (<acted>/<total>)". Built live from
+  // match.detectivesActed and the room's detective roster, so it updates
+  // the moment anyone acts. Only players with at least one UNACTED
+  // detective appear. Detective-perspective only (Mr.X and spectators
+  // never see it -- they keep the neutral team-level label).
+  const pendingActingPlayers =
+    !isPassAndPlay && roundPhaseMp === "acting"
+      ? detectivePlayersRoster
+          .map((p) => {
+            const total = (p.detectiveIds || []).length;
+            const acted = (p.detectiveIds || []).filter((id) => detectivesActedSet.has(id)).length;
+            return { playerId: p.playerId, name: p.playerDisplayName || p.displayName || "Player", acted, total };
+          })
+          .filter((p) => p.total > 0 && p.acted < p.total)
+      : [];
 
-  // Never promise more time than the round itself actually has left --
-  // the pooled acting window is a hard ceiling, so a 60s cap inside a
-  // window with 12s to run must read 12s, not 60s.
-  const subTurnRemaining =
-    subTurnCapActive && subTurnRawRemaining != null
-      ? secondsRemaining != null
-        ? Math.max(0, Math.min(subTurnRawRemaining, secondsRemaining))
-        : subTurnRawRemaining
-      : null;
+  // "Priya (2/3) and Arjun (1/2) are yet to move" -- Oxford-comma-free
+  // natural list, since it's read as a sentence, not scanned as data.
+  const pendingActingLabel = (() => {
+    if (pendingActingPlayers.length === 0) return null;
+    const parts = pendingActingPlayers.map((p) => `${p.name} (${p.acted}/${p.total})`);
+    const joined =
+      parts.length === 1
+        ? parts[0]
+        : parts.length === 2
+          ? `${parts[0]} and ${parts[1]}`
+          : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+    return `${joined} ${parts.length === 1 ? "is" : "are"} yet to move`;
+  })();
 
   // PASS-AND-PLAY ONLY seeding (v3.21). This used to also seed a
   // multiplayer player's own detectives into toggledIds, which is what
@@ -1083,6 +1235,44 @@ export default function GameBoard({
   }, [isMyTurnToAct, isMrXTurn, activeDetective, match, map, myRole]);
 
   // ---------------------------------------------------------------------
+  // AUTO-PASS A DETECTIVE WITH NO LEGAL MOVES (v3.24)
+  //
+  // The moment one of my detectives becomes the spotlighted one, if it
+  // has literally nowhere legal to go -- out of every ticket type it
+  // would need, or every reachable station already occupied -- there is
+  // no click that can accomplish anything. Waiting for the player to
+  // find and press "Skip" just burns their pooled time for no decision.
+  // So it passes itself, through the SAME pass_detective_turn RPC the
+  // manual button calls, and the spotlight advances to their next
+  // unacted detective (or their sequence ends).
+  //
+  // NOTE this is emphatically NOT the timeout case. A timeout leaves the
+  // detective in place and costs it a ticket (server-side, see
+  // force_end_acting_phase). A no-legal-moves auto-pass costs nothing --
+  // it's an ordinary pass that the player simply didn't have to click.
+  //
+  // Multiplayer + detective-perspective + acting phase only. Pass-and-
+  // play is untouched (it keeps its manual "no legal moves" button).
+  // The server can't independently verify "no legal moves" -- it has no
+  // knowledge of the map graph at all (see useTurnTimer's architectural
+  // note) -- but it doesn't need to: a pass is unconditionally legal for
+  // a detective that hasn't acted yet, so nothing here can produce a
+  // state the server would refuse, and a client can never get stuck.
+  const noMoveAutoPassedRef = React.useRef(null);
+  const autoPassKey =
+    !isPassAndPlay && iAmDetective && actingActive && activeDetective && legalTargets.size === 0
+      ? `${match.round}|${activeDetective.id}`
+      : null;
+  useEffect(() => {
+    if (!autoPassKey) return;
+    if (noMoveAutoPassedRef.current === autoPassKey) return;
+    noMoveAutoPassedRef.current = autoPassKey; // mark BEFORE calling, so a re-render can't double-fire
+    const detId = parseInt(autoPassKey.split("|")[1], 10);
+    if (onPassDetectiveTurnRef.current) onPassDetectiveTurnRef.current(detId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPassKey]);
+
+  // ---------------------------------------------------------------------
   // ROUTE EXPLORER v2 -- redesigned around "click a piece on the map to
   // turn its highlight on/off," rather than a separate mode-picker
   // control. Reachable stations are now computed across EVERY mode that
@@ -1148,7 +1338,20 @@ export default function GameBoard({
   const highlightedDetectiveIds = !showDetectiveHighlights
     ? new Set()
     : peekedPlayerId
-      ? new Set(peekedPlayerIsPeekable ? presenceState[peekedPlayerId]?.toggledDetectiveIds || [] : [])
+      ? // v3.24: prefer the BROADCAST reveal snapshot for this exact
+        // player when we have one -- that's the live path, arriving
+        // within a frame or two of their click. The Presence payload
+        // (toggledDetectiveIds) stays as the fallback for a peek that
+        // starts before any broadcast has been seen, and for the
+        // not-peekable case, so nothing regresses if a broadcast is
+        // slow or missing.
+        new Set(
+          !peekedPlayerIsPeekable
+            ? []
+            : peekedRevealOwnerId === peekedPlayerId && peekedRevealIds
+              ? peekedRevealIds
+              : presenceState[peekedPlayerId]?.toggledDetectiveIds || []
+        )
       : toggledIds;
 
   // ---------------------------------------------------------------------
@@ -1517,8 +1720,12 @@ export default function GameBoard({
                   point anymore. Gated to preThinkActive, same phase the
                   peek panel itself is restricted to. */}
               {!peekedPlayerId && preThinkActive && lastRoundStrokes.length > 0 && (
-                <button type="button" style={styles.drawToolBtn} onClick={recallLastRoundStrokes}>
-                  🕓 Recall last round
+                <button
+                  type="button"
+                  style={{ ...styles.drawToolBtn, ...(recalledStrokes.length > 0 ? styles.drawToolBtnActive : {}) }}
+                  onClick={recallLastRoundStrokes}
+                >
+                  🕓 {recalledStrokes.length > 0 ? "Hide last round" : "Recall last round"}
                 </button>
               )}
               {peekedPlayerId && drawMode && <span style={styles.exploreHint}>Drawing on their board</span>}
@@ -1537,6 +1744,7 @@ export default function GameBoard({
             <div style={styles.rowCenter}>
               <div style={styles.passTurnNote}>
                 No legal moves available from your current station with your remaining tickets.
+                {autoPassKey ? " Passing automatically…" : ""}
               </div>
               <button
                 style={styles.primaryBtn}
@@ -1864,40 +2072,16 @@ export default function GameBoard({
                             </>
                           )}
                         </span>
-                        {/* THE clock the player is actually racing (v3.22).
-                            Sits right next to the detective it belongs to,
-                            and is the ONLY strong countdown on screen while
-                            it's running -- the round-level pooled timer is
-                            demoted to muted text on the right (see the
-                            timer wrap below), because two equally loud
-                            countdowns is exactly the confusion this UX was
-                            asked to avoid. */}
-                        {subTurnRemaining != null && (() => {
-                          // v3.23: rendered as a BAR, using the exact same
-                          // track/fill/text markup and styles as the Mr.X
-                          // and planning-phase timers below, so every
-                          // countdown in the game looks like the same
-                          // object. It stays the PROMINENT one purely
-                          // through size/weight overrides (thicker track,
-                          // larger darker label) -- the demoted round
-                          // timer is still plain muted text.
-                          const capFrac = detectiveCapSeconds ? subTurnRemaining / detectiveCapSeconds : 0;
-                          return (
-                            <span style={styles.subTurnCapBarWrap} title={`This detective's move auto-passes in ${subTurnRemaining}s`}>
-                              <span style={{ ...styles.turnTimerBarTrack, ...styles.subTurnCapBarTrack }}>
-                                <span
-                                  style={{
-                                    ...styles.turnTimerBarFill,
-                                    display: "block",
-                                    width: `${Math.max(0, Math.min(100, capFrac * 100))}%`,
-                                    background: timerBarColor(capFrac),
-                                  }}
-                                />
-                              </span>
-                              <span style={{ ...styles.turnTimerBarText, ...styles.subTurnCapBarText }}>{subTurnRemaining}s</span>
-                            </span>
-                          );
-                        })()}
+                        {/* WHO'S STILL OUT (v3.24) -- replaces the old
+                            generic team-level phrasing with the actual
+                            names and per-player progress, live. Detective-
+                            perspective only: Mr.X and spectators must
+                            never learn how far along any detective player
+                            is, so they keep the neutral label above and
+                            nothing else. */}
+                        {iAmDetective && pendingActingLabel && (
+                          <span style={styles.pendingPlayersLabel}>{pendingActingLabel}</span>
+                        )}
                       </>
                     ) : isMrXTurn ? (
                       <span>{mrxName()}'s Turn</span>
@@ -1907,21 +2091,17 @@ export default function GameBoard({
                       <span>Waiting…</span>
                     )}
                   </div>
-                  {/* Round-level pooled countdown, DEMOTED (v3.22) to a
-                      plain muted status line whenever the per-detective
-                      cap above is the live one. No ring, no bar, no
-                      color, nothing that reads as "act on me" -- it's
-                      background information about when the round ends,
-                      not a deadline the player clicks against. The full
-                      bar comes straight back for Mr.X's turn, the
-                      planning window, and once all of my detectives have
-                      acted (nothing of mine is ticking then, so the pool
-                      IS the only relevant clock again). */}
-                  {secondsRemaining != null && subTurnRemaining != null ? (
-                    <div style={styles.mapTopBarRoundPoolNote}>
-                      Round ends in {Math.floor(secondsRemaining / 60)}:{String(secondsRemaining % 60).padStart(2, "0")}
-                    </div>
-                  ) : secondsRemaining != null && (preThinkActive || actingActive || turnTimerSeconds) ? (
+                  {/* THE timer (v3.24). With the per-detective cap gone
+                      there is exactly one countdown in every phase, so
+                      this single branch now serves Mr.X's turn, the
+                      planning window AND the acting window identically --
+                      same markup, same styles, same flex sizing. That
+                      also fixes the acting phase's odd layout: its bar
+                      used to be a fixed 90px pill wedged next to the
+                      detective name with the rest of the row left empty,
+                      which is why it looked so different from the other
+                      two. It now fills the row like they do. */}
+                  {secondsRemaining != null && (preThinkActive || actingActive || turnTimerSeconds) ? (
                     <div style={styles.mapTopBarTimerWrap}>
                       {(() => {
                         // The bar's denominator changes with the phase --
@@ -2556,6 +2736,27 @@ export default function GameBoard({
                   hand currently drawing. */}
               {iAmDetective && drawEnabled && (
                 <g style={{ pointerEvents: "none" }}>
+                  {/* RECALLED LAST-ROUND LAYER (v3.24) -- painted FIRST,
+                      so it sits underneath everything drawn this round,
+                      and dimmer/thinner so it reads as background
+                      context rather than as part of the live sketch.
+                      Only ever your own board: while peeking you're
+                      looking at someone else's drawing, and layering
+                      your old marks under theirs would be nonsense. */}
+                  {!peekedPlayerId &&
+                    recalledStrokes.map((s) => (
+                      <path
+                        key={`recall-${s.id}`}
+                        d={pointsToPath(s.points)}
+                        fill="none"
+                        stroke={styles.strokeColor}
+                        strokeWidth={0.28}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        opacity={0.3}
+                        strokeDasharray="1.2 0.9"
+                      />
+                    ))}
                   {strokesToRender.map((s) => (
                     <path key={s.id} d={pointsToPath(s.points)} fill="none" stroke={styles.strokeColor} strokeWidth={0.35} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
                   ))}
@@ -2905,52 +3106,36 @@ export const styles = {
     fontSize: 15,
     fontWeight: 700,
     whiteSpace: "nowrap",
-    flexShrink: 0,
+    // v3.24: allowed to shrink now (it used to be flexShrink: 0). The
+    // acting phase can append a long "who's yet to move" list here, and
+    // a non-shrinking group would push the timer bar clean off the row
+    // in a big game. Shrinking + minWidth:0 lets the label ellipsize
+    // instead, which is the right thing to lose.
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: "hidden",
   },
   mapTopBarRound: { color: "#888", fontWeight: 600, fontSize: 13 },
   mapTopBarDivider: { color: "#ccc", fontWeight: 400 },
   mapTopBarBufferLabel: { color: "#5b4636", fontWeight: 700 },
-  // The PRIMARY acting-phase countdown (v3.22): big, bold, colored,
-  // sitting immediately beside the detective whose sub-turn it bounds.
-  // Intentionally the loudest timing element on screen.
-  // v3.23: the per-detective cap countdown is a BAR now, not a pill --
-  // same track/fill/text trio as every other timer in the game
-  // (turnTimerBar*), just sized up so it still reads as the primary
-  // countdown next to the detective it belongs to. Only these three
-  // overrides differ from the shared bar styles; everything else is
-  // spread in from turnTimerBarTrack/Fill/Text so the two can never
-  // visually drift apart.
-  subTurnCapBarWrap: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
+  // (v3.24: subTurnCapBar* and mapTopBarRoundPoolNote are gone along with
+  // the per-detective cap they styled. Every phase now uses the single
+  // shared turnTimerBar* trio, which is what makes the acting-phase bar
+  // fill the row the same way the Mr.X and planning bars always did.)
+  //
+  // "Priya (2/3) and Arjun (1/2) are yet to move" -- secondary, quiet,
+  // sits after the turn label and before the timer bar. Allowed to
+  // shrink and ellipsize rather than push the timer off the row, since
+  // in a big room this string can get long.
+  pendingPlayersLabel: {
     marginLeft: 10,
-    flexShrink: 0,
-    verticalAlign: "middle",
-  },
-  subTurnCapBarTrack: {
-    flex: "none",
-    width: 90,
-    height: 11,
-    borderRadius: 6,
-  },
-  subTurnCapBarText: {
-    fontSize: 15,
-    fontWeight: 800,
-    color: "#333",
-    minWidth: 34,
-    textAlign: "left",
-  },
-  // The DEMOTED round-level pooled countdown: plain, small, grey, no
-  // track, no fill, no color shift. Deliberately reads as a status line.
-  mapTopBarRoundPoolNote: {
-    marginLeft: "auto",
-    paddingLeft: 12,
-    color: "#9a9a9a",
+    color: "#8a8375",
     fontSize: 12,
-    fontWeight: 500,
+    fontWeight: 600,
     whiteSpace: "nowrap",
-    flexShrink: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    minWidth: 0,
   },
   timerSchedulePreview: {
     marginTop: -4,

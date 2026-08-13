@@ -78,6 +78,16 @@ export function usePresence({
   onStrokesSync,
   onStrokesRequest,
   onPeekOff,
+  // onRevealSync (v3.24) -- a player pushing the set of detective ids
+  // whose DESTINATIONS they currently have revealed on their own board.
+  // Same shape of thing as strokes_sync: a full, idempotent snapshot,
+  // pushed on every change, cached and mirrored by anyone peeking that
+  // player. This used to ride along in the Presence payload
+  // (toggledDetectiveIds) only -- which still happens, and is still what
+  // seeds a peek that starts cold -- but Presence sync is coalescing and
+  // silently lossy, so the LIVE "they just clicked a piece, show me what
+  // they're seeing" path now goes over broadcast like everything else.
+  onRevealSync,
 }) {
   const [onlinePlayerIds, setOnlinePlayerIds] = useState(new Set());
   // playerId -> their full tracked presence payload (displayName, role,
@@ -113,14 +123,90 @@ export function usePresence({
   onStrokesRequestRef.current = onStrokesRequest;
   const onPeekOffRef = useRef(onPeekOff);
   onPeekOffRef.current = onPeekOff;
+  const onRevealSyncRef = useRef(onRevealSync);
+  onRevealSyncRef.current = onRevealSync;
+
+  // -------------------------------------------------------------------
+  // OUTBOUND SEND QUEUE (v3.24) -- THE actual fix for the long-running
+  // "peek-and-draw vanishes" bug. See sendOnChannel below for the full
+  // reasoning; in short, `channel.send()` silently does nothing useful
+  // (it falls back to a REST call and resolves "error") whenever the
+  // channel is not in the `joined` state, and NOTHING in this app ever
+  // looked at that return value. Anything sent during a reconnect, a
+  // channel rebuild, or the first moments after a tab wakes up was
+  // dropped without a trace. Now it's queued and flushed on the next
+  // successful SUBSCRIBED instead.
+  // -------------------------------------------------------------------
+  const outboxRef = useRef([]);
+  const channelJoinedRef = useRef(false);
+
+  const flushOutbox = useCallback(() => {
+    const ch = channelRef.current;
+    if (!ch || !channelJoinedRef.current) return;
+    const pending = outboxRef.current;
+    outboxRef.current = [];
+    for (const msg of pending) {
+      ch.send(msg).catch((e) => console.error("Realtime flush failed:", msg.event, e));
+    }
+  }, []);
+
+  // sendOnChannel -- one gate every broadcast in this hook goes through.
+  // Returns nothing; failures are queued for retry rather than thrown.
+  const sendOnChannel = useCallback(
+    (event, payload) => {
+      const msg = { type: "broadcast", event, payload };
+      const ch = channelRef.current;
+      if (!ch || !channelJoinedRef.current) {
+        // Bounded so a long disconnection can't grow without limit. The
+        // messages that matter most here (strokes_sync, reveal_sync) are
+        // full snapshots, so only the newest of each really matters --
+        // dropping the oldest is exactly the right thing to lose.
+        outboxRef.current.push(msg);
+        if (outboxRef.current.length > 60) outboxRef.current.shift();
+        return;
+      }
+      ch.send(msg)
+        .then((res) => {
+          // With broadcast ack enabled (see the channel config), this
+          // resolves to the SERVER's answer, not just "we wrote to a
+          // socket." Anything other than "ok" means the message did not
+          // land -- previously invisible, now retried.
+          if (res !== "ok") {
+            console.warn("Realtime broadcast not acknowledged:", event, res);
+            outboxRef.current.push(msg);
+            if (outboxRef.current.length > 60) outboxRef.current.shift();
+          }
+        })
+        .catch((e) => {
+          console.error("Realtime broadcast failed:", event, e);
+          outboxRef.current.push(msg);
+          if (outboxRef.current.length > 60) outboxRef.current.shift();
+        });
+    },
+    []
+  );
 
   useEffect(() => {
     if (!supabase || !roomId || !myPlayerId) return;
 
     const channel = supabase.channel(`presence:${roomId}`, {
-      config: { presence: { key: myPlayerId } },
+      config: {
+        presence: { key: myPlayerId },
+        // ack: true is the important one -- it makes channel.send()'s
+        // promise resolve with the server's real acknowledgement instead
+        // of resolving "ok" the moment the frame is handed to the
+        // socket. Without it there is no way whatsoever for a client to
+        // learn that a broadcast was dropped, which is precisely why
+        // this bug survived two previous rounds of "fixes" that only
+        // ever adjusted what happens AFTER a message arrives.
+        // self: false keeps the existing semantics (a sender does not
+        // receive its own broadcast; the peeker's optimistic local echo
+        // covers that case).
+        broadcast: { ack: true, self: false },
+      },
     });
     channelRef.current = channel;
+    channelJoinedRef.current = false;
 
     // Peek-and-draw: a player peeking into MY screen can draw directly
     // onto it (see GameBoard.jsx) -- this arrives here as a targeted
@@ -178,6 +264,15 @@ export function usePresence({
       }
     });
 
+    // reveal_sync -- a player's current "whose destinations am I looking
+    // at" set (v3.24). Room-wide; each client decides for itself whether
+    // it cares. Ignore our own echo, same as strokes_sync.
+    channel.on("broadcast", { event: "reveal_sync" }, ({ payload }) => {
+      if (payload?.senderPlayerId && payload.senderPlayerId !== myPlayerId && onRevealSyncRef.current) {
+        onRevealSyncRef.current(payload);
+      }
+    });
+
     channel.on("presence", { event: "sync" }, () => {
       const state = channel.presenceState();
       const nowOnline = new Set(Object.keys(state));
@@ -204,11 +299,20 @@ export function usePresence({
 
     channel.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
+        channelJoinedRef.current = true;
         await channel.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable });
+        // Anything that was attempted while the channel was down goes
+        // out now, in order. This is what turns a reconnect from
+        // "silently lost every message in that window" into "delivered
+        // a moment late."
+        flushOutbox();
+      } else if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        channelJoinedRef.current = false;
       }
     });
 
     return () => {
+      channelJoinedRef.current = false;
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
@@ -277,10 +381,18 @@ export function usePresence({
   // actions land on THEIR board, not yours). A plain broadcast, not
   // Presence state -- there's nothing to "currently be," it's a single
   // event the target applies once and moves on.
-  const sendRemoteStroke = useCallback((targetPlayerId, action) => {
-    if (!channelRef.current) return;
-    channelRef.current.send({ type: "broadcast", event: "stroke", payload: { targetPlayerId, ...action } }).catch((e) => console.error("Remote stroke broadcast failed:", e));
-  }, []);
+  //
+  // v3.24: routed through sendOnChannel, so a stroke drawn while the
+  // channel happens to be re-joining is queued and delivered rather than
+  // silently discarded. Re-sending the SAME payload (same actionId) is
+  // always safe: every receiver de-duplicates on actionId, so even the
+  // non-idempotent "undo"/"erase" actions can be retried freely.
+  const sendRemoteStroke = useCallback(
+    (targetPlayerId, action) => {
+      sendOnChannel("stroke", { targetPlayerId, ...action });
+    },
+    [sendOnChannel]
+  );
 
   // sendStrokesSync -- push MY current full stroke set to the room, so
   // any client peeking me re-renders it immediately. Full snapshot, not
@@ -288,34 +400,39 @@ export function usePresence({
   // single broadcast is ever missed.
   const sendStrokesSync = useCallback(
     (strokes) => {
-      if (!channelRef.current || !myPlayerId) return;
-      channelRef.current
-        .send({ type: "broadcast", event: "strokes_sync", payload: { senderPlayerId: myPlayerId, strokes } })
-        .catch((e) => console.error("Strokes sync broadcast failed:", e));
+      if (!myPlayerId) return;
+      sendOnChannel("strokes_sync", { senderPlayerId: myPlayerId, strokes });
     },
-    [myPlayerId]
+    [myPlayerId, sendOnChannel]
+  );
+
+  // sendRevealSync -- push MY current "revealed destinations" detective
+  // id set to the room (v3.24). Exactly the same contract as
+  // sendStrokesSync: a full snapshot, cheap, idempotent, self-healing.
+  const sendRevealSync = useCallback(
+    (revealedDetectiveIds) => {
+      if (!myPlayerId) return;
+      sendOnChannel("reveal_sync", { senderPlayerId: myPlayerId, revealedDetectiveIds: revealedDetectiveIds || [] });
+    },
+    [myPlayerId, sendOnChannel]
   );
 
   // sendStrokesRequest -- ask a specific player to push me their current
   // strokes right now (sent the moment a peek starts).
   const sendStrokesRequest = useCallback(
     (targetPlayerId) => {
-      if (!channelRef.current || !myPlayerId || !targetPlayerId) return;
-      channelRef.current
-        .send({ type: "broadcast", event: "strokes_request", payload: { targetPlayerId, fromPlayerId: myPlayerId } })
-        .catch((e) => console.error("Strokes request broadcast failed:", e));
+      if (!myPlayerId || !targetPlayerId) return;
+      sendOnChannel("strokes_request", { targetPlayerId, fromPlayerId: myPlayerId });
     },
-    [myPlayerId]
+    [myPlayerId, sendOnChannel]
   );
 
   // sendPeekOff -- tell the room I've revoked peek permission, so active
   // peekers drop out of my board immediately.
   const sendPeekOff = useCallback(() => {
-    if (!channelRef.current || !myPlayerId) return;
-    channelRef.current
-      .send({ type: "broadcast", event: "peek_off", payload: { senderPlayerId: myPlayerId } })
-      .catch((e) => console.error("Peek-off broadcast failed:", e));
-  }, [myPlayerId]);
+    if (!myPlayerId) return;
+    sendOnChannel("peek_off", { senderPlayerId: myPlayerId });
+  }, [myPlayerId, sendOnChannel]);
 
-  return { onlinePlayerIds, presenceState, isInactive, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff };
+  return { onlinePlayerIds, presenceState, isInactive, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff, sendRevealSync };
 }

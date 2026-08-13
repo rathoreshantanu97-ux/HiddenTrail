@@ -28,6 +28,20 @@ import { supabase } from "./supabaseClient.js";
 // "still here" status indefinitely.
 // ---------------------------------------------------------------------------
 //
+// PEEK IS VIEW-ONLY AS OF v3.27. The "stroke" broadcast event -- a
+// peeker drawing directly onto the board of the player they were peeking
+// -- has been REMOVED entirely, along with its delivery-ledger/retry
+// machinery. Four rounds of fixes (v3.21-v3.24) never made it reliable,
+// and it was carrying most of the complexity in this file and in
+// GameBoard's stroke state. What remains is a strictly smaller, one-way
+// contract: a player publishes their own board state, and anyone peeking
+// them renders it. Nothing outside a client can write to that client's
+// strokes anymore, which removes the whole class of "whose copy is
+// authoritative / did it arrive / can it be replayed" problems.
+//
+// NOTE: normal drawing on your OWN board is a SEPARATE feature
+// (draw_enabled) and is completely unaffected by this.
+//
 // STROKES ARE NO LONGER CARRIED BY PRESENCE (v3.21). They used to ride
 // along in the tracked payload above, which made a peeker's view of a
 // peeked player's drawing depend on Presence's periodic, size-limited,
@@ -63,18 +77,6 @@ export function usePresence({
   gracePeriodSeconds = 25,
   myToggledDetectiveIds = [],
   myPeekable = true,
-  onRemoteStroke,
-  // onPeerStroke (v3.22) -- fires for a "stroke" broadcast aimed at
-  // SOMEONE ELSE. Needed for multi-peeker concurrent drawing: if three
-  // players are all peeking player P and one of them draws on P's board,
-  // the other two must see that mark immediately, not only after P's own
-  // client has committed it and echoed a strokes_sync back. Without this,
-  // every peek-drawn mark was invisible to every peeker except the one
-  // whose hand drew it (and even for them only until pointerup, since the
-  // in-progress preview is all they had). The owner's strokes_sync is
-  // still the authority -- this is a fast, optimistic, self-healing
-  // overlay that the next snapshot overwrites wholesale.
-  onPeerStroke,
   onStrokesSync,
   onStrokesRequest,
   onPeekOff,
@@ -106,17 +108,11 @@ export function usePresence({
   const [, forceTick] = useState(0); // re-render periodically so grace-period expiry gets reflected in UI
   const channelRef = useRef(null);
   const backgroundTimeoutRef = useRef(null);
-  // Ref holding the LATEST onRemoteStroke callback -- the broadcast
-  // listener is attached once per channel (channel setup only re-runs on
-  // room/player/role changes, not every render), but GameBoard passes a
-  // fresh inline function each render, so the listener reads through this
-  // ref rather than closing over a stale copy.
-  const onRemoteStrokeRef = useRef(onRemoteStroke);
-  onRemoteStrokeRef.current = onRemoteStroke;
-  const onPeerStrokeRef = useRef(onPeerStroke);
-  onPeerStrokeRef.current = onPeerStroke;
-  // Same ref-indirection reasoning as onRemoteStrokeRef above, for the
-  // three new broadcast events (see the header comment).
+  // Ref indirection for every broadcast callback: the listeners are
+  // attached once per channel (channel setup only re-runs on
+  // room/player/role changes, not every render), but App passes fresh
+  // inline functions each render, so the listeners read through these
+  // refs rather than closing over a stale copy.
   const onStrokesSyncRef = useRef(onStrokesSync);
   onStrokesSyncRef.current = onStrokesSync;
   const onStrokesRequestRef = useRef(onStrokesRequest);
@@ -208,30 +204,8 @@ export function usePresence({
     channelRef.current = channel;
     channelJoinedRef.current = false;
 
-    // Peek-and-draw: a player peeking into MY screen can draw directly
-    // onto it (see GameBoard.jsx) -- this arrives here as a targeted
-    // broadcast event (NOT Presence state, since this is a one-off
-    // action, not "current status" to keep syncing). Only apply it if
-    // I'm actually the intended target -- broadcast is room-wide, not
-    // point-to-point, so every client in the room receives every event.
-    // v3.23 DELIVERY FIX. This used to be an if/ELSE on
-    // `payload.targetPlayerId === myPlayerId`, using the `myPlayerId`
-    // captured by THIS effect's closure. That made the peeked player's
-    // own delivery (the `onRemoteStroke` branch) depend on a single
-    // identity comparison made inside the hook, while every OTHER
-    // client's delivery went down the always-true `else` branch -- which
-    // is exactly the observed failure signature: a peeker's stroke
-    // reached every other peeker but never the owner of the board.
-    // Both callbacks now fire for every stroke event, unconditionally.
-    // The consumer (GameBoard) does the routing itself, against its own
-    // `myPlayerId` prop, and de-duplicates on `actionId` so a payload
-    // arriving through both callbacks is only ever applied once (which
-    // matters for the non-idempotent "undo"/"erase" actions).
-    channel.on("broadcast", { event: "stroke" }, ({ payload }) => {
-      if (!payload?.targetPlayerId) return;
-      if (onRemoteStrokeRef.current) onRemoteStrokeRef.current(payload);
-      if (onPeerStrokeRef.current) onPeerStrokeRef.current(payload);
-    });
+    // (v3.27: the "stroke" broadcast -- peek-and-draw -- used to be
+    // handled here. It is gone; peeking is view-only now.)
 
     // strokes_sync -- a player pushing their CURRENT full stroke set to
     // the room. Room-wide like every broadcast, so each client decides
@@ -376,23 +350,9 @@ export function usePresence({
     [onlinePlayerIds, gracePeriodSeconds]
   );
 
-  // sendRemoteStroke -- fire a one-off draw action at a SPECIFIC other
-  // player (used while peeking their screen: your pen/eraser/undo
-  // actions land on THEIR board, not yours). A plain broadcast, not
-  // Presence state -- there's nothing to "currently be," it's a single
-  // event the target applies once and moves on.
-  //
-  // v3.24: routed through sendOnChannel, so a stroke drawn while the
-  // channel happens to be re-joining is queued and delivered rather than
-  // silently discarded. Re-sending the SAME payload (same actionId) is
-  // always safe: every receiver de-duplicates on actionId, so even the
-  // non-idempotent "undo"/"erase" actions can be retried freely.
-  const sendRemoteStroke = useCallback(
-    (targetPlayerId, action) => {
-      sendOnChannel("stroke", { targetPlayerId, ...action });
-    },
-    [sendOnChannel]
-  );
+  // (v3.27: sendRemoteStroke -- "draw onto the board of the player I'm
+  // peeking" -- was removed with peek-and-draw. Peeking is view-only, so
+  // there is no outbound path from a peeker to another player's board.)
 
   // sendStrokesSync -- push MY current full stroke set to the room, so
   // any client peeking me re-renders it immediately. Full snapshot, not
@@ -434,5 +394,5 @@ export function usePresence({
     sendOnChannel("peek_off", { senderPlayerId: myPlayerId });
   }, [myPlayerId, sendOnChannel]);
 
-  return { onlinePlayerIds, presenceState, isInactive, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff, sendRevealSync };
+  return { onlinePlayerIds, presenceState, isInactive, sendStrokesSync, sendStrokesRequest, sendPeekOff, sendRevealSync };
 }

@@ -146,9 +146,7 @@ export default function GameBoard({
   onExploreModeChange, // (detectiveIds: number[]) => void -- reports this client's own EXTRA toggled-on detective ids (beyond their own, which are always shown by default) upward, so App.jsx can broadcast them via Presence
   onPeekableChange, // (peekable: boolean) => void -- reports this client's own "let teammates peek at my screen" preference upward, for the same Presence broadcast
   onStrokesChange, // (strokes: Stroke[]) => void -- reports this client's own drawing strokes upward, so App.jsx can answer a peer's strokes_request with the current set
-  onRemoteDraw, // (targetPlayerId, action) => void -- fires a draw action AT a specific other player's board (used while peeking them), via a one-off Realtime broadcast rather than persistent state
-  onRegisterRemoteStrokeHandler, // (handler: (payload) => void) => void -- called once on mount so App.jsx can wire incoming remote-draw events (from a teammate peeking ME) into this component's own stroke state
-  onRegisterPeerEventHandlers, // ({onStrokesSync, onPeekOff}) => void -- same handoff pattern, for the two broadcast events that drive peek rendering (see usePresence.js)
+  onRegisterPeerEventHandlers, // ({onStrokesSync, onRevealSync, onPeekOff}) => void -- called once on mount so App.jsx can wire the broadcast events that drive peek rendering (see usePresence.js) into this component's state
   onBroadcastStrokes, // (strokes) => void -- push MY current strokes to the room so active peekers re-render live. Replaces the old Presence-payload delivery, which silently dropped oversized/coalesced updates.
   onBroadcastReveal, // (revealedDetectiveIds) => void -- push MY current destination-reveal set to the room so active peekers mirror it live (v3.24). Same contract as onBroadcastStrokes.
   onRequestPeerStrokes, // (targetPlayerId) => void -- ask a player for their current strokes the moment I start peeking them, so I don't wait for their next edit
@@ -164,7 +162,8 @@ export default function GameBoard({
   actingActive = false, // true during the shared simultaneous acting phase -- any of your not-yet-acted detectives may be selected and moved
   mrxSecondsForBar = null, // Mr. X's full turn window (schedule.mrxSeconds) -- the denominator for the timer bar while timerPhase === "mrx"
   bufferSecondsForBar = null, // the shared pre-think buffer's full length (schedule.bufferSeconds) -- the denominator while timerPhase === "planning"
-  actSecondsForBar = null, // the shared acting phase's full length (schedule.actSeconds) -- the denominator while timerPhase === "acting"
+  actSecondsForBar = null, // v3.27: THIS player's OWN acting-pool length -- the denominator while timerPhase === "acting" (Mr.X/spectators get the safety cap here instead, since they have no pool of their own)
+  safetyCapRemaining = null, // v3.27: seconds left on the round's OUTER SAFETY CAP (sized off the busiest player). Displayed as a muted backstop line only -- it drives nobody's ticket forfeits.
   // (v3.24: detectiveCapSeconds is gone. The acting phase has exactly one
   // clock again -- the pooled per-round window -- and a player's spotlight
   // only advances when they actually move or pass. See the acting-phase
@@ -250,29 +249,15 @@ export default function GameBoard({
   const [peekedRevealIds, setPeekedRevealIds] = useState(null); // null = no broadcast snapshot for the current target yet
   const [peekedRevealOwnerId, setPeekedRevealOwnerId] = useState(null);
   const revealSyncCacheRef = React.useRef(new Map());
-  // Action ids already applied, so a "stroke" payload delivered through
-  // BOTH broadcast callbacks (see usePresence.js v3.23) is applied once.
-  // Matters because "undo" and "erase" are not idempotent.
-  const appliedStrokeActionIdsRef = React.useRef(new Set());
-  // PEEK-DRAW DELIVERY LEDGER (v3.24). actionId -> {targetPlayerId,
-  // action, attempts, strokeId, sentAt}. An entry lives here from the
-  // moment a peek-draw goes out until the OWNER of that board publishes
-  // a strokes_sync that proves it landed. See applyStrokeAction and the
-  // retry effect below for the full rationale -- in short, this is the
-  // first version of this feature that treats "sent" and "delivered" as
-  // different things, which is what the previous two fixes conflated.
-  const pendingPeekDrawsRef = React.useRef(new Map());
-  const confirmPeekDrawsRef = React.useRef(() => {});
-  confirmPeekDrawsRef.current = (ownerPlayerId, ownerStrokes) => {
-    if (pendingPeekDrawsRef.current.size === 0) return;
-    const strokeIds = new Set((ownerStrokes || []).map((s) => s.id));
-    for (const [actionId, entry] of Array.from(pendingPeekDrawsRef.current.entries())) {
-      if (entry.targetPlayerId !== ownerPlayerId) continue;
-      if (entry.strokeId ? strokeIds.has(entry.strokeId) : Date.now() > entry.sentAt) {
-        pendingPeekDrawsRef.current.delete(actionId);
-      }
-    }
-  };
+  // (v3.27: appliedStrokeActionIdsRef and the peek-draw delivery ledger
+  // pendingPeekDrawsRef / confirmPeekDrawsRef lived here. All three
+  // existed solely to make peek-and-draw deliver reliably, and all three
+  // are gone with it. The remaining sync surface -- a player publishing
+  // their own strokes and reveal set -- is made of FULL, IDEMPOTENT,
+  // single-writer snapshots, so there is nothing left to de-duplicate,
+  // acknowledge or retry: a missed message is simply corrected by the
+  // next one.)
+  //
   // The broadcast handlers below are installed once, so they must read
   // the CURRENT peek target through a ref rather than a stale closure.
   const peekedPlayerIdRef = React.useRef(peekedPlayerId);
@@ -288,6 +273,18 @@ export default function GameBoard({
   useEffect(() => {
     if (!preThinkActive && peekedPlayerId) setPeekedPlayerId(null);
   }, [preThinkActive, peekedPlayerId]);
+
+  // v3.27: starting a peek drops any armed pen/eraser. Peeking is
+  // view-only, so leaving a tool selected would just be a dead cursor
+  // (the pointer handlers refuse to draw) with a lit-up button
+  // suggesting otherwise.
+  useEffect(() => {
+    if (peekedPlayerId) {
+      setDrawMode(null);
+      setLiveStrokePoints(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peekedPlayerId]);
 
   // BELT-AND-BRACES BACKUP ONLY (v3.21). Releasing a peek when the
   // peeked player opts out is now driven PRIMARILY by an explicit
@@ -438,117 +435,28 @@ export default function GameBoard({
     return screenPointToSvgPoint(clientX, clientY);
   }
 
-  // While peeking, drawing actions are redirected to the PEEKED player's
-  // board instead of your own -- "reaching over and drawing on their
-  // sheet while looking at it" (explicit design decision), rather than
-  // silently accumulating on a board of yours that isn't even visible
-  // right now. Local strokes and remote-targeted strokes never mix.
+  // applyStrokeAction -- v3.27: a draw action ALWAYS lands on your own
+  // board, full stop. Peeking no longer redirects it to the peeked
+  // player (peek-and-draw is gone), and while a peek is active the
+  // drawing tools are hidden and the pointer handlers below refuse to
+  // start a stroke at all, so this can't even be reached mid-peek.
   //
-  // v3.22 PERSISTENCE FIX. Previously the peeker's half of this was
-  // purely fire-and-forget: the stroke went out as a broadcast and the
-  // peeker's own view showed NOTHING until the peeked player's client
-  // had committed it and echoed a full strokes_sync back. The in-progress
-  // preview (liveStrokePoints) is cleared on pointerup, so in the gap --
-  // or permanently, if that round trip didn't land -- the line simply
-  // vanished the instant the pointer was released. It now also applies
-  // OPTIMISTICALLY to the local peeked-board copy, so the mark is stable
-  // from the moment it's drawn, and the owner's next strokes_sync (the
-  // authority, a full idempotent snapshot) just confirms or corrects it.
+  // What this deletes, and why it's the right call: the old version
+  // stamped every action with an actionId, pushed it into a delivery
+  // ledger, echoed it optimistically onto a local copy of someone
+  // ELSE's board, and relied on that other client's next snapshot to
+  // confirm or correct it -- four interacting mechanisms, three rounds
+  // of fixes (v3.22/v3.23/v3.24), and still unreliable in live play.
+  // With one writer per board there is nothing to reconcile.
   //
-  // v3.24 -- THE ACTUAL PERSISTENCE FIX. The two earlier attempts both
-  // reasoned about what happens to a peek-draw AFTER it arrives (who
-  // routes it, who de-duplicates it, who caches it) and both silently
-  // assumed that a broadcast which was SENT was a broadcast that
-  // ARRIVED. That assumption is false: supabase-js resolves
-  // channel.send() to "error" and quietly falls back to a REST call
-  // whenever the channel isn't in the joined state, and nothing here
-  // ever inspected that result. A stroke drawn during a reconnect, a
-  // channel rebuild, or the first second after a tab wakes up went
-  // nowhere at all -- which is exactly the reported symptom (invisible
-  // to EVERYONE, including the board's owner, while the drawer's own
-  // optimistic copy survived only until the next snapshot overwrote it).
-  // So every peek-draw is now recorded as UNCONFIRMED and re-sent until
-  // the owner's own strokes_sync proves it landed. See
-  // pendingPeekDrawsRef / the retry effect below.
+  // NOTE: this is only about drawing on someone else's board. Ordinary
+  // drawing on your own board (draw_enabled) is untouched.
   function applyStrokeAction(action) {
-    if (peekedPlayerId) {
-      // actionId (v3.23): the receiving side may now be handed the same
-      // payload through two different broadcast callbacks, so every
-      // action carries a unique id it can de-duplicate on. That same id
-      // is what makes RE-SENDING safe (v3.24): the owner applies a given
-      // actionId at most once, so even "undo"/"erase" can be retried.
-      const stamped = { ...action, actionId: `${Date.now()}-${Math.random()}` };
-      onRemoteDraw && onRemoteDraw(peekedPlayerId, stamped);
-      pendingPeekDrawsRef.current.set(stamped.actionId, {
-        targetPlayerId: peekedPlayerId,
-        action: stamped,
-        attempts: 1,
-        // For an "add" we can confirm precisely (does the owner's
-        // snapshot contain this stroke id?). For undo/erase there is no
-        // such marker, so we settle for "the owner has published a
-        // snapshot since we sent it," which is a strictly weaker but
-        // still sound signal that our message reached a live client.
-        strokeId: action.kind === "add" && action.stroke ? action.stroke.id : null,
-        sentAt: Date.now(),
-      });
-      // Optimistic local echo onto the board I'm looking at. Guarded on
-      // ownership so it can never land on a previously-peeked player's
-      // leftover set.
-      setPeekedStrokesOwnerId(peekedPlayerId);
-      setPeekedStrokes((prev) => applyActionToStrokes(peekedStrokesOwnerId === peekedPlayerId ? prev : [], stamped));
-      return;
-    }
     setMyStrokes((prev) => applyActionToStrokes(prev, action));
   }
 
-  // routeIncomingStroke (v3.23) -- THE single entry point for every
-  // inbound peek-draw ("stroke") broadcast, replacing the old split
-  // between handleIncomingRemoteStroke ("it's for me") and
-  // handleIncomingPeerStroke ("it's for someone else"). That split used
-  // to be decided inside usePresence, against the player id captured by
-  // its channel effect, and only the "for me" half was ever wired to the
-  // board owner -- so a peeker's stroke reliably reached every OTHER
-  // peeker (the always-taken else branch) and never the owner, whose
-  // client is supposed to be the authority. Now usePresence forwards
-  // every stroke event through both callbacks and the decision is made
-  // right here, against this component's own myPlayerId prop, with the
-  // actionId guard below making the duplicate delivery harmless.
-  //
-  // Landing in myStrokes is what makes a peek-drawn stroke durable: it
-  // becomes an ordinary stroke of the peeked player's, re-broadcast to
-  // every other peeker via strokes_sync, and covered by their round
-  // auto-clear and "Recall last round" exactly like their own marks.
-  function routeIncomingStroke(payload) {
-    const target = payload?.targetPlayerId;
-    if (!target) return;
-    const actionId = payload.actionId;
-    if (actionId) {
-      if (appliedStrokeActionIdsRef.current.has(actionId)) return;
-      // Bounded: a round's worth of actions is a few dozen, and the set
-      // only exists to collapse the double delivery of the same payload.
-      if (appliedStrokeActionIdsRef.current.size > 500) appliedStrokeActionIdsRef.current.clear();
-      appliedStrokeActionIdsRef.current.add(actionId);
-    }
-    if (myPlayerId && target === myPlayerId) {
-      setMyStrokes((prev) => applyActionToStrokes(prev, payload));
-      return;
-    }
-    // A peek-draw aimed at a player OTHER than me. Only interesting if
-    // that's the player I'm currently peeking too -- then N peekers of
-    // the same board all see each other's marks live (v3.22).
-    if (target !== peekedPlayerIdRef.current) return;
-    setPeekedStrokesOwnerId(target);
-    setPeekedStrokes((prev) => applyActionToStrokes(prev, payload));
-  }
-  // Expose this to App.jsx so it can wire it into usePresence's
-  // onRemoteStroke callback -- App.jsx owns the Presence hook, GameBoard
-  // owns the actual strokes state, so this ref is how the incoming event
-  // reaches the right place without threading a second prop each render.
-  const routeIncomingStrokeRef = React.useRef(routeIncomingStroke);
-  routeIncomingStrokeRef.current = routeIncomingStroke;
   useEffect(() => {
-    onRegisterRemoteStrokeHandler && onRegisterRemoteStrokeHandler((payload) => routeIncomingStrokeRef.current(payload));
-    // The two broadcast-driven peek events. Both read the live peek
+    // The broadcast-driven peek events. All read the live peek
     // target through peekedPlayerIdRef, since these handlers are
     // installed exactly once and would otherwise capture the target
     // value from mount time (i.e. null, forever).
@@ -563,14 +471,6 @@ export default function GameBoard({
           if (!payload?.senderPlayerId) return;
           const strokes = payload.strokes || [];
           strokesSyncCacheRef.current.set(payload.senderPlayerId, strokes);
-          // v3.24: an owner's snapshot is the CONFIRMATION signal for any
-          // peek-draw I sent at that owner. Anything of mine that this
-          // snapshot already contains is delivered for certain and can
-          // stop being retried; anything it doesn't contain gets sent
-          // again (see the retry effect below). This is the piece both
-          // previous attempts at this bug were missing -- they assumed a
-          // broadcast that was sent had arrived.
-          confirmPeekDrawsRef.current(payload.senderPlayerId, strokes);
           if (payload.senderPlayerId === peekedPlayerIdRef.current) {
             setPeekedStrokes(strokes);
             setPeekedStrokesOwnerId(payload.senderPlayerId);
@@ -588,10 +488,6 @@ export default function GameBoard({
             setPeekedRevealOwnerId(payload.senderPlayerId);
           }
         },
-        // Second delivery path for peek-draws: usePresence now forwards
-        // EVERY "stroke" event through both callbacks and lets
-        // routeIncomingStroke decide who it's for (see there).
-        onPeerStroke: (payload) => routeIncomingStrokeRef.current(payload),
         // A player revoked peek permission. If that's who I'm peeking,
         // drop out immediately -- this is the PRIMARY release path (the
         // Presence-diff effect above is only a backup).
@@ -606,14 +502,10 @@ export default function GameBoard({
 
   const ERASE_RADIUS = 2.5; // map-space units, shared by local + remote erase
 
-  // applyActionToStrokes -- ONE definition of what a draw action means,
-  // used by every path now (my own drawing, a stroke drawn onto my board
-  // by a peeker, and a peeker's optimistic local echo). Previously the
-  // same three-branch switch was written out twice and the peeker path
-  // had no branch at all, which is how the peek-and-draw stroke ended up
-  // with nowhere durable to live. Pure: takes a list, returns a new list.
-  // "add" is idempotent on stroke id, so an optimistic apply followed by
-  // the owner's authoritative snapshot can never double up a line.
+  // applyActionToStrokes -- what a draw action means. Since v3.27 there
+  // is exactly ONE caller (your own drawing on your own board), which is
+  // rather the point: this used to be shared by three paths writing to
+  // two different boards. Pure: takes a list, returns a new list.
   function applyActionToStrokes(list, action) {
     const prev = list || [];
     if (action.kind === "add") {
@@ -628,8 +520,15 @@ export default function GameBoard({
     return prev;
   }
 
+  // v3.27: while peeking you are looking at SOMEONE ELSE'S board, so the
+  // pen must do nothing at all -- not draw on theirs (that feature is
+  // gone) and not silently accumulate on your own invisible board
+  // either, which would be worse than useless. The toolbar is hidden
+  // during a peek too; this is the enforcement behind that.
+  const drawingBlocked = !!peekedPlayerId;
+
   function handleDrawPointerDown(e) {
-    if (!drawMode) return;
+    if (!drawMode || drawingBlocked) return;
     const p = pointFromEvent(e);
     if (!p) return;
     if (drawMode === "pen") {
@@ -655,7 +554,7 @@ export default function GameBoard({
   const MIN_POINT_SPACING = 0.6;
 
   function handleDrawPointerMove(e) {
-    if (!drawMode) return;
+    if (!drawMode || drawingBlocked) return;
     const p = pointFromEvent(e);
     if (!p) return;
     if (drawMode === "pen" && liveStrokePoints) {
@@ -670,6 +569,10 @@ export default function GameBoard({
   }
 
   function handleDrawPointerUp() {
+    if (drawingBlocked) {
+      setLiveStrokePoints(null);
+      return;
+    }
     if (drawMode === "pen" && liveStrokePoints && liveStrokePoints.length > 1) {
       applyStrokeAction({ kind: "add", stroke: { id: `${Date.now()}-${Math.random()}`, points: liveStrokePoints } });
     }
@@ -715,29 +618,11 @@ export default function GameBoard({
     return () => clearInterval(id);
   }, []);
 
-  // PEEK-DRAW RETRY (v3.24) -- the other half of the delivery ledger.
-  // Every 1.5s, anything still unconfirmed goes out again with the SAME
-  // actionId (safe: receivers de-duplicate on it). Gives up after 8
-  // attempts / ~12s, which is far longer than any realistic reconnect
-  // and well inside a single planning window, so a genuinely dead peer
-  // can't leave this looping forever.
-  const onRemoteDrawRef = React.useRef(onRemoteDraw);
-  onRemoteDrawRef.current = onRemoteDraw;
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (pendingPeekDrawsRef.current.size === 0) return;
-      for (const [actionId, entry] of Array.from(pendingPeekDrawsRef.current.entries())) {
-        if (entry.attempts >= 8) {
-          pendingPeekDrawsRef.current.delete(actionId);
-          console.warn("Peek-draw never confirmed by the board's owner; giving up:", actionId);
-          continue;
-        }
-        entry.attempts += 1;
-        if (onRemoteDrawRef.current) onRemoteDrawRef.current(entry.targetPlayerId, entry.action);
-      }
-    }, 1500);
-    return () => clearInterval(id);
-  }, []);
+  // (v3.27: the peek-draw retry loop lived here -- 1.5s re-sends of any
+  // unconfirmed peek-draw, giving up after 8 attempts. Removed with the
+  // feature. The two heartbeats above are what remain, and they are a
+  // different, much weaker kind of thing: periodic re-announcements of a
+  // full snapshot, not per-action delivery tracking.)
 
   function toggleDetectiveHighlight(detId) {
     setToggledIds((prev) => {
@@ -1360,16 +1245,32 @@ export default function GameBoard({
       ? // v3.24: prefer the BROADCAST reveal snapshot for this exact
         // player when we have one -- that's the live path, arriving
         // within a frame or two of their click. The Presence payload
-        // (toggledDetectiveIds) stays as the fallback for a peek that
-        // starts before any broadcast has been seen, and for the
-        // not-peekable case, so nothing regresses if a broadcast is
-        // slow or missing.
+        // (toggledDetectiveIds) is the next fallback, for a peek that
+        // starts before any broadcast has been seen.
+        //
+        // v3.27 -- THE "PEEK SHOWS NOTHING" FIX. Both of those sources
+        // are NETWORK-DELIVERED, and when neither had arrived yet this
+        // fell through to an empty set: a peeker who started a peek got
+        // a completely bare board -- no rings, no destinations, nothing
+        // -- and had no way to tell "they genuinely have nothing
+        // revealed" apart from "their state hasn't reached me." That is
+        // exactly the reported "peeking doesn't even show their board."
+        //
+        // Now the final fallback is DERIVED, not delivered: the peeked
+        // player's OWN detectives, straight out of the roster this
+        // client already has. That is precisely what their board shows
+        // by default (their own detectives are seeded on, see
+        // seededOwnRef), so a cold peek renders their real default view
+        // on the first frame with zero network dependency, and the
+        // broadcast snapshot simply refines it the moment it lands.
         new Set(
           !peekedPlayerIsPeekable
             ? []
             : peekedRevealOwnerId === peekedPlayerId && peekedRevealIds
               ? peekedRevealIds
-              : presenceState[peekedPlayerId]?.toggledDetectiveIds || []
+              : presenceState[peekedPlayerId]?.toggledDetectiveIds?.length
+                ? presenceState[peekedPlayerId].toggledDetectiveIds
+                : detectivePlayersRoster.find((p) => p.playerId === peekedPlayerId)?.detectiveIds || []
         )
       : toggledIds;
 
@@ -1707,9 +1608,15 @@ export default function GameBoard({
               locking their OWN board (peeking blocks clicks) right as
               their own turn to act starts. See the auto-release effect
               below for the case where the buffer ends WHILE peeking. */}
+          {/* v3.27 GATING FIX (part of "why did peeking sometimes show
+              nothing at all?"). This panel used to ALSO require
+              routeExplorerEnabled -- an unrelated admin feature flag.
+              With route explorer off, peek had its own flag switched on
+              and still silently never appeared, with no message
+              explaining why. Peek is gated on peek_enabled and nothing
+              else now. */}
           {iAmDetective &&
             peekEnabled &&
-            routeExplorerEnabled &&
             preThinkActive &&
             detectivePlayersRoster.filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false).length > 0 && (
               <div style={styles.huddlePanel}>
@@ -1744,7 +1651,11 @@ export default function GameBoard({
               it's a durable preference you'd want to set once, not
               something to fumble with in the few seconds the buffer is
               actually running. */}
-          {iAmDetective && peekEnabled && routeExplorerEnabled && (
+          {/* Same v3.27 gating fix: this opt-out belongs to peek, not to
+              the route explorer. Leaving it behind routeExplorerEnabled
+              also meant a player could not even SEE, let alone change,
+              whether teammates were allowed to look at their board. */}
+          {iAmDetective && peekEnabled && (
             <label style={styles.peekToggleRow}>
               <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
               Let teammates peek into my screen
@@ -1753,10 +1664,12 @@ export default function GameBoard({
 
           {/* Freehand drawing -- pen/eraser/undo only, no color picker (a
               single fixed graphite color for everyone, see styles.strokeColor
-              below), never visible to Mr.X. While peeking a teammate's
-              screen, these three buttons draw on THEIR board instead of
-              yours (see applyStrokeAction) -- the label reflects that. */}
-          {iAmDetective && drawEnabled && (
+              below), never visible to Mr.X.
+              v3.27: hidden entirely WHILE PEEKING. Peeking is view-only
+              now, so there is no board of yours on screen to draw on and
+              no way to draw on theirs. Drawing on your own board when
+              you're not peeking is completely unchanged. */}
+          {iAmDetective && drawEnabled && !peekedPlayerId && (
             <div style={styles.drawToolbar}>
               <button
                 type="button"
@@ -1791,8 +1704,14 @@ export default function GameBoard({
                   🕓 {recalledStrokes.length > 0 ? "Hide last round" : "Recall last round"}
                 </button>
               )}
-              {peekedPlayerId && drawMode && <span style={styles.exploreHint}>Drawing on their board</span>}
             </div>
+          )}
+
+          {/* v3.27: replaces the old "Drawing on their board" hint. Says
+              plainly what peeking now is, so the absence of the pen while
+              peeking reads as intentional rather than broken. */}
+          {iAmDetective && peekedPlayerId && (
+            <div style={styles.exploreHint}>👁️ View-only: you're watching their board live. You can't draw on it.</div>
           )}
 
           {/* NO-LEGAL-MOVES PASS. v3.25 narrowed this to the only two
@@ -2171,6 +2090,18 @@ export default function GameBoard({
                             nothing else. */}
                         {iAmDetective && pendingActingLabel && (
                           <span style={styles.pendingPlayersLabel}>{pendingActingLabel}</span>
+                        )}
+                        {/* SAFETY-CAP LINE (v3.27). The prominent bar to
+                            the right is now each player's OWN pool, so
+                            this muted line is the only place the round's
+                            outer bound appears. It is deliberately NOT
+                            the thing anyone should be playing to: your
+                            own detectives are resolved when YOUR pool
+                            runs out, not when this does. It exists so a
+                            round can never run longer than the busiest
+                            player's window under any circumstance. */}
+                        {safetyCapRemaining != null && (
+                          <span style={styles.pendingPlayersLabel}>Round ends in {safetyCapRemaining}s at the latest</span>
                         )}
                       </>
                     ) : isMrXTurn ? (
@@ -2872,7 +2803,43 @@ export default function GameBoard({
               if (pendingMove.stay) {
                 const stayer = isMrXTurn ? match.mrX : activeDetective;
                 if (!stayer) return null;
-                const payableModes = STAY_TICKET_ORDER.filter((m) => (stayer.tickets?.[m] || 0) > 0);
+                // v3.27 -- CONNECTION-RESTRICTED TICKET CHOICE. The
+                // options offered are the types the player HOLDS
+                // intersected with the types that genuinely have an
+                // outgoing connection from the station they're standing
+                // on (map.stationModes, a Set built from the map's own
+                // edge list in mapSchema.js). Holding a metro ticket at a
+                // station no metro line touches is no longer a valid
+                // thing to give up.
+                //
+                // Why this rule exists: with forfeited tickets now going
+                // to Mr.X (v3.27), an unrestricted choice let a
+                // coordinated team decide exactly which types Mr.X would
+                // and wouldn't be fed, independently of anything on the
+                // board. The map now constrains that.
+                //
+                // The server enforces the identical rule in
+                // pass_detective_turn / mrx_stay_here and rejects a
+                // request that violates it, so this is the honest UI for
+                // a rule that holds regardless -- not the rule itself.
+                //
+                // FALLBACK: a station whose only connections are ferry
+                // (westeros #62 is a real example) yields no chargeable
+                // type at all. There, rather than offering nothing, we
+                // fall back to every held type -- which is exactly what
+                // the server's pick_stay_ticket does in the same case.
+                const stayStationModes = map.stationModes?.[pendingMove.to];
+                const connectedModes = STAY_TICKET_ORDER.filter((m) => stayStationModes?.has(m));
+                const heldModes = STAY_TICKET_ORDER.filter((m) => (stayer.tickets?.[m] || 0) > 0);
+                const connectedHeld = connectedModes.length > 0 ? heldModes.filter((m) => connectedModes.includes(m)) : heldModes;
+                // Second fallback, matching pick_stay_ticket's last
+                // resort exactly: they hold tickets, but none of a type
+                // that connects here. Something still has to be
+                // forfeited (the stay always costs one), so offer what
+                // they do hold rather than showing a misleading "nothing
+                // to forfeit" and having the server silently charge them
+                // a type the UI never mentioned.
+                const payableModes = connectedHeld.length > 0 ? connectedHeld : heldModes;
                 const who = isMrXTurn ? mrxName() : detectiveName(activeDetective.id);
                 const stayOptions =
                   payableModes.length > 0

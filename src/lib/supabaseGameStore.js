@@ -287,6 +287,21 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     [roomId, myPlayerId, myPlayerSecret, refreshMatch]
   );
 
+  // expireActingPools (v3.27) -- fired when THIS client's own acting pool
+  // runs out. Untargeted and fully server-authoritative (see the API
+  // comment), so it is both safe to call from anywhere and safe for
+  // several clients to call at once.
+  const expireActingPools = useCallback(async () => {
+    if (!roomId || !myPlayerId) return;
+    try {
+      await api.expireActingPools({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret });
+      await refreshMatch();
+    } catch (e) {
+      // Same reasoning as beginActingPhase -- benign races, not worth an error banner.
+      console.error("expireActingPools failed:", e);
+    }
+  }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
+
   const forceEndActingPhase = useCallback(async () => {
     if (!roomId || !myPlayerId) return;
     try {
@@ -322,6 +337,7 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     passDetectiveTurn,
     beginActingPhase,
     setPlanningReady,
+    expireActingPools,
     forceEndActingPhase,
     beginTurnScreen,
     resetToSetup,

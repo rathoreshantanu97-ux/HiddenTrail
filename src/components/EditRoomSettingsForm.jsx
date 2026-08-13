@@ -611,10 +611,10 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
                   <div>2. No shared planning window — detectives go straight to the acting phase.</div>
                 )}
                 <div>
-                  3. Detectives' acting phase: {schedule.actSeconds}s if every player controls exactly one detective, up to {worstCaseActing}s if a single
-                  player ends up holding all {numDetectives} (base {schedule.actSeconds}s + {schedule.extraSeatSeconds}s per extra detective). All players act
-                  at the same time inside this one shared window; a player holding several detectives moves theirs one after another, and the window is sized
-                  so the busiest player can get through all of theirs.
+                  3. Detectives' acting phase: every player acts at the same time, but each one now gets their OWN clock, sized off how many detectives THEY
+                  hold — {schedule.actSeconds}s for a single detective, plus {schedule.extraSeatSeconds}s for each extra one (so up to {worstCaseActing}s for a
+                  player holding all {numDetectives}). When a player's own clock runs out, only THEIR unmoved detectives stay put and forfeit a ticket to
+                  Mr. X; nobody else is affected. The round itself can never run past {worstCaseActing}s as an outer safety limit.
                 </div>
               </div>
             );

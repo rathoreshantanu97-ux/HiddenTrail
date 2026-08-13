@@ -98,20 +98,46 @@ export function computeTurnSchedule(actSeconds, bufferSeconds, ratios = {}, boun
   return { actSeconds, bufferSeconds: effectiveBuffer, mrxSeconds, extraSeatSeconds, extraSeatSecondsFromRatio };
 }
 
-// actingWindowSeconds -- the TOTAL length of the shared acting phase.
-// The phase runs concurrently for every player, but each player works
-// through their OWN detectives sequentially inside it (see GameBoard's
-// sub-turn model), so the window has to be long enough for whichever
-// single player has the most detectives to get through all of theirs:
+// actingWindowSeconds -- ONE player's OWN acting pool (v3.27).
 //
-//   base act time + extraSeatSeconds * (maxDetectivesForAnyOnePlayer - 1)
+//   base act time + extraSeatSeconds * (that player's own detective count - 1)
 //
-// A player with fewer detectives simply finishes early and waits -- the
-// window is deliberately sized for the slowest case, not averaged, since
-// cutting the busiest player off mid-sequence would be a correctness
-// problem, not just an inconvenience.
-export function actingWindowSeconds(schedule, maxDetectivesForAnyOnePlayer) {
+// v3.24-v3.26 called this same function with the BUSIEST player's count
+// and used the single number it returned as one shared round-level pool
+// for everybody. That had two problems worth naming: a player with one
+// detective silently inherited the busiest player's whole window (so the
+// act time the host configured meant nothing to most seats), and nobody's
+// tickets were forfeited until that one shared deadline passed, which
+// made the slowest seat set the pace for the entire table.
+//
+// The math is unchanged -- what changed is WHOSE count gets passed in.
+// Each player now computes their own pool from their own seat count, and
+// their pool expiring forfeits only their own outstanding detectives'
+// tickets (server-side: expire_acting_pools). The busiest player's value
+// is still computed, but only as the round's outer SAFETY CAP -- see
+// actingSafetyCapSeconds below.
+//
+// MUST stay in exact numerical agreement with the server's
+// player_acting_pool_seconds(), which is the authority for the actual
+// ticket forfeits; this copy only drives what the clock LOOKS like.
+export function actingWindowSeconds(schedule, detectiveCountForThisPlayer) {
   if (!schedule || !schedule.actSeconds) return null;
-  const n = Math.max(1, maxDetectivesForAnyOnePlayer || 1);
+  const n = Math.max(1, detectiveCountForThisPlayer || 1);
   return schedule.actSeconds + (schedule.extraSeatSeconds || 0) * (n - 1);
+}
+
+// actingSafetyCapSeconds -- the absolute outer bound on a round, sized
+// off whoever holds the MOST detectives. Since every individual pool is
+// computed by the same formula off a smaller-or-equal count, this is by
+// construction never shorter than any individual pool, which is exactly
+// what makes it a safe backstop.
+//
+// It deliberately drives NOTHING except the muted "round ends in…" line
+// and the last-resort force_end_acting_phase call: no player's own
+// timeout or ticket forfeit depends on it anymore. It exists so a round
+// can never hang -- most concretely for detectives whose owning player
+// row has vanished entirely (a seat freed mid-round), which the
+// per-player sweep cannot reach by construction.
+export function actingSafetyCapSeconds(schedule, maxDetectivesForAnyOnePlayer) {
+  return actingWindowSeconds(schedule, maxDetectivesForAnyOnePlayer);
 }

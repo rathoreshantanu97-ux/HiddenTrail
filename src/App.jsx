@@ -275,10 +275,11 @@ export default function App({ account, onLogout }) {
   // hook now needs the seat-ownership data (role -> player) to apportion
   // detective act-window time correctly for multi-seat players.
   const [mpPlayersList, setMpPlayersList] = useState([]);
-  // How many detectives the BUSIEST single player controls. Sizes the
-  // shared acting window, because every player works through their own
-  // detectives sequentially inside that one window (see turnSchedule.js's
-  // actingWindowSeconds). Mr.X and any role-less row are excluded.
+  // How many detectives the BUSIEST single player controls. As of v3.27
+  // this sizes ONLY the round's outer safety cap (see
+  // actingSafetyCapSeconds in turnSchedule.js) -- individual players'
+  // clocks are sized off their own seat count instead. Mr.X and any
+  // role-less row are excluded.
   const mpMaxDetectivesForAnyOnePlayer = useMemo(() => {
     let max = 1;
     for (const p of mpPlayersList) {
@@ -288,6 +289,14 @@ export default function App({ account, onLogout }) {
     }
     return max;
   }, [mpPlayersList]);
+  // How many detectives *I* control -- the size of MY OWN acting pool
+  // (v3.27). Read from my own role string rather than the roster, so it
+  // is correct immediately on join, before the first players poll lands.
+  // 0 for Mr.X and spectators, who have no pool of their own.
+  const mpMyDetectiveCount = useMemo(() => {
+    if (!mpRole || mpRole === "mrx") return 0;
+    return mpRole.split(",").filter((s) => /^d\d+$/.test(s)).length;
+  }, [mpRole]);
   const {
     secondsRemaining: mpSecondsRemaining,
     turnTimerSeconds: mpTurnTimerSeconds,
@@ -297,11 +306,13 @@ export default function App({ account, onLogout }) {
     mrxSeconds: mpMrxSeconds,
     bufferSeconds: mpBufferSeconds,
     actSeconds: mpActSeconds,
+    safetyCapRemaining: mpSafetyCapRemaining,
   } = useTurnTimer({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     map: getEffectiveMap(liveMapId),
     match: supabaseStore.match,
     maxDetectivesForAnyOnePlayer: mpMaxDetectivesForAnyOnePlayer,
+    myDetectiveCount: mpMyDetectiveCount,
     // v3.25: Mr.X's timer expiring no longer submits a random legal move
     // on his behalf. He stays on his current station, forfeits one
     // ticket of his cheapest held type, and the round is logged openly
@@ -315,6 +326,10 @@ export default function App({ account, onLogout }) {
     // (see GameBoard.jsx), and the acting window's expiry hands control
     // back to Mr.X, leaving any un-acted detectives in place.
     onBeginActingPhase: () => supabaseStore.beginActingPhase(),
+    // v3.27: my OWN acting pool running out sweeps only my own
+    // outstanding detectives (server-authoritative -- see the RPC).
+    onExpireActingPools: () => supabaseStore.expireActingPools(),
+    // ...and the outer safety cap remains as the last-resort backstop.
     onForceEndActingPhase: () => supabaseStore.forceEndActingPhase(),
   });
 
@@ -327,11 +342,14 @@ export default function App({ account, onLogout }) {
   // installed once rather than re-created per render.
   const mpStrokesRef = useRef(mpStrokes);
   mpStrokesRef.current = mpStrokes;
-  // GameBoard registers its own stroke-applying function here on mount
-  // (see onRegisterRemoteStrokeHandler) -- a ref, not state, since this
-  // is a plain function handoff, not a value the rest of App.jsx reads or
-  // re-renders on. Same pattern for the two new broadcast handlers.
-  const remoteStrokeHandlerRef = useRef(null);
+  // GameBoard hands its broadcast-event handlers up here on mount -- a
+  // ref, not state, since this is a plain function handoff, not a value
+  // the rest of App.jsx reads or re-renders on.
+  //
+  // v3.27: the separate remoteStrokeHandlerRef is gone along with
+  // peek-and-draw. Nothing outside a player's own client can write to
+  // their stroke set anymore, so there is no inbound "apply this stroke
+  // to my board" path left to register.
   const peerEventHandlersRef = useRef({});
   // Our own player id, read through a ref by the broadcast handlers so
   // they always compare against the CURRENT value rather than whatever
@@ -348,7 +366,7 @@ export default function App({ account, onLogout }) {
   const mpRevealIdsRef = useRef([]);
   mpRevealIdsRef.current = mpToggledDetectiveIds;
 
-  const { onlinePlayerIds, isInactive, presenceState, sendRemoteStroke, sendStrokesSync, sendStrokesRequest, sendPeekOff, sendRevealSync } = usePresence({
+  const { onlinePlayerIds, isInactive, presenceState, sendStrokesSync, sendStrokesRequest, sendPeekOff, sendRevealSync } = usePresence({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     myPlayerId: mpPlayerId,
     myDisplayName: mpDisplayName,
@@ -356,10 +374,6 @@ export default function App({ account, onLogout }) {
     gracePeriodSeconds: 25, // TODO: read from admin config once wired through App-level state
     myToggledDetectiveIds: mpToggledDetectiveIds,
     myPeekable: mpPeekable,
-    onRemoteStroke: (payload) => remoteStrokeHandlerRef.current && remoteStrokeHandlerRef.current(payload),
-    // A peek-draw aimed at a THIRD player -- relevant to me only if I'm
-    // peeking that same player (multi-peeker concurrent drawing, v3.22).
-    onPeerStroke: (payload) => peerEventHandlersRef.current.onPeerStroke && peerEventHandlersRef.current.onPeerStroke(payload),
     // Strokes and peek-revocation now arrive as explicit broadcasts
     // rather than being inferred from Presence state -- see the header
     // comment in usePresence.js for why.
@@ -1166,13 +1180,12 @@ export default function App({ account, onLogout }) {
         mrxSecondsForBar={mpMrxSeconds}
         bufferSecondsForBar={mpBufferSeconds}
         actSecondsForBar={mpActSeconds}
+        safetyCapRemaining={mpSafetyCapRemaining}
         roundPhase={supabaseStore.match?.roundPhase}
         detectivesActed={supabaseStore.match?.detectivesActed}
         onExploreModeChange={setMpToggledDetectiveIds}
         onPeekableChange={setMpPeekable}
         onStrokesChange={setMpStrokes}
-        onRemoteDraw={(targetPlayerId, action) => sendRemoteStroke(targetPlayerId, action)}
-        onRegisterRemoteStrokeHandler={(handler) => (remoteStrokeHandlerRef.current = handler)}
         onRegisterPeerEventHandlers={(handlers) => (peerEventHandlersRef.current = handlers)}
         onBroadcastStrokes={(strokes) => sendStrokesSync(strokes)}
         onRequestPeerStrokes={(targetPlayerId) => sendStrokesRequest(targetPlayerId)}

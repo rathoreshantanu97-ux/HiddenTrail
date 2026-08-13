@@ -305,6 +305,44 @@ export function computeTicketCounts(graph, stationIds, totalRounds = null) {
     if (detTotal < totalRounds) {
       detective.taxi += totalRounds - detTotal;
     }
+
+    // MR.X SELF-SUFFICIENCY FLOOR (v3.27). The real Scotland Yard board
+    // gives Mr.X 4 taxi / 3 bus / 3 underground / 5 black -- 15 fare
+    // tickets against a 22-round game -- and that is fine THERE, because
+    // on the physical board every detective ticket spent is handed
+    // straight to Mr.X, so his supply is continuously topped up by the
+    // detectives' own play. This project inherited the 15 but not,
+    // reliably, the top-up rate: our maps run 21-24 rounds, and a game
+    // where several detectives sit on a station all round (or drop out,
+    // or the round times out) starves him of specific types entirely.
+    // Confirmed by direct measurement before this change: all three
+    // active maps computed EXACTLY 15 Mr.X fare tickets against 21, 22
+    // and 24 rounds respectively -- i.e. Mr.X was structurally
+    // dependent on donations for between 6 and 9 rounds of every game.
+    //
+    // The fix mirrors the detective rule directly above it: Mr.X's own
+    // fare supply (taxi + bus + underground + black, since black is
+    // genuinely spendable as fare) must at least equal the round count,
+    // so he can always finish a full game on his own tickets alone.
+    // Donations then become an advantage rather than a dependency.
+    // The deficit is spread ROUND-ROBIN across taxi/bus/underground
+    // rather than dumped on taxi (as the detective rule does), because
+    // the stated goal here is a working supply of EVERY type all game --
+    // a Mr.X with fifteen taxi tickets and one metro ticket is just as
+    // stuck as one with too few tickets overall. black/double are left
+    // exactly at their calibrated values: they're special powers, not
+    // fare tiers, and inflating them changes the game's shape.
+    const MRX_FARE_MODES = ["taxi", "bus", "underground"];
+    const mrxFareTotal = mrx.taxi + mrx.bus + mrx.underground + mrx.black;
+    if (mrxFareTotal < totalRounds) {
+      let deficit = totalRounds - mrxFareTotal;
+      let i = 0;
+      while (deficit > 0) {
+        mrx[MRX_FARE_MODES[i % MRX_FARE_MODES.length]] += 1;
+        deficit -= 1;
+        i += 1;
+      }
+    }
   }
 
   return { detective, mrx };

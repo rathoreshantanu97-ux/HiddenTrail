@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import * as api from "./supabaseApi.js";
 import * as auth from "./accessControlApi.js";
-import { computeTurnSchedule, actingWindowSeconds } from "./turnSchedule.js";
+import { computeTurnSchedule, actingWindowSeconds, actingSafetyCapSeconds } from "./turnSchedule.js";
 
 // ---------------------------------------------------------------------------
 // useTurnTimer — for multiplayer games with a per-room turn timer set.
@@ -43,15 +43,29 @@ export function useTurnTimer({
   map,
   match,
   // maxDetectivesForAnyOnePlayer -- how many detectives the BUSIEST
-  // single player in this room controls. Sizes the shared acting window
-  // (see actingWindowSeconds in turnSchedule.js), since each player works
-  // through their own detectives sequentially inside that one window.
+  // single player in this room controls. As of v3.27 this sizes ONLY the
+  // round's outer safety cap, not anybody's actual clock.
   maxDetectivesForAnyOnePlayer = 1,
+  // myDetectiveCount (v3.27) -- how many detectives THIS client controls.
+  // Sizes this client's OWN acting pool, which is the number their timer
+  // bar shows and the only thing that drives their own detectives'
+  // timeout forfeits. Mr.X and spectators pass 0/1 and simply watch the
+  // safety cap instead (they have no pool of their own to run out).
+  myDetectiveCount = 0,
   // onForceEndMrxTurn (v3.25) -- fired when MR.X's own window expires.
   // See submitMrxTimeout below: he stays put and forfeits a ticket,
   // rather than being teleported by a random auto-move as before.
   onForceEndMrxTurn,
   onBeginActingPhase,
+  // onExpireActingPools (v3.27) -- fired once this client's OWN acting
+  // pool runs out. Calls the server-side sweep, which authoritatively
+  // re-derives EVERY player's pool itself and forfeits a ticket for each
+  // outstanding detective of each player whose pool has genuinely
+  // elapsed. It deliberately takes no target: a client cannot expire
+  // anyone (including itself) early by calling it, so it is safe for any
+  // client to fire, which is what covers a player who has dropped.
+  onExpireActingPools,
+  // onForceEndActingPhase -- now ONLY the outer safety-cap backstop.
   onForceEndActingPhase,
 }) {
   const [actSeconds, setActSeconds] = useState(null);
@@ -103,15 +117,33 @@ export function useTurnTimer({
     [actSeconds, bufferSecondsInput, ratios, bounds, extraDetectiveSeconds]
   );
 
-  // The acting phase's real total length -- base act time plus the
-  // configured top-up for each detective beyond the first held by the
-  // busiest single player. Everyone in the room sees this SAME countdown
-  // (it's one shared phase); per-player sub-turn progress is shown
-  // separately in GameBoard.
-  const actingTotalSeconds = useMemo(
-    () => actingWindowSeconds(schedule, maxDetectivesForAnyOnePlayer),
+  // MY OWN pool (v3.27) -- base act time plus the configured top-up for
+  // each detective beyond the first that I PERSONALLY control. This is
+  // the number my timer bar counts down, and its expiry forfeits only my
+  // own outstanding detectives' tickets.
+  const myActingPoolSeconds = useMemo(
+    () => (myDetectiveCount > 0 ? actingWindowSeconds(schedule, myDetectiveCount) : null),
+    [schedule, myDetectiveCount]
+  );
+
+  // The round's outer safety cap, sized off the busiest player. Shown as
+  // the muted "round ends in…" line and used for the last-resort
+  // force-end call; it no longer drives anyone's ticket forfeits.
+  const actingSafetyCapTotalSeconds = useMemo(
+    () => actingSafetyCapSeconds(schedule, maxDetectivesForAnyOnePlayer),
     [schedule, maxDetectivesForAnyOnePlayer]
   );
+
+  // What the PROMINENT bar counts down during the acting phase: my own
+  // pool if I have one, otherwise (Mr.X, spectators) the safety cap,
+  // since they have nothing of their own running out.
+  const actingTotalSeconds = myActingPoolSeconds ?? actingSafetyCapTotalSeconds;
+
+  const [safetyCapRemaining, setSafetyCapRemaining] = useState(null);
+  // Separate guard for the safety cap: it fires at a DIFFERENT moment
+  // from my own pool, so sharing one guard key would let whichever fired
+  // first permanently suppress the other.
+  const capAttemptedForRef = useRef(null);
 
   useEffect(() => {
     if (!schedule || !match?.roundPhase) {
@@ -129,6 +161,9 @@ export function useTurnTimer({
     const guardKey = `${match.roundPhase}|${anchor || ""}`;
     if (attemptedForRef.current !== guardKey) {
       attemptedForRef.current = null;
+    }
+    if (capAttemptedForRef.current !== guardKey) {
+      capAttemptedForRef.current = null;
     }
 
     const tryExpire = (remaining, action) => {
@@ -177,16 +212,57 @@ export function useTurnTimer({
         const remaining = Math.max(0, Math.ceil(actingTotalSeconds - elapsed));
         setSecondsRemaining(remaining);
         setPhaseLabel("acting");
-        tryExpire(remaining, submitForceEndActingPhase);
+
+        // TWO INDEPENDENT DEADLINES (v3.27), each with its own guard.
+        //
+        //  1. MY OWN pool. Expiring calls the per-player sweep, which
+        //     forfeits a ticket for each of MY still-unmoved detectives
+        //     and leaves every other player's alone. It's fine (and
+        //     useful) that other clients fire this at their own moments
+        //     too: the server re-derives everyone's pool itself, so each
+        //     call simply sweeps whoever is genuinely overdue right then.
+        //     That redundancy is exactly what covers a dropped player.
+        //  2. The SAFETY CAP. Sized off the busiest player, so it always
+        //     lands at or after every individual pool. Only a backstop:
+        //     by the time it fires the per-player sweep should already
+        //     have resolved everyone, and force_end_acting_phase itself
+        //     re-checks the cap server-side before doing anything.
+        if (myActingPoolSeconds) {
+          const myRemaining = Math.max(0, Math.ceil(myActingPoolSeconds - elapsed));
+          tryExpire(myRemaining, submitExpireActingPools);
+        }
+
+        if (actingSafetyCapTotalSeconds) {
+          const capRemaining = Math.max(0, Math.ceil(actingSafetyCapTotalSeconds - elapsed));
+          setSafetyCapRemaining(capRemaining);
+          if (capRemaining <= 0 && capAttemptedForRef.current !== guardKey && match.phase === "playing") {
+            capAttemptedForRef.current = guardKey;
+            submitForceEndActingPhase();
+          }
+        } else {
+          setSafetyCapRemaining(null);
+        }
         return;
       }
+
+      setSafetyCapRemaining(null);
     };
 
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule, actingTotalSeconds, match?.roundPhase, match?.turnStartedAt, match?.detectivePhaseStartedAt, match?.actingPhaseStartedAt, match?.phase]);
+  }, [
+    schedule,
+    actingTotalSeconds,
+    myActingPoolSeconds,
+    actingSafetyCapTotalSeconds,
+    match?.roundPhase,
+    match?.turnStartedAt,
+    match?.detectivePhaseStartedAt,
+    match?.actingPhaseStartedAt,
+    match?.phase,
+  ]);
 
   // submitMrxTimeout (v3.25) -- REPLACES the old submitRandomMrxMove.
   //
@@ -217,6 +293,10 @@ export function useTurnTimer({
     if (onBeginActingPhase) onBeginActingPhase();
   }
 
+  function submitExpireActingPools() {
+    if (onExpireActingPools) onExpireActingPools();
+  }
+
   function submitForceEndActingPhase() {
     if (onForceEndActingPhase) onForceEndActingPhase();
   }
@@ -229,11 +309,17 @@ export function useTurnTimer({
     actingActive: phaseLabel === "acting",
     bufferSeconds: schedule?.bufferSeconds ?? null,
     mrxSeconds: schedule?.mrxSeconds ?? null,
-    // actSeconds is now the ACTING PHASE'S FULL LENGTH (sized for the
-    // busiest player), not the bare per-detective base -- that's what the
-    // timer bar needs as its denominator, since it's what's actually
-    // counting down. The unscaled base is still available separately.
+    // actSeconds is the denominator for the PROMINENT bar: as of v3.27
+    // that's THIS client's OWN acting pool (sized off their own detective
+    // count), falling back to the safety cap for Mr.X/spectators who have
+    // no pool of their own. The unscaled base is still available
+    // separately as baseActSeconds.
     actSeconds: actingTotalSeconds ?? null,
+    // The outer safety cap, exposed separately so GameBoard can render
+    // the muted "round ends in…" line without it ever being mistaken for
+    // (or reused as) the player's own countdown.
+    safetyCapSeconds: actingSafetyCapTotalSeconds ?? null,
+    safetyCapRemaining,
     baseActSeconds: schedule?.actSeconds ?? null,
     extraSeatSeconds: schedule?.extraSeatSeconds ?? null,
   };

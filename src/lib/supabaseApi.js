@@ -416,10 +416,26 @@ export async function setPlanningReady({ roomId, playerId, callerSecret, ready }
   };
 }
 
-// forceEndActingPhase -- called by any connected client when the shared
-// acting-phase timer reaches zero, so the round doesn't hang forever
-// waiting on a detective who never acted. Un-acted detectives simply
-// stay where they are for this round.
+// expireActingPools (v3.27) -- the per-player acting-pool sweep. Fired by
+// a client when its OWN pool runs out, but deliberately UNTARGETED: the
+// server recomputes every player's pool from the room config and the
+// phase start time and resolves whoever is genuinely overdue, so this
+// cannot be used to expire anyone early, and any client firing it also
+// covers players who have dropped. Each resolved detective stays put and
+// forfeits one ticket to Mr.X.
+export async function expireActingPools({ roomId, callerPlayerId, callerSecret }) {
+  await callRpc("expire_acting_pools", {
+    p_room_id: roomId,
+    p_caller_player_id: callerPlayerId,
+    p_caller_secret: callerSecret,
+  });
+}
+
+// forceEndActingPhase -- v3.27: now ONLY the outer safety-cap backstop,
+// fired when the busiest player's pool (the longest one in the room) has
+// elapsed. Per-player timeouts are handled by expireActingPools above.
+// The server re-checks the cap itself before acting, so an early call is
+// a no-op rather than a way to cut the round short.
 export async function forceEndActingPhase({ roomId, callerPlayerId, callerSecret }) {
   await callRpc("force_end_acting_phase", {
     p_room_id: roomId,

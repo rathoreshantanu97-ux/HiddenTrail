@@ -515,5 +515,9 @@ export const bengaluruMap = {
   decorations: DECORATIONS_BENGALURU,
   characterNames: null,
   mrxName: "The Fugitive",
-  fixedTicketCounts: {"mrx":{"bus":3,"taxi":4,"black":5,"double":2,"underground":3},"detective":{"bus":9,"taxi":14,"underground":5}},
+  // v3.27: Mr.X's fare supply raised from the classic 4/3/3 (+5 black =
+  // 15 total) to 7/6/6 (+5 black = 24) so it matches this map's 24-round
+  // length -- see the "MR.X SELF-SUFFICIENCY FLOOR" comment in
+  // computeTicketCounts. Detective counts and black/double are unchanged.
+  fixedTicketCounts: {"mrx":{"bus":6,"taxi":7,"black":5,"double":2,"underground":6},"detective":{"bus":9,"taxi":14,"underground":5}},
 };

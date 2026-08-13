@@ -144,8 +144,8 @@ export default function GameBoard({
   onBeginActingPhase, // () => void -- multiplayer only: ends the shared planning window early. Now only the TIMEOUT path uses this (see useTurnTimer.js); the in-game control is the unanimous ready vote below.
   onSetPlanningReady, // (ready: boolean) => void -- multiplayer only: tick/un-tick MY "ready to act" vote. The SERVER decides when the vote is unanimous and flips the phase.
   connectedDetectivePlayerIds = [], // playerIds of detective-controlling players currently online (multiplayer only) -- the denominator for "Ready (X of Y)"
-  extraHeaderContent, // room-level vote/admin controls (Pause + End Game vote in multiplayer, End Game in pass-and-play, Rulebook). v3.29: these render INSIDE the "Room & settings" menu at the top of the side panel, not in a permanent row -- they are rare, never urgent, and were crowding out per-round information. Length no longer matters here.
-  extraHeaderContentBelow, // bulkier room-level controls (Takeover Reversal / Redistribute Roles votes, TakeoverPanel). v3.29: also inside the "Room & settings" menu, directly under extraHeaderContent.
+  extraHeaderContent, // room-level vote/admin controls (Pause + End Game vote in multiplayer, End Game in pass-and-play, Rulebook). v3.30: these render in the always-visible "utility cluster" at the BOTTOM of the side panel (the v3.29 menu is gone). Each control is still individually feature-flag-gated inside its own component.
+  extraHeaderContentBelow, // bulkier room-level controls (Takeover Reversal / Redistribute Roles votes, TakeoverPanel). v3.30: also in the bottom utility cluster, directly under extraHeaderContent.
   belowTicketsContent, // e.g. chat in multiplayer. v3.29: this is now the body of the "Chat" TAB in the side panel's tabbed lower section -- passing it is what makes that tab exist at all, so pass-and-play (which passes nothing) simply has no chat tab.
   onExploreModeChange, // (detectiveIds: number[]) => void -- reports this client's own EXTRA toggled-on detective ids (beyond their own, which are always shown by default) upward, so App.jsx can broadcast them via Presence
   onPeekableChange, // (peekable: boolean) => void -- reports this client's own "let teammates peek at my screen" preference upward, for the same Presence broadcast
@@ -245,8 +245,10 @@ export default function GameBoard({
   // surfaces (travel log / chat / peek) the tabbed lower section is
   // showing, and whether the room/admin menu is open. Both are purely
   // local view state: nothing here is shared, persisted or sent anywhere.
-  const [sidebarTab, setSidebarTab] = useState("log"); // "log" | "chat" | "peek"
-  const [menuOpen, setMenuOpen] = useState(false);
+  // (v3.30: sidebarTab and menuOpen are gone -- there is no tabbed
+  // section and no room menu any more. Every surface they used to hide
+  // is rendered simultaneously; see the ordering note at the top of the
+  // sidebar's JSX.)
   const seededOwnRef = React.useRef(false);
   const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
   const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
@@ -1293,6 +1295,36 @@ export default function GameBoard({
       : []
     : myStrokes;
 
+  // ---------------------------------------------------------------------
+  // v3.30 -- PLANNING VIEW FILTER, ACTUALLY EFFECTIVE.
+  //
+  // planningScopeActive is the single source of truth for "the personal
+  // 'My detectives' filter is switched on AND currently applicable". It is
+  // used in three places now, where v3.28 used it in only one:
+  //   1. planningOriginIds (default origin indicators) -- as before;
+  //   2. highlightedDetectiveIds -- NEW. Previously, any teammate whose
+  //      destinations you had explicitly clicked open stayed fully
+  //      highlighted after switching to "My detectives", because that set
+  //      was never filtered. Switching to "My detectives" while looking at
+  //      a cluttered board therefore did visibly nothing, which is the
+  //      reported symptom;
+  //   3. the token dimming below -- NEW. Under a room configured with
+  //      position_highlight_style = "blink" (which is this project's
+  //      default, and what the live rooms are actually set to), the ONLY
+  //      rendered difference between an in-scope and an out-of-scope
+  //      detective was whether its node blinked -- no ring is drawn at all
+  //      in that style (see the `highlightPositionStyle !== "blink"`
+  //      guards in the station render). Filtering therefore produced a
+  //      change that was essentially invisible. Out-of-scope detectives are
+  //      now also visibly de-emphasised, so the filter reads the same way
+  //      in every configured highlight style.
+  // Still purely personal and purely client-side: nothing here is
+  // broadcast, persisted, or allowed to affect what is legal.
+  // ---------------------------------------------------------------------
+  const planningScopeActive =
+    !isPassAndPlay && iAmDetective && !peekedPlayerId && roundPhaseMp === "planning" && planningOriginScope === "mine";
+  const isOutOfPlanningScope = (detId) => planningScopeActive && !myOwnDetectives.some((d) => d.id === detId);
+
   // The set of detectives currently highlighted on THIS client's board:
   // your own full toggled set normally, or -- while peeking -- EXACTLY
   // the peeked player's toggled set, REPLACING yours rather than merging
@@ -1332,7 +1364,11 @@ export default function GameBoard({
                 ? presenceState[peekedPlayerId].toggledDetectiveIds
                 : detectivePlayersRoster.find((p) => p.playerId === peekedPlayerId)?.detectiveIds || []
         )
-      : toggledIds;
+      : // v3.30 -- the planning-phase view filter now applies HERE too, not
+        // only to the default origins below. See planningScopeActive.
+        planningScopeActive
+        ? new Set([...toggledIds].filter((id) => myOwnDetectives.some((d) => d.id === id)))
+        : toggledIds;
 
   // ---------------------------------------------------------------------
   // PLANNING-PHASE DEFAULT ORIGINS (v3.21). During the shared planning
@@ -1359,9 +1395,7 @@ export default function GameBoard({
   // an actual detective player and a spectator always sees "all".
   const planningOriginIds =
     !isPassAndPlay && roundPhaseMp === "planning" && (iAmDetective || isSpectator)
-      ? new Set(
-          (iAmDetective && planningOriginScope === "mine" ? myOwnDetectives : match.detectives).map((d) => d.id)
-        )
+      ? new Set((planningScopeActive ? myOwnDetectives : match.detectives).map((d) => d.id))
       : new Set();
 
   // reachableByDetectiveId: stationId -> [{detId, color}] for every
@@ -1610,23 +1644,55 @@ export default function GameBoard({
   // The flash itself. lastStayBonus.seq is the tally value at the moment
   // of the grant, which only ever increases, so comparing it against the
   // last one we showed is enough to tell a genuinely NEW award from the
-  // same one re-rendering. Auto-clears after a few seconds ("brief"),
-  // and is additionally bounded to the round it happened in, so a client
-  // that joins or refreshes mid-game is never shown a stale celebration
-  // from several rounds ago as if it just occurred.
+  // same one re-rendering. Auto-clears after a few seconds ("brief").
+  //
+  // v3.30 -- THE "FLASH NEVER APPEARS" FIX, and the root cause was this
+  // component's own staleness guard, not the server.
+  //
+  // What was here before ALSO required `lastStayBonus.round === match.round`
+  // -- the idea being "don't replay an old celebration to someone who just
+  // refreshed". The problem is that a stay which crosses a threshold very
+  // often IS the last action of the round: pass_detective_turn writes
+  // last_stay_bonus (stamped with the CURRENT round) and then, in the SAME
+  // transaction, calls begin_next_round_mrx_internal, which increments
+  // `round`. force_end_acting_phase (the timeout path) does the same thing
+  // unconditionally. So by the time the single realtime update reaches any
+  // client, last_stay_bonus.round is already round-1 and the guard threw
+  // the flash away every time. Verified directly against the live database:
+  // a room sitting at round 4 with
+  // last_stay_bonus = {type: black, tally: 10, round: 3} -- a bonus that
+  // no client was ever shown.
+  //
+  // The replacement does the staleness job properly and without depending
+  // on round numbers at all: the FIRST value we ever observe is recorded
+  // as a baseline and deliberately NOT flashed (that is the refresh /
+  // late-join case), and every change after that is a genuinely new award
+  // that happened while we were watching. Same protection, no false
+  // negatives.
   const lastStayBonus = !isPassAndPlay ? match.lastStayBonus : null;
   const [flashedBonusSeq, setFlashedBonusSeq] = useState(null);
   const [bonusFlash, setBonusFlash] = useState(null);
+  const bonusBaselineRef = React.useRef(false);
   useEffect(() => {
-    if (!lastStayBonus || lastStayBonus.seq == null) return;
-    if (lastStayBonus.round !== match.round) return;
-    if (flashedBonusSeq === lastStayBonus.seq) return;
-    setFlashedBonusSeq(lastStayBonus.seq);
+    if (isPassAndPlay) return;
+    const seq = lastStayBonus?.seq ?? null;
+    // Baseline pass: whatever the state already was when this board
+    // mounted is "history", never a celebration. Runs on the first
+    // render regardless of whether a bonus exists yet, so a game with
+    // no bonus so far still flashes correctly on its very first one.
+    if (!bonusBaselineRef.current) {
+      bonusBaselineRef.current = true;
+      setFlashedBonusSeq(seq);
+      return;
+    }
+    if (seq == null) return;
+    if (flashedBonusSeq === seq) return;
+    setFlashedBonusSeq(seq);
     setBonusFlash(lastStayBonus);
     const t = setTimeout(() => setBonusFlash(null), 9000);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastStayBonus?.seq, lastStayBonus?.round, match.round]);
+  }, [lastStayBonus?.seq, isPassAndPlay]);
 
   const bonusTypeLabel = (t) => (t === "double" ? "2x (double move) card" : "Black ticket");
 
@@ -1635,28 +1701,38 @@ export default function GameBoard({
       <div style={styles.playingLayoutSidebar}>
         <div style={styles.sidebarPermanent}>
           {/* ---------------------------------------------------------
-              v3.29 LAYOUT REORGANIZATION -- ROOM MENU.
-              Everything here is reference material or an occasional
-              administrative action: the room code (needed once, when
-              someone drops), the mode legend (static), and the room-level
-              vote/admin controls (pause, end game, takeover reversal,
-              redistribute roles, rulebook). None of it is needed on a
-              per-turn basis, and all of it was previously occupying the
-              top of the panel ahead of information you read every single
-              round. It is now one click away instead of always-on.
-              Deliberately NOT hidden behind this: anything you act on
-              during your own turn (the 2x button, the pass button, the
-              stay popup) and anything you read every round (tickets,
-              stay tally, travel log).
+              v3.30 -- NO MENU, NO TABS: EVERYTHING ALWAYS VISIBLE.
+              v3.29 put the room code, legend, vote/admin controls,
+              rulebook and peek-privacy tick behind a "Room & settings"
+              dropdown, and the travel log / chat / peek behind tabs.
+              Both are gone by explicit instruction: every one of those
+              surfaces is now rendered simultaneously in this panel.
+
+              To keep that from becoming an undifferentiated wall, the
+              panel is ordered by how often you need each thing (CSS
+              `order` on a flex column, so each block keeps its natural,
+              heavily-commented position in source):
+
+                order 0  bonus flash banner      (transient, must be seen)
+                order 1  stay tally              (read constantly)
+                order 2  everyone's tickets      (read constantly)
+                order 3  phase controls: 2x / pass / view filter
+                order 5  travel log              (read often)
+                order 6  chat                    (read often)
+                order 7  peek panel              (occasional, phase-gated)
+                order 9  error/message bar       (existing)
+                order 10 utility cluster         (rare: room code, legend,
+                                                  votes, rulebook, privacy)
+
+              The utility cluster is rendered LAST rather than first: it
+              is the only group nothing in a normal round ever needs.
               --------------------------------------------------------- */}
-          <div style={styles.roomMenuBar}>
-            <button type="button" style={styles.roomMenuBtn} onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen}>
-              ⋯ Room & settings
-            </button>
-            {roomCode && <span style={styles.roomCodeInline}>Code: {roomCode}</span>}
-          </div>
-          {menuOpen && (
-            <div style={styles.roomMenuPanel}>
+          <div style={styles.utilityCluster}>
+            {/* Room code + legend share ONE compact row -- both are
+                static reference material, neither justifies its own
+                block. */}
+            <div style={styles.utilityTopRow}>
+              {roomCode && <span style={styles.roomCodeInline}>Code: {roomCode}</span>}
               <div style={styles.legendCompact}>
                 {Object.entries(activeMode).map(([key, m]) => (
                   <span key={key} style={styles.legendCompactItem}>
@@ -1665,25 +1741,28 @@ export default function GameBoard({
                   </span>
                 ))}
               </div>
-              {/* extraHeaderContent / extraHeaderContentBelow are the
-                  room-level vote + admin controls injected by App.jsx.
-                  They used to sit permanently near the top of the panel;
-                  they live in here now. The 2x button is deliberately NOT
-                  moved in with them -- see its own block below. */}
-              {extraHeaderContent && <div style={styles.roomMenuRow}>{extraHeaderContent}</div>}
-              {extraHeaderContentBelow}
-              {/* Peek privacy preference: a durable, set-once setting, so
-                  the menu is exactly where it belongs. The peek LIST
-                  itself is a per-round activity and lives in its own tab
-                  below instead. */}
-              {iAmDetective && peekEnabled && (
-                <label style={styles.peekToggleRow}>
-                  <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
-                  Let teammates peek into my screen
-                </label>
-              )}
             </div>
-          )}
+            {/* The vote/admin controls injected by App.jsx, clustered as
+                one group. Each individual control is still gated by its
+                OWN feature flag inside its own component (PauseVote,
+                EndGameVote, TakeoverReversalVote, RedistributeRolesVote
+                each call useFeatureEnabled) -- this container never
+                overrides that, it only decides where they sit. */}
+            {(extraHeaderContent || extraHeaderContentBelow) && (
+              <div style={styles.utilityVotes}>
+                {extraHeaderContent && <div style={styles.roomMenuRow}>{extraHeaderContent}</div>}
+                {extraHeaderContentBelow}
+              </div>
+            )}
+            {/* Peek privacy preference -- a durable, set-once setting,
+                but now always visible rather than buried in a menu. */}
+            {iAmDetective && peekEnabled && (
+              <label style={styles.peekToggleRow}>
+                <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
+                Let teammates peek into my screen
+              </label>
+            )}
+          </div>
 
           {/* Keyframes for the bonus flash. Declared here, next to its
               only consumer, rather than in a global stylesheet -- this is
@@ -1754,7 +1833,7 @@ export default function GameBoard({
               that used to share it have moved into the menu), so the
               wrapping problem that row used to have is gone with them. */}
           {isMrXTurn && isMyTurnToAct && !pendingMove ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <div style={{ order: 3, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
               {isMrXTurn && isMyTurnToAct && !pendingMove && (
                 <button
                   style={{
@@ -1777,7 +1856,8 @@ export default function GameBoard({
               votes and the rulebook button -- are no longer rendered
               here. They are room-level administrative controls, needed
               rarely and never urgently, and they now live inside the
-              "Room & settings" menu at the top of this panel.) */}
+              always-visible utility cluster at the bottom of this
+              panel.) */}
 
           {/* Route explorer v2: no separate mode-picker control anymore --
               your own detectives' reachable stations are shown by default
@@ -1830,7 +1910,7 @@ export default function GameBoard({
                 - the peek list is a per-round activity and is now the
                   "Peek" tab of the tabbed section below;
                 - the privacy toggle is a set-once preference and is now
-                  in the "Room & settings" menu at the top;
+                  in the utility cluster at the bottom of the panel;
                 - the drawing toolbar and the peek hint are anchored over
                   the map itself, appearing only while drawing is
                   actually available -- the thing they act on IS the map,
@@ -1862,7 +1942,7 @@ export default function GameBoard({
               with the other action controls (2x/Pause/End-Game,
               Takeover, explore-mode) rather than left at the bottom. */}
           {isMyTurnToAct && !pendingMove && legalTargets.size === 0 && (isPassAndPlay || isMrXTurn) && (
-            <div style={styles.rowCenter}>
+            <div style={{ ...styles.rowCenter, order: 4 }}>
               <div style={styles.passTurnNote}>
                 No legal moves available from your current station with your remaining tickets.
                 {autoPassKey ? " Passing automatically…" : ""}
@@ -2001,37 +2081,21 @@ export default function GameBoard({
             const peekablePeers = detectivePlayersRoster.filter(
               (p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false
             );
-            const peekTabAvailable = iAmDetective && peekEnabled && preThinkActive && peekablePeers.length > 0;
-            const tabs = [
-              { key: "log", label: "Travel log" },
-              ...(belowTicketsContent ? [{ key: "chat", label: "Chat" }] : []),
-              ...(peekTabAvailable ? [{ key: "peek", label: "Peek" }] : []),
-            ];
-            // A tab can disappear underneath you (the planning window
-            // ends and the peek tab goes with it). Falling back to the
-            // always-present log rather than rendering nothing means the
-            // section can never end up blank.
-            const active = tabs.some((t) => t.key === sidebarTab) ? sidebarTab : "log";
+            // v3.30: no tabs. All three surfaces render at once, each
+            // with its own flex `order`, in frequency sequence: travel
+            // log (5), chat (6), peek (7). The peek panel keeps exactly
+            // the same availability rule it had as a tab -- detective,
+            // peeking enabled, planning window, at least one willing
+            // teammate -- so nothing about who may peek changed.
+            const peekAvailable = iAmDetective && peekEnabled && preThinkActive && peekablePeers.length > 0;
             return (
               <>
-                <div style={styles.sidebarTabBar}>
-                  {tabs.map((t) => (
-                    <button
-                      key={t.key}
-                      type="button"
-                      style={{ ...styles.sidebarTab, ...(active === t.key ? styles.sidebarTabActive : {}) }}
-                      onClick={() => setSidebarTab(t.key)}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-                {/* Wrapped so it carries the same flex `order` as the
-                    other two tab bodies -- belowTicketsContent is an
-                    opaque node from App.jsx with its own styling, so we
-                    cannot set an order on it directly. */}
-                {active === "chat" && <div style={{ order: 7 }}>{belowTicketsContent}</div>}
-                {active === "peek" && (
+                {/* Wrapped so it can carry a flex `order` --
+                    belowTicketsContent is an opaque node from App.jsx
+                    with its own styling, so we cannot set one on it
+                    directly. */}
+                {belowTicketsContent && <div style={{ order: 6, width: "100%" }}>{belowTicketsContent}</div>}
+                {peekAvailable && (
                   <div style={styles.huddlePanel}>
                     <div style={styles.exploreLabel}>Peek into a teammate's screen:</div>
                     {peekablePeers.map((p) => (
@@ -2054,12 +2118,12 @@ export default function GameBoard({
                       </button>
                     ))}
                     <div style={styles.exploreHint}>
-                      👁️ View-only: you watch their board live, you can't draw on it. Whether teammates may peek at YOUR board is in the Room &amp;
-                      settings menu.
+                      👁️ View-only: you watch their board live, you can't draw on it. Whether teammates may peek at YOUR board is the tick at the
+                      bottom of this panel.
                     </div>
                   </div>
                 )}
-                {active !== "log" ? null : (
+                {(
           <div style={styles.travelLogPanel}>
             <div style={styles.travelLogTitle}>
               {mrxName()}'s travel log ({match.maxRounds + 2} moves max — {match.maxRounds} rounds + 2 double-move legs)
@@ -2227,69 +2291,64 @@ export default function GameBoard({
                     sidebar can scroll but this column's content above
                     the map cannot. */}
                 <div ref={topBarRef} style={{ ...styles.mapTopBar, width: fittedWidth }}>
-                  <div style={styles.mapTopBarTurn}>
+                  {/* -------------------------------------------------
+                      v3.30 TOP-BAR HIERARCHY.
+                      Four stacked tiers, in strict order of importance,
+                      instead of one horizontal row where a round label,
+                      a phase label, a pending-players list, a safety-cap
+                      line and the timer all competed at the same weight:
+
+                        1. ONE merged primary line: round + phase
+                           ("Round 3/4 — Detectives planning"). These are
+                           both "where are we right now", so they are one
+                           sentence, not two competing labels.
+                        2. Personal sub-turn progress ("Your detective
+                           1 of 2 — Name"). Detective-perspective only,
+                           acting phase only, and REMOVED FROM THE DOM
+                           entirely when not applicable rather than
+                           rendered empty or faded. Mr.X and spectators
+                           never see it -- unchanged gating.
+                        3. The timer bar, deliberately the largest and
+                           highest-contrast element in the bar.
+                        4. The muted trailing line: who is yet to move
+                           (detective-only, as before) and the safety-cap
+                           backstop, smallest text on the bar.
+                      ------------------------------------------------- */}
+                  <div style={styles.mapTopBarPrimary}>
                     {!isMrXTurn && activeDetective && <span style={{ ...styles.turnColorDot, background: activeDetective.color }} />}
                     <span style={styles.mapTopBarRound}>Round {match.round}/{match.maxRounds}</span>
                     <span style={styles.mapTopBarDivider}>—</span>
-                    {preThinkActive ? (
-                      // Shared planning window: framed as a TEAM moment,
-                      // not any one seat's turn -- nobody can move yet, so
-                      // naming a single "X's Turn" here would be misleading.
-                      <span style={styles.mapTopBarBufferLabel}>
-                        🕵️ Detectives are planning their move…
-                      </span>
-                    ) : !isPassAndPlay && actingActive ? (
-                      // Acting phase: every PLAYER is up at once (the
-                      // round-level countdown is shared and shown to
-                      // everyone), but each player moves their own
-                      // detectives one at a time -- so a detective player
-                      // also gets their OWN "detective X of Y" progress
-                      // and whose move it currently is. Mr.X and
-                      // spectators see only the neutral team-level label,
-                      // never anyone's sub-turn state.
-                      <>
-                        <span style={styles.mapTopBarBufferLabel}>
-                          🏃 Detectives are moving
-                          {iAmDetective && myTotalDetectiveCount > 0 && (
-                            <>
-                              {" — "}
-                              {activeDetective
-                                ? `your detective ${mySubTurnIndex} of ${myTotalDetectiveCount}: ${detectiveName(activeDetective.id)}`
-                                : `all ${myTotalDetectiveCount} of your detectives have acted`}
-                            </>
-                          )}
-                        </span>
-                        {/* WHO'S STILL OUT (v3.24) -- replaces the old
-                            generic team-level phrasing with the actual
-                            names and per-player progress, live. Detective-
-                            perspective only: Mr.X and spectators must
-                            never learn how far along any detective player
-                            is, so they keep the neutral label above and
-                            nothing else. */}
-                        {iAmDetective && pendingActingLabel && (
-                          <span style={styles.pendingPlayersLabel}>{pendingActingLabel}</span>
-                        )}
-                        {/* SAFETY-CAP LINE (v3.27). The prominent bar to
-                            the right is now each player's OWN pool, so
-                            this muted line is the only place the round's
-                            outer bound appears. It is deliberately NOT
-                            the thing anyone should be playing to: your
-                            own detectives are resolved when YOUR pool
-                            runs out, not when this does. It exists so a
-                            round can never run longer than the busiest
-                            player's window under any circumstance. */}
-                        {safetyCapRemaining != null && (
-                          <span style={styles.pendingPlayersLabel}>Round ends in {safetyCapRemaining}s at the latest</span>
-                        )}
-                      </>
-                    ) : isMrXTurn ? (
-                      <span>{mrxName()}'s Turn</span>
-                    ) : activeDetective ? (
-                      <span>{detectiveName(activeDetective.id)}'s Turn</span>
-                    ) : (
-                      <span>Waiting…</span>
-                    )}
+                    <span style={styles.mapTopBarPhase}>
+                      {preThinkActive
+                        ? "Detectives planning"
+                        : !isPassAndPlay && actingActive
+                          ? "Detectives moving"
+                          : isMrXTurn
+                            ? `${mrxName()}'s turn`
+                            : activeDetective
+                              ? `${detectiveName(activeDetective.id)}'s turn`
+                              : "Waiting…"}
+                    </span>
                   </div>
+                  {!isPassAndPlay && actingActive && iAmDetective && myTotalDetectiveCount > 0 && (
+                    <div style={styles.mapTopBarSubTurn}>
+                      {activeDetective
+                        ? `Your detective ${mySubTurnIndex} of ${myTotalDetectiveCount} — ${detectiveName(activeDetective.id)}`
+                        : `All ${myTotalDetectiveCount} of your detectives have acted`}
+                    </div>
+                  )}
+                  {/* Muted trailing line -- smallest, least prominent
+                      text on the bar. Detective-perspective only for the
+                      pending-players part (Mr.X and spectators must never
+                      learn how far along any detective player is --
+                      gating unchanged from v3.24); the safety-cap
+                      backstop is shown to everyone. */}
+                  {((iAmDetective && pendingActingLabel) || safetyCapRemaining != null) && (
+                    <div style={styles.mapTopBarFootnote}>
+                      {iAmDetective && pendingActingLabel ? <span>{pendingActingLabel}</span> : null}
+                      {safetyCapRemaining != null ? <span>Round ends in {safetyCapRemaining}s at the latest</span> : null}
+                    </div>
+                  )}
                   {/* THE timer (v3.24). With the per-detective cap gone
                       there is exactly one countdown in every phase, so
                       this single branch now serves Mr.X's turn, the
@@ -2580,6 +2639,13 @@ export default function GameBoard({
                 // have moved. Public info (detectives_acted is public), so
                 // this is shown to every viewer, not just the controller.
                 const isActedThisRound = !isPassAndPlay && roundPhaseMp === "acting" && detHere && detectivesActedSet.has(detHere.id);
+                // v3.30: de-emphasise (but never hide, and never make
+                // un-clickable) a teammate filtered out by the personal
+                // "My detectives" planning view. Positions are public
+                // information and this is a decluttering preference, not
+                // a rule -- so the piece stays on the board and stays
+                // clickable, it just stops competing for attention.
+                const isFilteredOutDetective = !!detHere && isOutOfPlanningScope(detHere.id);
                 // Turn indicator: for a detective's turn, this is visible
                 // to EVERYONE (their position is always public). For
                 // Mr.X's own turn, a SEPARATE private indicator is shown
@@ -2644,6 +2710,7 @@ export default function GameBoard({
                       // Dim + fully non-interactive for a detective that
                       // has already acted this round.
                       ...(isActedThisRound ? { opacity: 0.45, pointerEvents: "none" } : {}),
+                      ...(isFilteredOutDetective && !isActedThisRound ? { opacity: 0.4 } : {}),
                     }}
                   >
                     <circle cx={x} cy={y} r={2.6 * sizeScale} fill="transparent" />
@@ -3521,16 +3588,51 @@ export const styles = {
   // round + turn banner on the left, timer filling the rest. Always
   // visible regardless of sidebar scroll, which was the whole point of
   // moving it out of the sidebar.
+  // v3.30: a vertical stack rather than a single horizontal row, so the
+  // four tiers (round+phase / personal sub-turn / timer / footnote) can
+  // carry genuinely different visual weight instead of all being
+  // equal-weight text competing side by side. `order` is used so the
+  // footnote can sit AFTER the timer while staying next to the label it
+  // belongs with in source.
   mapTopBar: {
     display: "flex",
-    alignItems: "center",
-    gap: 12,
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 3,
     background: "#fff",
     borderRadius: 10,
-    padding: "8px 14px",
+    padding: "7px 14px 8px",
     marginBottom: 8,
     boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
     boxSizing: "border-box",
+  },
+  mapTopBarPrimary: {
+    order: 1,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    minWidth: 0,
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+  },
+  mapTopBarPhase: { fontSize: 15.5, fontWeight: 800, color: "#1a1a1a", letterSpacing: -0.2 },
+  mapTopBarSubTurn: {
+    order: 2,
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: "#5b4636",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  mapTopBarFootnote: {
+    order: 4,
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+    fontSize: 10.5,
+    color: "#9a958a",
+    lineHeight: 1.3,
   },
   mapTopBarTurn: {
     display: "flex",
@@ -3582,11 +3684,16 @@ export const styles = {
   },
   timerSchedulePreviewTitle: { fontWeight: 700, color: "#3d3a30", marginBottom: 2 },
   mapTopBarTimerWrap: {
+    // v3.30: tier 3 of the stacked top bar, and deliberately the
+    // dominant element -- full width of the bar, a taller track and a
+    // larger countdown number than anything else on it.
+    order: 3,
     display: "flex",
     alignItems: "center",
     gap: 8,
-    flex: 1,
+    width: "100%",
     minWidth: 60,
+    marginTop: 2,
   },
   roundLabel: { fontSize: 12, color: "#888" },
   turnLabel: { fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 },
@@ -3600,7 +3707,8 @@ export const styles = {
   },
   turnTimerBarTrack: {
     flex: 1,
-    height: 8,
+    height: 12, // v3.30: taller -- this is the bar the whole top strip is built around
+
     borderRadius: 5,
     background: "#e5e2d8",
     overflow: "hidden",
@@ -3611,10 +3719,10 @@ export const styles = {
     transition: "width 1s linear, background-color 1s linear",
   },
   turnTimerBarText: {
-    fontSize: 12,
-    fontWeight: 700,
-    color: "#666",
-    minWidth: 28,
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#3a3a36",
+    minWidth: 40,
     textAlign: "right",
   },
   roomCodeLabel: { fontSize: 11, color: "#aaa", marginTop: 2, letterSpacing: 0.5 },
@@ -3657,46 +3765,37 @@ export const styles = {
   },
   // v3.29 -- layout reorganization: room menu, tab bar, map-anchored
   // contextual toolbar.
-  roomMenuBar: { order: -2, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
-  roomMenuBtn: {
-    border: "1px solid #d7d2c4",
-    background: "#fff",
-    color: "#333",
-    borderRadius: 8,
-    padding: "4px 10px",
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-  },
   roomCodeInline: { fontSize: 11.5, color: "#8a8375", fontWeight: 600, letterSpacing: 0.4 },
-  roomMenuPanel: {
-    order: -1,
-    border: "1px solid #e2ddcf",
-    background: "#fbfaf6",
-    borderRadius: 10,
-    padding: "8px 10px",
-    marginBottom: 10,
+  roomMenuRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 0 },
+  // (v3.30: sidebarTabBar / sidebarTab / sidebarTabActive are unused now
+  // that the tabbed section is gone. Kept only as dead style entries
+  // would be noise, so they are removed outright.)
+  utilityCluster: {
+    // The rarely-needed group, rendered LAST in the panel by `order`.
+    order: 10,
+    marginTop: 14,
+    paddingTop: 10,
+    borderTop: "1px solid #e2ddcf",
     display: "flex",
     flexDirection: "column",
     gap: 8,
   },
-  roomMenuRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 0 },
-  sidebarTabBar: { order: 6, display: "flex", gap: 4, borderBottom: "1px solid #e2ddcf", marginBottom: 8 },
-  sidebarTab: {
-    border: "none",
-    borderBottom: "2px solid transparent",
-    background: "none",
-    color: "#8a8375",
-    padding: "5px 9px",
-    fontSize: 12,
-    fontWeight: 700,
-    cursor: "pointer",
+  utilityTopRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    flexWrap: "wrap",
   },
-  sidebarTabActive: { color: "#1a1a1a", borderBottomColor: "#1a1a1a" },
+  utilityVotes: { display: "flex", flexDirection: "column", gap: 6 },
   mapContextToolbar: {
+    // v3.30: TOP-left of the map, not bottom-left (v3.29). Same
+    // floating/contextual behaviour -- it still only exists while one of
+    // its members is actually relevant -- just anchored to the corner
+    // the eye starts from.
     position: "absolute",
     left: 10,
-    bottom: 10,
+    top: 10,
     display: "flex",
     flexDirection: "column",
     gap: 6,
@@ -3752,7 +3851,7 @@ export const styles = {
   stayTallyNext: { fontSize: 11.5, color: "#666", marginTop: 3 },
   stayTallyBarOuter: { height: 4, borderRadius: 3, background: "#e6e2d6", marginTop: 5, overflow: "hidden" },
   stayTallyBarInner: { height: "100%", borderRadius: 3, transition: "width 0.3s ease" },
-  viewFilterRow: { display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 8 },
+  viewFilterRow: { order: 3, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 8 },
   viewFilterLabel: { fontSize: 11.5, color: "#777" },
   viewFilterBtn: {
     border: "1px solid #d7d2c4",
@@ -3898,7 +3997,7 @@ export const styles = {
     marginBottom: 8,
   },
   travelLogPanel: {
-    order: 7,
+    order: 5, // v3.30: read-often, directly under the always-on tickets strip
     width: "100%",
     maxWidth: 760,
     boxSizing: "border-box",
@@ -3985,6 +4084,7 @@ export const styles = {
     padding: "4px 2px",
   },
   exploreHint: {
+    order: 3,
     fontSize: 12.5,
     color: "#8a8375",
     padding: "6px 2px",

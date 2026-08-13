@@ -144,9 +144,9 @@ export default function GameBoard({
   onBeginActingPhase, // () => void -- multiplayer only: ends the shared planning window early. Now only the TIMEOUT path uses this (see useTurnTimer.js); the in-game control is the unanimous ready vote below.
   onSetPlanningReady, // (ready: boolean) => void -- multiplayer only: tick/un-tick MY "ready to act" vote. The SERVER decides when the vote is unanimous and flips the phase.
   connectedDetectivePlayerIds = [], // playerIds of detective-controlling players currently online (multiplayer only) -- the denominator for "Ready (X of Y)"
-  extraHeaderContent, // shares a row with the "Play 2x card" button (e.g. Pause/End Game in multiplayer, End Game in pass-and-play) -- kept small/short controls only, since it's meant to sit alongside the 2x button without wrapping badly
-  extraHeaderContentBelow, // renders as its OWN row, below the 2x/Pause/End-Game row -- for bulkier controls that shouldn't crowd that first row (e.g. multiplayer's Takeover Reversal / Redistribute Roles votes, and the TakeoverPanel)
-  belowTicketsContent, // e.g. chat in multiplayer -- renders AFTER the log/tickets panels, per the agreed sidebar order (votes -> huddle -> explorer -> log -> tickets -> chat)
+  extraHeaderContent, // room-level vote/admin controls (Pause + End Game vote in multiplayer, End Game in pass-and-play, Rulebook). v3.29: these render INSIDE the "Room & settings" menu at the top of the side panel, not in a permanent row -- they are rare, never urgent, and were crowding out per-round information. Length no longer matters here.
+  extraHeaderContentBelow, // bulkier room-level controls (Takeover Reversal / Redistribute Roles votes, TakeoverPanel). v3.29: also inside the "Room & settings" menu, directly under extraHeaderContent.
+  belowTicketsContent, // e.g. chat in multiplayer. v3.29: this is now the body of the "Chat" TAB in the side panel's tabbed lower section -- passing it is what makes that tab exist at all, so pass-and-play (which passes nothing) simply has no chat tab.
   onExploreModeChange, // (detectiveIds: number[]) => void -- reports this client's own EXTRA toggled-on detective ids (beyond their own, which are always shown by default) upward, so App.jsx can broadcast them via Presence
   onPeekableChange, // (peekable: boolean) => void -- reports this client's own "let teammates peek at my screen" preference upward, for the same Presence broadcast
   onStrokesChange, // (strokes: Stroke[]) => void -- reports this client's own drawing strokes upward, so App.jsx can answer a peer's strokes_request with the current set
@@ -241,6 +241,12 @@ export default function GameBoard({
   // full position, so narrowing it is an opt-in decluttering choice, not
   // the starting state.
   const [planningOriginScope, setPlanningOriginScope] = useState("all"); // "all" | "mine"
+  // v3.29 layout reorganization -- which of the three read-mostly
+  // surfaces (travel log / chat / peek) the tabbed lower section is
+  // showing, and whether the room/admin menu is open. Both are purely
+  // local view state: nothing here is shared, persisted or sent anywhere.
+  const [sidebarTab, setSidebarTab] = useState("log"); // "log" | "chat" | "peek"
+  const [menuOpen, setMenuOpen] = useState(false);
   const seededOwnRef = React.useRef(false);
   const [peekedPlayerId, setPeekedPlayerId] = useState(null); // playerId whose ENTIRE screen (their own detectives + their own extra toggles) we're currently mirroring, via the side panel
   const [myPeekable, setMyPeekable] = useState(true); // whether I allow TEAMMATES to peek into my screen -- off by choice, broadcast via Presence, purely a privacy preference
@@ -1628,24 +1634,56 @@ export default function GameBoard({
     <div style={styles.pagePlaying}>
       <div style={styles.playingLayoutSidebar}>
         <div style={styles.sidebarPermanent}>
-          <div style={styles.headerBarSlim}>
-            {/* Round, turn label, timer, and this-player's ticket chips
-                all moved to the new top-of-map bar (round+turn+timer) and
-                "Everyone's tickets" below (ticket chips -- see that
-                section for why the standalone chip panel was dropped
-                rather than duplicated). Only room code and the mode
-                legend stay here, since they're static reference info,
-                not per-turn status. */}
-            {roomCode && <div style={styles.roomCodeLabel}>Room code: {roomCode}</div>}
-            <div style={styles.legendCompact}>
-              {Object.entries(activeMode).map(([key, m]) => (
-                <span key={key} style={styles.legendCompactItem}>
-                  <span style={{ ...styles.legendDot, background: m.color }} />
-                  {m.label}
-                </span>
-              ))}
-            </div>
+          {/* ---------------------------------------------------------
+              v3.29 LAYOUT REORGANIZATION -- ROOM MENU.
+              Everything here is reference material or an occasional
+              administrative action: the room code (needed once, when
+              someone drops), the mode legend (static), and the room-level
+              vote/admin controls (pause, end game, takeover reversal,
+              redistribute roles, rulebook). None of it is needed on a
+              per-turn basis, and all of it was previously occupying the
+              top of the panel ahead of information you read every single
+              round. It is now one click away instead of always-on.
+              Deliberately NOT hidden behind this: anything you act on
+              during your own turn (the 2x button, the pass button, the
+              stay popup) and anything you read every round (tickets,
+              stay tally, travel log).
+              --------------------------------------------------------- */}
+          <div style={styles.roomMenuBar}>
+            <button type="button" style={styles.roomMenuBtn} onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen}>
+              ⋯ Room & settings
+            </button>
+            {roomCode && <span style={styles.roomCodeInline}>Code: {roomCode}</span>}
           </div>
+          {menuOpen && (
+            <div style={styles.roomMenuPanel}>
+              <div style={styles.legendCompact}>
+                {Object.entries(activeMode).map(([key, m]) => (
+                  <span key={key} style={styles.legendCompactItem}>
+                    <span style={{ ...styles.legendDot, background: m.color }} />
+                    {m.label}
+                  </span>
+                ))}
+              </div>
+              {/* extraHeaderContent / extraHeaderContentBelow are the
+                  room-level vote + admin controls injected by App.jsx.
+                  They used to sit permanently near the top of the panel;
+                  they live in here now. The 2x button is deliberately NOT
+                  moved in with them -- see its own block below. */}
+              {extraHeaderContent && <div style={styles.roomMenuRow}>{extraHeaderContent}</div>}
+              {extraHeaderContentBelow}
+              {/* Peek privacy preference: a durable, set-once setting, so
+                  the menu is exactly where it belongs. The peek LIST
+                  itself is a per-round activity and lives in its own tab
+                  below instead. */}
+              {iAmDetective && peekEnabled && (
+                <label style={styles.peekToggleRow}>
+                  <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
+                  Let teammates peek into my screen
+                </label>
+              )}
+            </div>
+          )}
 
           {/* Keyframes for the bonus flash. Declared here, next to its
               only consumer, rather than in a global stylesheet -- this is
@@ -1708,7 +1746,14 @@ export default function GameBoard({
             </div>
           )}
 
-          {(isMrXTurn && isMyTurnToAct && !pendingMove) || extraHeaderContent ? (
+          {/* THE 2x BUTTON stays out here, NOT in the room menu. It is a
+              move-shaped decision Mr.X takes on his own turn, in the few
+              seconds he has to take it -- exactly the kind of thing the
+              reorganization is meant to keep immediately reachable. It
+              also now appears alone on its row (the vote/admin buttons
+              that used to share it have moved into the menu), so the
+              wrapping problem that row used to have is gone with them. */}
+          {isMrXTurn && isMyTurnToAct && !pendingMove ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
               {isMrXTurn && isMyTurnToAct && !pendingMove && (
                 <button
@@ -1724,37 +1769,15 @@ export default function GameBoard({
                   Play 2x ({match.mrX.tickets.double})
                 </button>
               )}
-              {/* extraHeaderContent (End Game in pass-and-play; Pause +
-                  End Game vote in multiplayer -- deliberately kept SHORT
-                  here) shares this same row instead of stacking on its
-                  own line below -- for Mr.X specifically, this was
-                  pushing these controls far enough down to require
-                  scrolling before they were visible; putting them side by
-                  side with the 2x button keeps everything reachable
-                  without scrolling, matching how the detective view
-                  already looked (it never had the 2x button competing for
-                  space). justifyContent switched from "space-between" to
-                  "flex-end": space-between pushed the 2x button to the far
-                  LEFT edge and extraHeaderContent to the far RIGHT edge of
-                  the row, which -- combined with flexWrap -- was enough
-                  horizontal spread to make the row wrap onto two lines
-                  well before it actually ran out of room; flex-end packs
-                  everything together on the right, matching how
-                  extraHeaderContent's own internal buttons are already
-                  right-aligned, and wraps only when genuinely necessary.
-                  The div below strips extraHeaderContent's own
-                  marginBottom so it doesn't create extra vertical gap now
-                  that it's inline rather than stacked. */}
-              {extraHeaderContent && <div style={{ marginBottom: 0, display: "flex", gap: 8 }}>{extraHeaderContent}</div>}
             </div>
           ) : null}
 
-          {/* extraHeaderContentBelow: a SECOND, separate row for bulkier
-              controls that shouldn't crowd the 2x/Pause/End-Game row above
-              -- multiplayer's Takeover Reversal + Redistribute Roles votes
-              (and the TakeoverPanel) land here instead of competing for
-              space with the first row. */}
-          {extraHeaderContentBelow}
+          {/* (v3.29: extraHeaderContent and extraHeaderContentBelow --
+              the pause / end-game / takeover-reversal / redistribute
+              votes and the rulebook button -- are no longer rendered
+              here. They are room-level administrative controls, needed
+              rarely and never urgently, and they now live inside the
+              "Room & settings" menu at the top of this panel.) */}
 
           {/* Route explorer v2: no separate mode-picker control anymore --
               your own detectives' reachable stations are shown by default
@@ -1800,126 +1823,19 @@ export default function GameBoard({
             <div style={styles.exploreHint}>💡 Click any teammate's piece on the map to see their reachable stations too.</div>
           )}
 
-          {/* Peek panel: pick ONE teammate (by player, not by detective --
-              a player controlling several seats is one row) to mirror
-              their ENTIRE current screen -- their own detectives' default
-              highlights plus whatever they've personally toggled on --
-              onto yours, live. Select again to stop peeking. Only players
-              who currently allow it (myPeekable, opt-out below) are
-              listed -- someone who's turned peeking off simply doesn't
-              appear here, no "request denied" moment for either side.
-              ONLY offered during the shared pre-think buffer -- peeking
-              during Mr.X's turn or an individual detective's own act
-              window doesn't match the "team is thinking together" moment
-              this is meant for, and would otherwise risk a detective
-              locking their OWN board (peeking blocks clicks) right as
-              their own turn to act starts. See the auto-release effect
-              below for the case where the buffer ends WHILE peeking. */}
-          {/* v3.27 GATING FIX (part of "why did peeking sometimes show
-              nothing at all?"). This panel used to ALSO require
-              routeExplorerEnabled -- an unrelated admin feature flag.
-              With route explorer off, peek had its own flag switched on
-              and still silently never appeared, with no message
-              explaining why. Peek is gated on peek_enabled and nothing
-              else now. */}
-          {iAmDetective &&
-            peekEnabled &&
-            preThinkActive &&
-            detectivePlayersRoster.filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false).length > 0 && (
-              <div style={styles.huddlePanel}>
-                <div style={styles.exploreLabel}>Peek into a teammate's screen:</div>
-                {detectivePlayersRoster
-                  .filter((p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false)
-                  .map((p) => (
-                    <button
-                      key={p.playerId}
-                      style={{
-                        ...styles.huddleRow,
-                        ...(peekedPlayerId === p.playerId ? styles.huddleRowActive : {}),
-                      }}
-                      onClick={() => setPeekedPlayerId(peekedPlayerId === p.playerId ? null : p.playerId)}
-                    >
-                      <span
-                        style={{
-                          ...styles.huddleDot,
-                          background: match.detectives.find((d) => d.id === p.detectiveIds[0])?.color || "#666",
-                        }}
-                      />
-                      {p.displayName}
-                      {peekedPlayerId === p.playerId ? " (peeking)" : ""}
-                    </button>
-                  ))}
-              </div>
-            )}
-
-          {/* Your OWN privacy preference -- controls whether you show up
-              in OTHER players' peek lists above, not whether you can peek
-              at others. Kept visible ANYTIME (not buffer-gated), since
-              it's a durable preference you'd want to set once, not
-              something to fumble with in the few seconds the buffer is
-              actually running. */}
-          {/* Same v3.27 gating fix: this opt-out belongs to peek, not to
-              the route explorer. Leaving it behind routeExplorerEnabled
-              also meant a player could not even SEE, let alone change,
-              whether teammates were allowed to look at their board. */}
-          {iAmDetective && peekEnabled && (
-            <label style={styles.peekToggleRow}>
-              <input type="checkbox" checked={myPeekable} onChange={(e) => setMyPeekable(e.target.checked)} />
-              Let teammates peek into my screen
-            </label>
-          )}
-
-          {/* Freehand drawing -- pen/eraser/undo only, no color picker (a
-              single fixed graphite color for everyone, see styles.strokeColor
-              below), never visible to Mr.X.
-              v3.27: hidden entirely WHILE PEEKING. Peeking is view-only
-              now, so there is no board of yours on screen to draw on and
-              no way to draw on theirs. Drawing on your own board when
-              you're not peeking is completely unchanged. */}
-          {iAmDetective && drawEnabled && !peekedPlayerId && (
-            <div style={styles.drawToolbar}>
-              <button
-                type="button"
-                style={{ ...styles.drawToolBtn, ...(drawMode === "pen" ? styles.drawToolBtnActive : {}) }}
-                onClick={() => setDrawMode(drawMode === "pen" ? null : "pen")}
-              >
-                ✏️ Pen
-              </button>
-              <button
-                type="button"
-                style={{ ...styles.drawToolBtn, ...(drawMode === "eraser" ? styles.drawToolBtnActive : {}) }}
-                onClick={() => setDrawMode(drawMode === "eraser" ? null : "eraser")}
-              >
-                🧹 Eraser
-              </button>
-              <button type="button" style={styles.drawToolBtn} onClick={undoLastStroke}>
-                ↩️ Undo
-              </button>
-              {/* Real bug fix: this used to stay clickable during act
-                  windows too -- but "recall last round" only makes sense
-                  as part of the shared thinking/buffer moment (bringing
-                  back what the team was sketching to keep reasoning from
-                  it), not mid-move when the drawing layer isn't even the
-                  point anymore. Gated to preThinkActive, same phase the
-                  peek panel itself is restricted to. */}
-              {!peekedPlayerId && preThinkActive && lastRoundStrokes.length > 0 && (
-                <button
-                  type="button"
-                  style={{ ...styles.drawToolBtn, ...(recalledStrokes.length > 0 ? styles.drawToolBtnActive : {}) }}
-                  onClick={recallLastRoundStrokes}
-                >
-                  🕓 {recalledStrokes.length > 0 ? "Hide last round" : "Recall last round"}
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* v3.27: replaces the old "Drawing on their board" hint. Says
-              plainly what peeking now is, so the absence of the pen while
-              peeking reads as intentional rather than broken. */}
-          {iAmDetective && peekedPlayerId && (
-            <div style={styles.exploreHint}>👁️ View-only: you're watching their board live. You can't draw on it.</div>
-          )}
+          {/* (v3.29: the peek LIST, the peek privacy toggle, the drawing
+              toolbar and the view-only peek hint no longer live here.
+              Each was a permanent sidebar entry that only mattered
+              during one specific phase or mode:
+                - the peek list is a per-round activity and is now the
+                  "Peek" tab of the tabbed section below;
+                - the privacy toggle is a set-once preference and is now
+                  in the "Room & settings" menu at the top;
+                - the drawing toolbar and the peek hint are anchored over
+                  the map itself, appearing only while drawing is
+                  actually available -- the thing they act on IS the map,
+                  so putting them next to it removes the eye-travel the
+                  sidebar placement forced on every stroke.) */}
 
           {/* NO-LEGAL-MOVES PASS. v3.25 narrowed this to the only two
               cases that still need a button:
@@ -1968,40 +1884,14 @@ export default function GameBoard({
             </div>
           )}
 
-          {/* READY VOTE (v3.21) -- replaces the old "Begin acting phase
-              now" button, which let ANY single detective end the shared
-              planning window for everyone. That was fine as a trust-based
-              convenience in principle, but in practice it cost teammates
-              thinking time they were entitled to, so it's now a unanimous
-              vote ENFORCED SERVER-SIDE (see the set_planning_ready RPC).
-              The client only renders the tally; it never decides the
-              transition. Detective players only -- never Mr.X, never
-              spectators. The natural planning-timer expiry still ends the
-              phase on its own via begin_acting_phase, so a team that
-              never all tick ready is not stuck. */}
-          {!isPassAndPlay && iAmDetective && preThinkActive && (() => {
-            const readyIds = (match.planningReadyPlayers || []).map(String);
-            const iAmReady = myPlayerId != null && readyIds.includes(String(myPlayerId));
-            // Denominator: detective-controlling players currently
-            // online. A player who has dropped is excluded here for the
-            // same reason the server excludes them -- they must not be
-            // able to block the vote indefinitely. Falls back to 1 (just
-            // me) before the roster/presence data has loaded.
-            const totalVoters = Math.max(connectedDetectivePlayerIds.length, 1);
-            const readyVoters = readyIds.filter((pid) => connectedDetectivePlayerIds.map(String).includes(pid)).length;
-            return (
-              <div style={styles.rowCenter}>
-                <label style={{ ...styles.peekToggleRow, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={iAmReady}
-                    onChange={(e) => onSetPlanningReady && onSetPlanningReady(e.target.checked)}
-                  />
-                  Ready to act ({readyVoters} of {totalVoters})
-                </label>
-              </div>
-            );
-          })()}
+          {/* (v3.29: the ready-to-act tick has moved out of the sidebar
+              and is anchored over the map instead -- see the contextual
+              toolbar there. It only exists during the planning phase, so
+              a permanent slot in a panel that is on screen for the whole
+              game was the wrong home for it; it now appears exactly when
+              it is actionable, next to the board the decision is being
+              made about. It is still detective-only and still purely a
+              tally the SERVER decides on -- neither of those changed.) */}
 
           {/* (v3.25) The standalone "Skip <detective>'s move" button that
               used to live here is GONE. Voluntarily staying put is now
@@ -2091,6 +1981,85 @@ export default function GameBoard({
             </div>
           </div>
 
+          {/* -----------------------------------------------------------
+              v3.29 TABBED LOWER SECTION.
+              The travel log, chat and peek list are three READ-mostly
+              surfaces that used to be stacked one after another, so the
+              panel's total height was the sum of all three whether or not
+              you were looking at any of them -- which is what pushed the
+              things you actually act on below the fold. They are mutually
+              exclusive in practice (you are reading one at a time), so
+              they are tabs now.
+
+              Tab availability is derived, not assumed: chat only exists
+              when App.jsx passes it (multiplayer), and peek only exists
+              for a detective, with peeking enabled, during the planning
+              window, with at least one willing teammate. The travel log
+              is always there, which is why it is the default.
+              ----------------------------------------------------------- */}
+          {(() => {
+            const peekablePeers = detectivePlayersRoster.filter(
+              (p) => p.playerId !== myPlayerId && presenceState[p.playerId]?.peekable !== false
+            );
+            const peekTabAvailable = iAmDetective && peekEnabled && preThinkActive && peekablePeers.length > 0;
+            const tabs = [
+              { key: "log", label: "Travel log" },
+              ...(belowTicketsContent ? [{ key: "chat", label: "Chat" }] : []),
+              ...(peekTabAvailable ? [{ key: "peek", label: "Peek" }] : []),
+            ];
+            // A tab can disappear underneath you (the planning window
+            // ends and the peek tab goes with it). Falling back to the
+            // always-present log rather than rendering nothing means the
+            // section can never end up blank.
+            const active = tabs.some((t) => t.key === sidebarTab) ? sidebarTab : "log";
+            return (
+              <>
+                <div style={styles.sidebarTabBar}>
+                  {tabs.map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      style={{ ...styles.sidebarTab, ...(active === t.key ? styles.sidebarTabActive : {}) }}
+                      onClick={() => setSidebarTab(t.key)}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                {/* Wrapped so it carries the same flex `order` as the
+                    other two tab bodies -- belowTicketsContent is an
+                    opaque node from App.jsx with its own styling, so we
+                    cannot set an order on it directly. */}
+                {active === "chat" && <div style={{ order: 7 }}>{belowTicketsContent}</div>}
+                {active === "peek" && (
+                  <div style={styles.huddlePanel}>
+                    <div style={styles.exploreLabel}>Peek into a teammate's screen:</div>
+                    {peekablePeers.map((p) => (
+                      <button
+                        key={p.playerId}
+                        style={{
+                          ...styles.huddleRow,
+                          ...(peekedPlayerId === p.playerId ? styles.huddleRowActive : {}),
+                        }}
+                        onClick={() => setPeekedPlayerId(peekedPlayerId === p.playerId ? null : p.playerId)}
+                      >
+                        <span
+                          style={{
+                            ...styles.huddleDot,
+                            background: match.detectives.find((d) => d.id === p.detectiveIds[0])?.color || "#666",
+                          }}
+                        />
+                        {p.displayName}
+                        {peekedPlayerId === p.playerId ? " (peeking)" : ""}
+                      </button>
+                    ))}
+                    <div style={styles.exploreHint}>
+                      👁️ View-only: you watch their board live, you can't draw on it. Whether teammates may peek at YOUR board is in the Room &amp;
+                      settings menu.
+                    </div>
+                  </div>
+                )}
+                {active !== "log" ? null : (
           <div style={styles.travelLogPanel}>
             <div style={styles.travelLogTitle}>
               {mrxName()}'s travel log ({match.maxRounds + 2} moves max — {match.maxRounds} rounds + 2 double-move legs)
@@ -2177,8 +2146,10 @@ export default function GameBoard({
                 </div>
               )}
             </div>
-
-          {belowTicketsContent}
+                )}
+              </>
+            );
+          })()}
 
           {message && <div style={styles.messageBar}>{message}</div>}
 
@@ -3232,6 +3203,84 @@ export default function GameBoard({
               }
               return null;
             })()}
+            {/* ---------------------------------------------------------
+                v3.29 CONTEXTUAL MAP TOOLBAR.
+                Anchored over the map, bottom-left, and rendered ONLY when
+                one of its members is actually relevant right now. Both
+                members act on the map itself -- the ready tick ends the
+                planning window you are looking at the map to use, and the
+                pen draws on that same map -- so a sidebar home for either
+                meant looking in one place and acting in another, every
+                round, for the whole game.
+
+                The detective-only gating is UNCHANGED and deliberate:
+                Mr.X and spectators never see the ready tick, exactly as
+                before. Moving a control does not change who may see it.
+                --------------------------------------------------------- */}
+            {(() => {
+              const showReady = !isPassAndPlay && iAmDetective && preThinkActive;
+              const showDraw = iAmDetective && drawEnabled && !peekedPlayerId;
+              const showPeekHint = iAmDetective && !!peekedPlayerId;
+              if (!showReady && !showDraw && !showPeekHint) return null;
+              const readyIds = (match.planningReadyPlayers || []).map(String);
+              const iAmReady = myPlayerId != null && readyIds.includes(String(myPlayerId));
+              // Denominator: detective-controlling players currently
+              // online. A dropped player is excluded for the same reason
+              // the server excludes them -- they must not be able to
+              // block the vote indefinitely. Falls back to 1 (just me)
+              // before roster/presence data has loaded.
+              const totalVoters = Math.max(connectedDetectivePlayerIds.length, 1);
+              const readyVoters = readyIds.filter((pid) => connectedDetectivePlayerIds.map(String).includes(pid)).length;
+              return (
+                <div style={styles.mapContextToolbar}>
+                  {showReady && (
+                    <label style={{ ...styles.mapContextReady, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={iAmReady}
+                        onChange={(e) => onSetPlanningReady && onSetPlanningReady(e.target.checked)}
+                      />
+                      Ready to act ({readyVoters} of {totalVoters})
+                    </label>
+                  )}
+                  {showDraw && (
+                    <div style={styles.drawToolbar}>
+                      <button
+                        type="button"
+                        style={{ ...styles.drawToolBtn, ...(drawMode === "pen" ? styles.drawToolBtnActive : {}) }}
+                        onClick={() => setDrawMode(drawMode === "pen" ? null : "pen")}
+                      >
+                        ✏️ Pen
+                      </button>
+                      <button
+                        type="button"
+                        style={{ ...styles.drawToolBtn, ...(drawMode === "eraser" ? styles.drawToolBtnActive : {}) }}
+                        onClick={() => setDrawMode(drawMode === "eraser" ? null : "eraser")}
+                      >
+                        🧹 Eraser
+                      </button>
+                      <button type="button" style={styles.drawToolBtn} onClick={undoLastStroke}>
+                        ↩️ Undo
+                      </button>
+                      {/* "Recall last round" only makes sense as part of
+                          the shared thinking moment (bringing back what
+                          the team was sketching), not mid-move. Gated to
+                          preThinkActive, unchanged from v3.24. */}
+                      {preThinkActive && lastRoundStrokes.length > 0 && (
+                        <button
+                          type="button"
+                          style={{ ...styles.drawToolBtn, ...(recalledStrokes.length > 0 ? styles.drawToolBtnActive : {}) }}
+                          onClick={recallLastRoundStrokes}
+                        >
+                          🕓 {recalledStrokes.length > 0 ? "Hide last round" : "Recall last round"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {showPeekHint && <div style={styles.mapContextHint}>👁️ View-only: watching their board live.</div>}
+                </div>
+              );
+            })()}
             <div style={styles.zoomControls}>
               <button style={styles.zoomBtn} onClick={() => zoomBy(1.4)} aria-label="Zoom in">
                 +
@@ -3295,6 +3344,15 @@ export const styles = {
     gap: 0,
   },
   sidebarPermanent: {
+    // v3.29: a flex COLUMN, purely so the persistent top strip (ticket
+    // counts + stay tally) can be pulled above the phase-gated controls
+    // that sit between them in source order, without physically moving
+    // three large, heavily-commented JSX blocks around and risking a
+    // silent behavioral change in one of them. Only the handful of
+    // children that need a specific slot carry an `order`; everything
+    // else keeps its natural DOM position.
+    display: "flex",
+    flexDirection: "column",
     // Reduced from 420 to 360 to hand more width back to the map itself
     // -- checked that the content that actually lives here (ticket
     // chips, the 26-cell travel log grid, chat) all use flexible
@@ -3597,8 +3655,79 @@ export const styles = {
     gap: 4,
     alignItems: "flex-end",
   },
+  // v3.29 -- layout reorganization: room menu, tab bar, map-anchored
+  // contextual toolbar.
+  roomMenuBar: { order: -2, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
+  roomMenuBtn: {
+    border: "1px solid #d7d2c4",
+    background: "#fff",
+    color: "#333",
+    borderRadius: 8,
+    padding: "4px 10px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  roomCodeInline: { fontSize: 11.5, color: "#8a8375", fontWeight: 600, letterSpacing: 0.4 },
+  roomMenuPanel: {
+    order: -1,
+    border: "1px solid #e2ddcf",
+    background: "#fbfaf6",
+    borderRadius: 10,
+    padding: "8px 10px",
+    marginBottom: 10,
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  roomMenuRow: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 0 },
+  sidebarTabBar: { order: 6, display: "flex", gap: 4, borderBottom: "1px solid #e2ddcf", marginBottom: 8 },
+  sidebarTab: {
+    border: "none",
+    borderBottom: "2px solid transparent",
+    background: "none",
+    color: "#8a8375",
+    padding: "5px 9px",
+    fontSize: 12,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  sidebarTabActive: { color: "#1a1a1a", borderBottomColor: "#1a1a1a" },
+  mapContextToolbar: {
+    position: "absolute",
+    left: 10,
+    bottom: 10,
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    alignItems: "flex-start",
+    zIndex: 5,
+  },
+  mapContextReady: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid #d7d2c4",
+    borderRadius: 8,
+    padding: "5px 9px",
+    fontSize: 12,
+    fontWeight: 600,
+    color: "#333",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+  },
+  mapContextHint: {
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid #d7d2c4",
+    borderRadius: 8,
+    padding: "5px 9px",
+    fontSize: 11.5,
+    color: "#555",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+  },
   // v3.28 -- stay tally + bonus flash + planning view filter.
   stayBonusFlash: {
+    order: 0,
     border: "1px solid #e0b436",
     background: "#fff5d6",
     borderRadius: 10,
@@ -3610,6 +3739,7 @@ export const styles = {
     animation: "htStayBonusFlash 0.9s ease-in-out 6",
   },
   stayTallyPanel: {
+    order: 1,
     border: "1px solid #e2ddcf",
     background: "#fbfaf6",
     borderRadius: 10,
@@ -3659,6 +3789,11 @@ export const styles = {
     boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
   },
   allTicketsPanel: {
+    // Part of the v3.29 persistent top strip -- see sidebarPermanent.
+    // Ticket counts are read every single round by both roles, so they
+    // sit above everything phase-specific and never scroll out from
+    // under the phase controls.
+    order: 2,
     width: "100%",
     maxWidth: 760,
     boxSizing: "border-box",
@@ -3763,6 +3898,7 @@ export const styles = {
     marginBottom: 8,
   },
   travelLogPanel: {
+    order: 7,
     width: "100%",
     maxWidth: 760,
     boxSizing: "border-box",
@@ -3886,6 +4022,7 @@ export const styles = {
     marginTop: 8,
   },
   huddlePanel: {
+    order: 7,
     marginTop: 10,
     padding: "8px 10px",
     background: "#f7f6f3",
@@ -3910,6 +4047,7 @@ export const styles = {
   huddleRowActive: { borderColor: "#111", fontWeight: 700 },
   huddleDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
   messageBar: {
+    order: 9,
     width: "100%",
     maxWidth: 760,
     marginTop: 10,

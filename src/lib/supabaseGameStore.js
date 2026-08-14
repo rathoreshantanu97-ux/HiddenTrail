@@ -72,12 +72,38 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     };
   }, [roomId, refreshMatch]);
 
+  // HEARTBEAT -- keeps players.last_seen_at fresh. This is not just a
+  // presence nicety: it is the SERVER's definition of "currently
+  // connected", and therefore the denominator of the unanimous
+  // ready-to-act vote in set_planning_ready (a player the server thinks
+  // has dropped is excluded from the vote, deliberately, so a dead client
+  // can't block the round forever).
+  //
+  // v3.34: fire once IMMEDIATELY as well as on the interval. Previously
+  // the first beat was only sent 15s after mount, so a player who had
+  // just joined, refreshed, or reconnected could look stale to the server
+  // for up to 15 seconds -- and the planning phase is exactly the window
+  // in which a client makes no other RPC calls at all, so nothing else
+  // was refreshing the timestamp either. During that gap the server's
+  // connected set can be smaller than the real one, which makes a
+  // too-small unanimity denominator possible.
   useEffect(() => {
     if (!myPlayerId) return;
-    const id = setInterval(() => {
-      api.heartbeat({ playerId: myPlayerId, callerSecret: myPlayerSecret }).catch(() => {});
-    }, 15000);
-    return () => clearInterval(id);
+    const beat = () => api.heartbeat({ playerId: myPlayerId, callerSecret: myPlayerSecret }).catch(() => {});
+    beat();
+    const id = setInterval(beat, 15000);
+    // Also beat the moment the tab comes back to the foreground: a
+    // backgrounded mobile browser routinely throttles or suspends timers
+    // entirely, so the interval alone cannot be relied on to have kept
+    // running while the player was away.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") beat();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [myPlayerId, myPlayerSecret]);
 
   const startGame = useCallback(

@@ -266,6 +266,15 @@ export default function GameBoard({
   // destinations, closing whichever was open before. There is deliberately
   // no auto-advance of any kind -- see the derived activeDetective below.
   const [selectedActingDetId, setSelectedActingDetId] = useState(null);
+  // v3.34 -- the SERVER's own ready tally, as returned by the last
+  // set_planning_ready call ({readyCount, connectedCount}). The server is
+  // the only authority on how many players it considers connected, and
+  // therefore on what "unanimous" means; the client's Presence-derived
+  // denominator is a separate estimate that can legitimately disagree for
+  // a few seconds. Showing the server's numbers when we have them means
+  // the tally in the corner is the same tally the transition decision is
+  // actually made from, instead of a lookalike.
+  const [serverReadyTally, setServerReadyTally] = useState(null);
   // v3.29 layout reorganization -- which of the three read-mostly
   // surfaces (travel log / chat / peek) the tabbed lower section is
   // showing, and whether the room/admin menu is open. Both are purely
@@ -558,6 +567,9 @@ export default function GameBoard({
   // from lingering across rounds.
   useEffect(() => {
     setSelectedActingDetId(null);
+    // The server tally is a snapshot from one specific planning window --
+    // it must never be carried into the next one.
+    setServerReadyTally(null);
   }, [match.round, roundPhaseMp]);
 
   // Destination toggles are per-round exploration, not a durable
@@ -1703,6 +1715,36 @@ export default function GameBoard({
                   // observer of a trail can't tell stillness from
                   // hesitation, and neither can this log.
                   const isStay = !!entry && (entry.mode === "stay" || entry.stayed);
+                  // v3.34 -- A BLACK-TICKET STAY IS RENDERED AS AN ORDINARY
+                  // BLACK MOVE, with no stay treatment whatsoever: no
+                  // dashed/greyed cell, no "—", no extra letter beside it,
+                  // and a tooltip identical to a real black move's.
+                  //
+                  // Why black specifically: black is Mr.X's concealment
+                  // ticket. Its entire purpose is that the detectives
+                  // cannot tell WHICH mode he used -- and a stay paid for
+                  // with black is exactly that same "you don't get to know
+                  // what happened" fact. Showing a dash next to it leaked
+                  // the one thing black is supposed to hide (that he did
+                  // not travel at all), on top of looking like two
+                  // competing indicators for one decision. v3.32 item 9
+                  // added the little ticket letter beside the dash to fix
+                  // "a black stay shows no ticket info"; the correct
+                  // resolution of that is the plain black chip on its own,
+                  // not chip AND dash.
+                  //
+                  // taxi/bus/underground stays are deliberately UNCHANGED
+                  // and keep their dash + letter: those tickets carry no
+                  // concealment promise, so "he stood still and forfeited a
+                  // taxi ticket" is information the log is meant to show.
+                  const isBlackStay = isStay && entry.ticket === "black";
+                  // showAsStay -- the *visual* stay treatment, which is now
+                  // narrower than isStay (the data-level fact).
+                  const showAsStay = isStay && !isBlackStay;
+                  // Which mode chip to draw for a non-stay-styled cell. For
+                  // a black stay the entry's own mode is the sentinel
+                  // "stay", so the chip is explicitly pointed at black.
+                  const chipMode = isBlackStay ? "black" : entry?.mode;
                   return (
                     <div
                       key={moveNum}
@@ -1710,11 +1752,11 @@ export default function GameBoard({
                         ...styles.logBoardCell,
                         ...(belongsToRevealRound ? styles.logBoardCellReveal : {}),
                         ...(isFuture ? styles.logBoardCellFuture : {}),
-                        ...(isStay ? styles.logBoardCellStay : {}),
+                        ...(showAsStay ? styles.logBoardCellStay : {}),
                       }}
                       title={
                         entry
-                          ? isStay
+                          ? showAsStay
                             ? `Move ${moveNum} (round ${entry.round}): did not move this round${
                                 // v3.32 item 9 -- ticketTypeLabel resolves the
                                 // SPECIAL ticket types (black in particular)
@@ -1725,7 +1767,9 @@ export default function GameBoard({
                                 // taxi/bus/underground stay names its own.
                                 entry.ticket ? ` — forfeited a ${ticketTypeLabel(entry.ticket)} ticket` : " — no tickets left to forfeit"
                               }${belongsToRevealRound ? " — reveal move" : ""}`
-                            : `Move ${moveNum} (round ${entry.round}): ${activeMode[entry.mode]?.label || entry.mode}${belongsToRevealRound ? " — reveal move" : ""}`
+                            : // chipMode, not entry.mode -- a black stay must
+                              // read exactly like a black move here too.
+                              `Move ${moveNum} (round ${entry.round}): ${ticketTypeLabel(chipMode) || chipMode}${belongsToRevealRound ? " — reveal move" : ""}`
                           : `Move ${moveNum}${belongsToRevealRound ? " — reveal move (upcoming)" : ""}: not yet played`
                       }
                     >
@@ -1733,7 +1777,7 @@ export default function GameBoard({
                         {moveNum}
                         {entry ? ` · R${entry.round}` : ""}
                       </div>
-                      {entry && isStay ? (
+                      {entry && showAsStay ? (
                         // The dash is the stay marker and stays exactly as
                         // it was -- a stay is never dressed up as a travel
                         // move. What's new in v3.32 is the tiny forfeited-
@@ -1750,11 +1794,11 @@ export default function GameBoard({
                         <div
                           style={{
                             ...styles.logBoardModeTag,
-                            background: activeMode[entry.mode]?.color || "#ccc",
-                            color: entry.mode === "black" ? "#fff" : "#1a1a1a",
+                            background: activeMode[chipMode]?.color || (chipMode === "black" ? "#1a1a1a" : "#ccc"),
+                            color: chipMode === "black" ? "#fff" : "#1a1a1a",
                           }}
                         >
-                          {modeChipLetter(entry.mode, activeMode)}
+                          {modeChipLetter(chipMode, activeMode)}
                         </div>
                       ) : (
                         <div style={styles.logBoardModeTagEmpty}>·</div>
@@ -2200,6 +2244,18 @@ export default function GameBoard({
                 // already relies on, not a new one.
                 const isCurrentTurnStation = !isMrXTurn && activeDetective && numId === activeDetective.pos;
                 const isMrXOwnTurnIndicator = isMrXTurn && mrXHere;
+                // v3.34 -- how many destination-style rings are ALREADY
+                // occupying the innermost slot (nodeR + 0.7) before the
+                // per-detective reach rings are stacked on top. Exactly one
+                // of the two can ever apply to a given station: the plain
+                // legal-move ring (a travel destination, so never the
+                // active piece's own station), or the v3.28 "your own
+                // station is a Stay destination" ring (only ever the active
+                // piece's own station). Used purely to offset the stack so
+                // no two rings land on the same radius and hide each other.
+                const stayDestRingHere =
+                  !isPassAndPlay && isMyTurnToAct && (isCurrentTurnStation || isMrXOwnTurnIndicator) && highlightDestinationStyle !== "none";
+                const destRingOffset = isLegal || stayDestRingHere ? 1 : 0;
                 let fill = "#ffffff";
                 let stroke = "#8a8375";
                 if (detHere) {
@@ -2274,8 +2330,26 @@ export default function GameBoard({
                         so overlapping highlights from different
                         detectives stay distinguishable by color, same
                         color-coding already used for origin rings below. */}
+                    {/* v3.34 -- STACK OFFSET, not a re-style. Every one of
+                        the destination-style rings on this station shares
+                        one radius ladder now, starting at nodeR+0.7 and
+                        stepping outward by 0.4 per ring. Before this, the
+                        isLegal ring above and the FIRST reaching-detective
+                        ring were both hard-coded to exactly nodeR+0.7, so
+                        on any station that was simultaneously my active
+                        piece's legal destination AND a highlighted
+                        teammate's reachable station, the two rings were
+                        drawn precisely on top of one another -- one
+                        silently painted over the other, hiding a real,
+                        distinct fact (whose reach this was) behind an
+                        identical-geometry ring. The two rings are NOT
+                        redundant with each other (different meaning,
+                        different colour), so the fix is to separate them,
+                        not to drop one. The active mover's OWN reach entry
+                        IS genuine duplication of isLegal and is still
+                        dropped outright, as before (see reachingDetectives). */}
                     {reachingDetectives.map((rd, i) => (
-                      <HighlightRing key={rd.detId} x={x} y={y} radius={nodeR + 0.7 + i * 0.4} color={rd.color} strokeWidth={0.3} dashed={i > 0} style={highlightDestinationStyle} />
+                      <HighlightRing key={rd.detId} x={x} y={y} radius={nodeR + 0.7 + (i + destRingOffset) * 0.4} color={rd.color} strokeWidth={0.3} dashed={i + destRingOffset > 0} style={highlightDestinationStyle} />
                     ))}
                     {/* Origin ring for any highlighted detective's CURRENT
                         position -- lets you see, at a glance, whose
@@ -2315,10 +2389,7 @@ export default function GameBoard({
                         Multiplayer only -- pass-and-play never enters the
                         click-your-own-station stay flow at all, so
                         advertising it there would be a lie. */}
-                    {!isPassAndPlay &&
-                      isMyTurnToAct &&
-                      (isCurrentTurnStation || isMrXOwnTurnIndicator) &&
-                      highlightDestinationStyle !== "none" && (
+                    {stayDestRingHere && (
                         <HighlightRing
                           x={x}
                           y={y}
@@ -2838,8 +2909,14 @@ export default function GameBoard({
               // the server excludes them -- they must not be able to
               // block the vote indefinitely. Falls back to 1 (just me)
               // before roster/presence data has loaded.
-              const totalVoters = Math.max(connectedDetectivePlayerIds.length, 1);
-              const readyVoters = readyIds.filter((pid) => connectedDetectivePlayerIds.map(String).includes(pid)).length;
+              // v3.34: prefer the SERVER's counts when we have them (see
+              // serverReadyTally) -- they are what the unanimity decision
+              // is actually made from. The Presence-derived numbers stay
+              // as the pre-first-click fallback.
+              const totalVoters = serverReadyTally ? Math.max(serverReadyTally.connectedCount, 1) : Math.max(connectedDetectivePlayerIds.length, 1);
+              const readyVoters = serverReadyTally
+                ? serverReadyTally.readyCount
+                : readyIds.filter((pid) => connectedDetectivePlayerIds.map(String).includes(pid)).length;
               const canDouble = match.mrX.tickets.double > 0 && !match.mrX.doubleMoveActive;
               return (
                 <div style={styles.mapCornerTopRight}>
@@ -2848,7 +2925,16 @@ export default function GameBoard({
                       <input
                         type="checkbox"
                         checked={iAmReady}
-                        onChange={(e) => onSetPlanningReady && onSetPlanningReady(e.target.checked)}
+                        onChange={async (e) => {
+                          if (!onSetPlanningReady) return;
+                          // This is a VOTE (set_planning_ready), never a
+                          // forced transition -- the server alone decides
+                          // whether this tick completed a unanimous one.
+                          const res = await onSetPlanningReady(e.target.checked);
+                          if (res && typeof res.connectedCount === "number") {
+                            setServerReadyTally({ readyCount: res.readyCount, connectedCount: res.connectedCount });
+                          }
+                        }}
                       />
                       Ready to act ({readyVoters} of {totalVoters})
                     </label>

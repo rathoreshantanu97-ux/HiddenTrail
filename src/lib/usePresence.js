@@ -75,21 +75,11 @@ export function usePresence({
   myDisplayName,
   myRole,
   gracePeriodSeconds = 25,
-  myToggledDetectiveIds = [],
-  myPeekable = true,
-  onStrokesSync,
-  onStrokesRequest,
-  onPeekOff,
-  // onRevealSync (v3.24) -- a player pushing the set of detective ids
-  // whose DESTINATIONS they currently have revealed on their own board.
-  // Same shape of thing as strokes_sync: a full, idempotent snapshot,
-  // pushed on every change, cached and mirrored by anyone peeking that
-  // player. This used to ride along in the Presence payload
-  // (toggledDetectiveIds) only -- which still happens, and is still what
-  // seeds a peek that starts cold -- but Presence sync is coalescing and
-  // silently lossy, so the LIVE "they just clicked a piece, show me what
-  // they're seeing" path now goes over broadcast like everything else.
-  onRevealSync,
+  // (v3.32: myToggledDetectiveIds, myPeekable, onStrokesSync,
+  // onStrokesRequest, onPeekOff and onRevealSync are gone. Every one of
+  // them existed to serve peeking and/or the shared drawing layer, both
+  // of which were removed from the product. Presence is back to its
+  // original, narrow job: who is in this room and are they online.)
 }) {
   const [onlinePlayerIds, setOnlinePlayerIds] = useState(new Set());
   // playerId -> their full tracked presence payload (displayName, role,
@@ -204,18 +194,11 @@ export function usePresence({
     channelRef.current = channel;
     channelJoinedRef.current = false;
 
-    // (v3.27: the "stroke" broadcast -- peek-and-draw -- used to be
-    // handled here. It is gone; peeking is view-only now.)
-
-    // strokes_sync -- a player pushing their CURRENT full stroke set to
-    // the room. Room-wide like every broadcast, so each client decides
-    // for itself whether it cares (GameBoard only applies it when the
-    // sender is the player it's actively peeking). Ignore our own echo.
-    channel.on("broadcast", { event: "strokes_sync" }, ({ payload }) => {
-      if (payload?.senderPlayerId && payload.senderPlayerId !== myPlayerId && onStrokesSyncRef.current) {
-        onStrokesSyncRef.current(payload);
-      }
-    });
+    // (v3.32: the strokes_sync / strokes_request / peek_off /
+    // reveal_sync broadcast listeners lived here. All four are gone with
+    // the peek and drawing features they existed for. Nothing is
+    // broadcast on this channel any more beyond Presence's own
+    // join/leave/sync bookkeeping.)
 
     // strokes_request -- someone just STARTED peeking me and wants my
     // current drawing right now, rather than waiting for my next edit.
@@ -274,7 +257,7 @@ export function usePresence({
     channel.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
         channelJoinedRef.current = true;
-        await channel.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable });
+        await channel.track({ displayName: myDisplayName, role: myRole });
         // Anything that was attempted while the channel was down goes
         // out now, in order. This is what turns a reconnect from
         // "silently lost every message in that window" into "delivered
@@ -354,45 +337,5 @@ export function usePresence({
   // peeking" -- was removed with peek-and-draw. Peeking is view-only, so
   // there is no outbound path from a peeker to another player's board.)
 
-  // sendStrokesSync -- push MY current full stroke set to the room, so
-  // any client peeking me re-renders it immediately. Full snapshot, not
-  // a delta: idempotent, order-independent, and self-healing if any
-  // single broadcast is ever missed.
-  const sendStrokesSync = useCallback(
-    (strokes) => {
-      if (!myPlayerId) return;
-      sendOnChannel("strokes_sync", { senderPlayerId: myPlayerId, strokes });
-    },
-    [myPlayerId, sendOnChannel]
-  );
-
-  // sendRevealSync -- push MY current "revealed destinations" detective
-  // id set to the room (v3.24). Exactly the same contract as
-  // sendStrokesSync: a full snapshot, cheap, idempotent, self-healing.
-  const sendRevealSync = useCallback(
-    (revealedDetectiveIds) => {
-      if (!myPlayerId) return;
-      sendOnChannel("reveal_sync", { senderPlayerId: myPlayerId, revealedDetectiveIds: revealedDetectiveIds || [] });
-    },
-    [myPlayerId, sendOnChannel]
-  );
-
-  // sendStrokesRequest -- ask a specific player to push me their current
-  // strokes right now (sent the moment a peek starts).
-  const sendStrokesRequest = useCallback(
-    (targetPlayerId) => {
-      if (!myPlayerId || !targetPlayerId) return;
-      sendOnChannel("strokes_request", { targetPlayerId, fromPlayerId: myPlayerId });
-    },
-    [myPlayerId, sendOnChannel]
-  );
-
-  // sendPeekOff -- tell the room I've revoked peek permission, so active
-  // peekers drop out of my board immediately.
-  const sendPeekOff = useCallback(() => {
-    if (!myPlayerId) return;
-    sendOnChannel("peek_off", { senderPlayerId: myPlayerId });
-  }, [myPlayerId, sendOnChannel]);
-
-  return { onlinePlayerIds, presenceState, isInactive, sendStrokesSync, sendStrokesRequest, sendPeekOff, sendRevealSync };
+  return { onlinePlayerIds, presenceState, isInactive };
 }

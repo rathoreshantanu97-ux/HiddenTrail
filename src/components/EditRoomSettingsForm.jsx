@@ -54,6 +54,11 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
   // editable; a blank field falls back to the same defaults server-side.
   const [stayBlackThreshold, setStayBlackThreshold] = useState(null);
   const [stayDoubleThreshold, setStayDoubleThreshold] = useState(null);
+  // v3.32 item 10 -- seconds added to Mr.X's own turn clock when he plays
+  // a 2x. null/"" = inherit (the admin default, else one full derived
+  // Mr.X window). Never hardcoded anywhere on the client: the server
+  // resolves the whole chain inside activate_double_move.
+  const [doubleMoveExtraSeconds, setDoubleMoveExtraSeconds] = useState(null);
   const [publicConfig, setPublicConfig] = useState({
     turnTimerMin: 30,
     turnTimerMax: 300,
@@ -119,11 +124,14 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
           redistributeRoles: room.redistribute_roles_enabled_override,
           positionHighlightStyle: room.position_highlight_style_override,
           destinationHighlightStyle: room.destination_highlight_style_override,
+          actingPositionHighlightStyle: room.acting_position_highlight_style_override,
+          actingDestinationHighlightStyle: room.acting_destination_highlight_style_override,
           routeExplorer: room.route_explorer_enabled_override,
           roundScalingRatio: room.round_scaling_ratio_override,
-          draw: room.draw_enabled_override,
-          peek: room.peek_enabled_override,
+          // v3.32: draw/peek are gone from the product -- no longer read
+          // back, no longer offered, no longer sent.
         });
+        setDoubleMoveExtraSeconds(room.double_move_extra_seconds ?? null);
       })
       .catch((e) => console.error("Failed to fetch current room settings:", e))
       .finally(() => setLoaded(true));
@@ -156,6 +164,8 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
         detectiveCapSeconds: detectiveCapSeconds === "" || detectiveCapSeconds == null ? null : parseInt(detectiveCapSeconds, 10),
         stayBlackThreshold: stayBlackThreshold === "" || stayBlackThreshold == null ? null : parseInt(stayBlackThreshold, 10),
         stayDoubleThreshold: stayDoubleThreshold === "" || stayDoubleThreshold == null ? null : parseInt(stayDoubleThreshold, 10),
+        doubleMoveExtraSeconds:
+          doubleMoveExtraSeconds === "" || doubleMoveExtraSeconds == null ? null : parseInt(doubleMoveExtraSeconds, 10),
         featureOverrides,
         isPublic,
         roomName: isPublic ? roomName.trim() : null,
@@ -294,57 +304,53 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
               />
             </label>
           )}
-          {featureConfig.drawOverridable && (
-            <label style={styles.featureOverrideRow}>
-              <span>Allow the freehand drawing / annotation layer</span>
-              <input
-                type="checkbox"
-                checked={featureOverrides.draw ?? featureConfig.drawEnabled}
-                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, draw: e.target.checked }))}
-              />
-            </label>
-          )}
-          {featureConfig.peekOverridable && (
-            <label style={styles.featureOverrideRow}>
-              <span>Allow peeking into a teammate's screen</span>
-              <input
-                type="checkbox"
-                checked={featureOverrides.peek ?? featureConfig.peekEnabled}
-                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, peek: e.target.checked }))}
-              />
-            </label>
-          )}
-          {featureConfig.positionHighlightStyleOverridable && (
-            <label style={styles.featureOverrideRow}>
-              <span>Position highlight style (your turn / Mr. X's own view)</span>
-              <select
-                style={styles.featureOverrideSelect}
-                value={featureOverrides.positionHighlightStyle ?? featureConfig.positionHighlightStyle}
-                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, positionHighlightStyle: e.target.value }))}
-              >
-                <option value="ring">Pulsing ring</option>
-                <option value="rotating">Rotating ring</option>
-                <option value="blink">Blink</option>
-                <option value="static">Static ring</option>
-                <option value="none">None</option>
-              </select>
-            </label>
-          )}
-          {featureConfig.destinationHighlightStyleOverridable && (
-            <label style={styles.featureOverrideRow}>
-              <span>Destination highlight style (legal moves)</span>
-              <select
-                style={styles.featureOverrideSelect}
-                value={featureOverrides.destinationHighlightStyle ?? featureConfig.destinationHighlightStyle}
-                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, destinationHighlightStyle: e.target.value }))}
-              >
-                <option value="ring">Pulsing ring</option>
-                <option value="rotating">Rotating ring</option>
-                <option value="blink">Blink</option>
-                <option value="static">Static ring</option>
-                <option value="none">None</option>
-              </select>
-            </label>
+          {/* v3.32: the "allow drawing" and "allow peeking" host toggles
+              are gone -- both features were removed from the product, so
+              a per-room switch for them would control nothing. */}
+          {/* v3.32 -- FOUR independent highlight slots (planning origin,
+              planning destination, acting origin, acting destination).
+              Each is offered to the host only if the admin left that
+              specific slot host-overridable, exactly as the original two
+              were. The two planning keys keep their old, unprefixed
+              names, so a room that already had an override keeps it. */}
+          {[
+            {
+              key: "positionHighlightStyle",
+              overridableKey: "positionHighlightStyleOverridable",
+              label: "Planning phase — origin/position highlight style",
+            },
+            {
+              key: "destinationHighlightStyle",
+              overridableKey: "destinationHighlightStyleOverridable",
+              label: "Planning phase — destination highlight style",
+            },
+            {
+              key: "actingPositionHighlightStyle",
+              overridableKey: "actingPositionHighlightStyleOverridable",
+              label: "Acting phase — origin/position highlight style",
+            },
+            {
+              key: "actingDestinationHighlightStyle",
+              overridableKey: "actingDestinationHighlightStyleOverridable",
+              label: "Acting phase — destination highlight style",
+            },
+          ].map(({ key, overridableKey, label }) =>
+            featureConfig[overridableKey] ? (
+              <label key={key} style={styles.featureOverrideRow}>
+                <span>{label}</span>
+                <select
+                  style={styles.featureOverrideSelect}
+                  value={featureOverrides[key] ?? featureConfig[key] ?? "ring"}
+                  onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, [key]: e.target.value }))}
+                >
+                  <option value="ring">Pulsing ring</option>
+                  <option value="rotating">Rotating ring</option>
+                  <option value="blink">Blink</option>
+                  <option value="static">Static ring</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+            ) : null
           )}
           {featureConfig.roundScalingOverridable && (
             <label style={styles.featureOverrideRow}>
@@ -668,6 +674,36 @@ export default function EditRoomSettingsForm({ roomId, myPlayerId, mySecret, cur
             }
             return <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>First rewards at stay count: {seq.join(", ")}…</div>;
           })()}
+
+          {/* v3.32 item 10 -- EXTRA TIME ON A DOUBLE MOVE.
+              A 2x is two moves' worth of decision made inside one turn
+              window, so the window is topped up when it's played. Blank
+              means "inherit": the admin's global default if one is set,
+              otherwise one full Mr. X window, which is roughly one base
+              move's worth of thinking time. Nothing here is hardcoded --
+              the whole chain is resolved server-side inside
+              activate_double_move, so every client agrees. */}
+          <label style={styles.featureOverrideRow}>
+            <span>
+              Extra time when Mr.&nbsp;X plays a 2x — seconds added to his own turn clock the moment he activates a double move. Blank inherits the
+              app-wide default, which itself falls back to one full Mr.&nbsp;X window (roughly one base move's worth of thinking time).
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="Auto"
+              style={{ ...styles.featureOverrideSelect, textAlign: "center" }}
+              value={doubleMoveExtraSeconds ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "" || /^\d*$/.test(v)) setDoubleMoveExtraSeconds(v === "" ? null : v);
+              }}
+              onBlur={() => {
+                if (doubleMoveExtraSeconds === null || doubleMoveExtraSeconds === "") return;
+                setDoubleMoveExtraSeconds(Math.max(0, Math.min(600, parseInt(doubleMoveExtraSeconds, 10) || 0)));
+              }}
+            />
+          </label>
 
           {publicConfig && turnTimerSeconds && (() => {
             // Host sets these TWO numbers above directly -- everything

@@ -200,6 +200,28 @@ function BoardSection({ activeMode, mrxLabel }) {
   return (
     <>
       <SectionTitle>The board & transport</SectionTitle>
+      {/* -----------------------------------------------------------
+          v3.32 -- THE COLOUR KEY LIVES HERE NOW.
+          Up to v3.31 this key was pinned permanently to the side panel,
+          on screen for the whole game. It is reference material you
+          consult once or twice and then never again, so it was removed
+          from constant display and folded into the rules, on demand.
+          Built from the ACTIVE map's own mode theme, so a themed map
+          (Auto / Cab / Metro / Secret Tunnel) shows its own names and
+          colours rather than the generic defaults -- exactly what the
+          side-panel legend did.
+          ----------------------------------------------------------- */}
+      <div style={styles.quickLegend}>
+        <div style={styles.quickLegendTitle}>Route &amp; ticket colour key</div>
+        <div style={styles.quickLegendRow}>
+          {Object.entries(activeMode).map(([key, m]) => (
+            <span key={key} style={styles.quickLegendItem}>
+              <span style={{ ...styles.legendSwatch, background: m.color }} />
+              {m.label}
+            </span>
+          ))}
+        </div>
+      </div>
       <P>
         Stations are connected by colored routes. Each route only supports certain transport modes — moving between two
         stations means using a ticket that matches one of the routes actually connecting them.
@@ -407,6 +429,17 @@ function MultiplayerSection({ mrxLabel }) {
 }
 
 const styles = {
+  quickLegend: {
+    border: "1px solid #e6e2d8",
+    background: "#fbfaf7",
+    borderRadius: 10,
+    padding: "10px 12px",
+    marginBottom: 14,
+  },
+  quickLegendTitle: { fontSize: 12, fontWeight: 800, color: "#5b4636", marginBottom: 8, letterSpacing: 0.3, textTransform: "uppercase" },
+  quickLegendRow: { display: "flex", flexWrap: "wrap", gap: "8px 16px" },
+  quickLegendItem: { display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "#333" },
+
   overlay: {
     position: "fixed",
     inset: 0,

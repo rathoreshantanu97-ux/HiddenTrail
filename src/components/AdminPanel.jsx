@@ -195,7 +195,17 @@ export default function AdminPanel({ accountId, onBack }) {
     try {
       await auth.setFeatureToggles({
         callerAccountId: accountId,
-        config: { ...featureDraft, roundScalingRatio: Number(featureDraft.roundScalingRatio) },
+        config: {
+          ...featureDraft,
+          roundScalingRatio: Number(featureDraft.roundScalingRatio),
+          // v3.32: blank stays null ("derive one full Mr. X window"),
+          // anything typed is coerced to a real number -- a bare string
+          // would be rejected by the RPC's integer parameter.
+          doubleMoveExtraSeconds:
+            featureDraft.doubleMoveExtraSeconds === null || featureDraft.doubleMoveExtraSeconds === ""
+              ? null
+              : Number(featureDraft.doubleMoveExtraSeconds),
+        },
       });
       await refresh();
       setFeaturesSaved("Saved.");
@@ -591,8 +601,12 @@ export default function AdminPanel({ accountId, onBack }) {
             { key: "pauseResume", label: "Pause / resume" },
             { key: "redistributeRoles", label: "Host: redistribute roles" },
             { key: "routeExplorer", label: "Route explorer (show reachable stations by mode)" },
-            { key: "draw", label: "Freehand drawing / annotation layer (detectives only)" },
-            { key: "peek", label: "Peek into a teammate's screen" },
+            // v3.32: the "draw" and "peek" rows are gone. Both features
+            // were removed from the product entirely (no canvas, no
+            // stroke sync, no peek panel), so an admin toggle for them
+            // would control nothing. The DB columns survive, inert, and
+            // are still round-tripped by accessControlApi.js so saving
+            // this form can't rewrite them -- see the note there.
           ].map(({ key, label }) => (
             <div key={key} style={styles.featureRow}>
               <span style={styles.featureLabel}>{label}</span>
@@ -616,50 +630,68 @@ export default function AdminPanel({ accountId, onBack }) {
             </div>
           ))}
 
-          <div style={styles.featureRow}>
-            <span style={styles.featureLabel}>Position highlight style (default) — your turn / Mr. X's own view</span>
-            <select
-              style={styles.configInput}
-              value={featureDraft.positionHighlightStyle}
-              onChange={(e) => setFeatureDraft({ ...featureDraft, positionHighlightStyle: e.target.value })}
-            >
-              <option value="ring">Pulsing ring</option>
-              <option value="rotating">Rotating ring</option>
-              <option value="blink">Blink</option>
-              <option value="static">Static ring</option>
-              <option value="none">None</option>
-            </select>
-            <label style={styles.featureCheckboxLabel}>
-              <input
-                type="checkbox"
-                checked={featureDraft.positionHighlightStyleOverridable}
-                onChange={(e) => setFeatureDraft({ ...featureDraft, positionHighlightStyleOverridable: e.target.checked })}
-              />
-              Hosts can override per-room
-            </label>
-          </div>
+          {/* -------------------------------------------------------
+              v3.32 -- FOUR HIGHLIGHT SLOTS, NOT TWO.
+              Planning and acting are visually different jobs: planning
+              shows the team's whole position at rest, acting shows which
+              of your own pieces still owe a move. Each of the two roles
+              (origin / destination) is therefore configured per phase.
+              The two PLANNING keys keep their original, unprefixed names
+              so every already-stored room override and admin default
+              carries over untouched.
+              ------------------------------------------------------- */}
+          {[
+            { key: "positionHighlightStyle", label: "Planning phase — origin/position highlight style" },
+            { key: "destinationHighlightStyle", label: "Planning phase — destination highlight style" },
+            { key: "actingPositionHighlightStyle", label: "Acting phase — origin/position highlight style" },
+            { key: "actingDestinationHighlightStyle", label: "Acting phase — destination highlight style" },
+          ].map(({ key, label }) => (
+            <div key={key} style={styles.featureRow}>
+              <span style={styles.featureLabel}>{label}</span>
+              <select
+                style={styles.configInput}
+                value={featureDraft[key] ?? "ring"}
+                onChange={(e) => setFeatureDraft({ ...featureDraft, [key]: e.target.value })}
+              >
+                <option value="ring">Pulsing ring</option>
+                <option value="rotating">Rotating ring</option>
+                <option value="blink">Blink</option>
+                <option value="static">Static ring</option>
+                <option value="none">None</option>
+              </select>
+              <label style={styles.featureCheckboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={!!featureDraft[`${key}Overridable`]}
+                  onChange={(e) => setFeatureDraft({ ...featureDraft, [`${key}Overridable`]: e.target.checked })}
+                />
+                Hosts can override per-room
+              </label>
+            </div>
+          ))}
 
+          {/* v3.32 item 10 -- the GLOBAL default for the double-move time
+              top-up. A room may still override it; left blank here AND on
+              the room means "derive one full Mr. X window", which is
+              roughly one base move's worth of thinking time. */}
           <div style={styles.featureRow}>
-            <span style={styles.featureLabel}>Destination highlight style (default) — legal moves</span>
-            <select
+            <span style={styles.featureLabel}>
+              Extra turn time when Mr. X plays a 2x / double move (seconds, blank = one full Mr. X window)
+            </span>
+            <input
+              type="number"
+              min={0}
+              max={600}
+              placeholder="auto"
               style={styles.configInput}
-              value={featureDraft.destinationHighlightStyle}
-              onChange={(e) => setFeatureDraft({ ...featureDraft, destinationHighlightStyle: e.target.value })}
-            >
-              <option value="ring">Pulsing ring</option>
-              <option value="rotating">Rotating ring</option>
-              <option value="blink">Blink</option>
-              <option value="static">Static ring</option>
-              <option value="none">None</option>
-            </select>
-            <label style={styles.featureCheckboxLabel}>
-              <input
-                type="checkbox"
-                checked={featureDraft.destinationHighlightStyleOverridable}
-                onChange={(e) => setFeatureDraft({ ...featureDraft, destinationHighlightStyleOverridable: e.target.checked })}
-              />
-              Hosts can override per-room
-            </label>
+              value={featureDraft.doubleMoveExtraSeconds ?? ""}
+              onChange={(e) =>
+                setFeatureDraft({
+                  ...featureDraft,
+                  doubleMoveExtraSeconds: e.target.value === "" ? null : e.target.value,
+                })
+              }
+            />
           </div>
 
           <div style={styles.featureRow}>

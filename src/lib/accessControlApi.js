@@ -364,6 +364,12 @@ export async function getFeatureConfig() {
     redistributeRolesEnabled: true, redistributeRolesOverridable: true,
     positionHighlightStyle: "ring", positionHighlightStyleOverridable: true,
     destinationHighlightStyle: "rotating", destinationHighlightStyleOverridable: true,
+    // v3.32 -- the acting-phase half of the four-slot highlight config.
+    // Defaults deliberately mirror the planning-phase pair, so an install
+    // that never touches them behaves exactly as it did pre-split.
+    actingPositionHighlightStyle: "ring", actingPositionHighlightStyleOverridable: true,
+    actingDestinationHighlightStyle: "rotating", actingDestinationHighlightStyleOverridable: true,
+    doubleMoveExtraSeconds: null,
     routeExplorerEnabled: true, routeExplorerOverridable: true,
     roundScalingRatio: 1.0, roundScalingOverridable: true,
     publicRoomsEnabled: true,
@@ -403,6 +409,11 @@ export async function getFeatureConfig() {
     positionHighlightStyleOverridable: row.out_position_highlight_style_overridable,
     destinationHighlightStyle: row.out_destination_highlight_style,
     destinationHighlightStyleOverridable: row.out_destination_highlight_style_overridable,
+    actingPositionHighlightStyle: row.out_acting_position_highlight_style,
+    actingPositionHighlightStyleOverridable: row.out_acting_position_highlight_style_overridable,
+    actingDestinationHighlightStyle: row.out_acting_destination_highlight_style,
+    actingDestinationHighlightStyleOverridable: row.out_acting_destination_highlight_style_overridable,
+    doubleMoveExtraSeconds: row.out_double_move_extra_seconds,
     routeExplorerEnabled: row.out_route_explorer_enabled,
     routeExplorerOverridable: row.out_route_explorer_overridable,
     roundScalingRatio: row.out_round_scaling_ratio,
@@ -432,15 +443,27 @@ export async function setFeatureToggles({ callerAccountId, config }) {
     p_position_highlight_style_overridable: config.positionHighlightStyleOverridable,
     p_destination_highlight_style: config.destinationHighlightStyle,
     p_destination_highlight_style_overridable: config.destinationHighlightStyleOverridable,
+    p_acting_position_highlight_style: config.actingPositionHighlightStyle ?? null,
+    p_acting_position_highlight_style_overridable: config.actingPositionHighlightStyleOverridable ?? null,
+    p_acting_destination_highlight_style: config.actingDestinationHighlightStyle ?? null,
+    p_acting_destination_highlight_style_overridable: config.actingDestinationHighlightStyleOverridable ?? null,
+    p_double_move_extra_seconds: config.doubleMoveExtraSeconds ?? null,
     p_route_explorer_enabled: config.routeExplorerEnabled,
     p_route_explorer_overridable: config.routeExplorerOverridable,
     p_round_scaling_ratio: config.roundScalingRatio,
     p_round_scaling_overridable: config.roundScalingOverridable,
     p_public_rooms_enabled: config.publicRoomsEnabled,
-    p_draw_enabled: config.drawEnabled,
-    p_draw_overridable: config.drawOverridable,
-    p_peek_enabled: config.peekEnabled,
-    p_peek_overridable: config.peekOverridable,
+    // v3.32 -- DRAWING AND PEEKING ARE GONE FROM THE PRODUCT. No client
+    // code reads these flags any more and there is no UI to change them.
+    // They are still round-tripped here, unchanged, purely so that saving
+    // any OTHER admin setting cannot silently rewrite a stored value that
+    // nothing is looking at. The columns are left in place deliberately:
+    // this is a live database, and inert columns are strictly safer than
+    // a destructive drop for zero functional gain.
+    p_draw_enabled: config.drawEnabled ?? true,
+    p_draw_overridable: config.drawOverridable ?? true,
+    p_peek_enabled: config.peekEnabled ?? true,
+    p_peek_overridable: config.peekOverridable ?? true,
   });
 }
 

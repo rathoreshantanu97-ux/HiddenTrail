@@ -334,75 +334,19 @@ export default function App({ account, onLogout }) {
     onForceEndActingPhase: () => supabaseStore.forceEndActingPhase(),
   });
 
-  const [mpToggledDetectiveIds, setMpToggledDetectiveIds] = useState([]); // this client's own EXTRA (non-own) route-explorer toggles, reported up from GameBoard so they can be broadcast via Presence
-  const [mpPeekable, setMpPeekable] = useState(true); // this client's own "let teammates peek at my screen" preference, reported up from GameBoard
-  const [mpStrokes, setMpStrokes] = useState([]); // this client's own drawing strokes, reported up from GameBoard
-  // Latest own strokes, in a ref -- needed because the strokes_request
-  // handler (someone just started peeking me) has to answer with the
-  // CURRENT value at the moment the request arrives, and the handler is
-  // installed once rather than re-created per render.
-  const mpStrokesRef = useRef(mpStrokes);
-  mpStrokesRef.current = mpStrokes;
-  // GameBoard hands its broadcast-event handlers up here on mount -- a
-  // ref, not state, since this is a plain function handoff, not a value
-  // the rest of App.jsx reads or re-renders on.
-  //
-  // v3.27: the separate remoteStrokeHandlerRef is gone along with
-  // peek-and-draw. Nothing outside a player's own client can write to
-  // their stroke set anymore, so there is no inbound "apply this stroke
-  // to my board" path left to register.
-  const peerEventHandlersRef = useRef({});
-  // Our own player id, read through a ref by the broadcast handlers so
-  // they always compare against the CURRENT value rather than whatever
-  // the Realtime channel effect happened to capture when it subscribed
-  // (v3.23 -- see the "stroke"/"strokes_request" comments in
-  // usePresence.js for why that indirection now exists).
-  const mpPlayerIdRef = useRef(mpPlayerId);
-  mpPlayerIdRef.current = mpPlayerId;
-
-  // Latest own "revealed destinations" detective id set, in a ref, for
-  // exactly the same reason mpStrokesRef exists: a strokes_request now
-  // also gets answered with the current reveal set (v3.24), and that
-  // handler is installed once rather than rebuilt per render.
-  const mpRevealIdsRef = useRef([]);
-  mpRevealIdsRef.current = mpToggledDetectiveIds;
-
-  const { onlinePlayerIds, isInactive, presenceState, sendStrokesSync, sendStrokesRequest, sendPeekOff, sendRevealSync } = usePresence({
+  // (v3.32: mpToggledDetectiveIds, mpPeekable, mpStrokes, the stroke and
+  // reveal refs, peerEventHandlersRef and the four broadcast senders are
+  // all gone. Every one of them existed only to carry peeking and the
+  // shared drawing layer between clients; both features were removed
+  // from the product, so nothing is exchanged over the room channel any
+  // more beyond Presence's own online/offline bookkeeping.)
+  const { onlinePlayerIds, isInactive, presenceState } = usePresence({
     roomId: appMode === "multiplayer" ? mpRoomId : null,
     myPlayerId: mpPlayerId,
     myDisplayName: mpDisplayName,
     myRole: mpRole,
     gracePeriodSeconds: 25, // TODO: read from admin config once wired through App-level state
-    myToggledDetectiveIds: mpToggledDetectiveIds,
-    myPeekable: mpPeekable,
-    // Strokes and peek-revocation now arrive as explicit broadcasts
-    // rather than being inferred from Presence state -- see the header
-    // comment in usePresence.js for why.
-    onStrokesSync: (payload) => peerEventHandlersRef.current.onStrokesSync && peerEventHandlersRef.current.onStrokesSync(payload),
-    // Someone asked a player for their current drawing. Answer only if
-    // that player is me -- the targeting test lives here now (v3.23), so
-    // it runs against the live mpPlayerId rather than a value captured
-    // inside the Realtime channel effect.
-    onStrokesRequest: (payload) => {
-      if (!payload || payload.targetPlayerId !== mpPlayerIdRef.current) return;
-      if (sendStrokesSyncRef.current) sendStrokesSyncRef.current(mpStrokesRef.current);
-      // A peek START asks for one thing but needs two: the drawing AND
-      // which detectives' destinations the peeked player currently has
-      // revealed (v3.24). Answering both off the one request keeps the
-      // peeker's first frame complete instead of half-populated.
-      if (sendRevealSyncRef.current) sendRevealSyncRef.current(mpRevealIdsRef.current);
-    },
-    onPeekOff: (payload) => peerEventHandlersRef.current.onPeekOff && peerEventHandlersRef.current.onPeekOff(payload),
-    onRevealSync: (payload) => peerEventHandlersRef.current.onRevealSync && peerEventHandlersRef.current.onRevealSync(payload),
   });
-
-  // sendStrokesSync is produced BY the same hook call whose options
-  // reference it (the strokes_request responder), so it can't be named
-  // directly there -- this ref closes that ordering loop.
-  const sendStrokesSyncRef = useRef(null);
-  sendStrokesSyncRef.current = sendStrokesSync;
-  const sendRevealSyncRef = useRef(null);
-  sendRevealSyncRef.current = sendRevealSync;
 
   useEffect(() => {
     if (appMode !== "multiplayer" || mpStage !== "playing" || !mpRoomId) return;
@@ -1191,15 +1135,6 @@ export default function App({ account, onLogout }) {
         safetyCapRemaining={mpSafetyCapRemaining}
         roundPhase={supabaseStore.match?.roundPhase}
         detectivesActed={supabaseStore.match?.detectivesActed}
-        onExploreModeChange={setMpToggledDetectiveIds}
-        onPeekableChange={setMpPeekable}
-        onStrokesChange={setMpStrokes}
-        onRegisterPeerEventHandlers={(handlers) => (peerEventHandlersRef.current = handlers)}
-        onBroadcastStrokes={(strokes) => sendStrokesSync(strokes)}
-        onRequestPeerStrokes={(targetPlayerId) => sendStrokesRequest(targetPlayerId)}
-        onBroadcastReveal={(revealedDetectiveIds) => sendRevealSync(revealedDetectiveIds)}
-        onBroadcastPeekOff={() => sendPeekOff()}
-        presenceState={presenceState}
         detectivePlayersRoster={detectivePlayersRoster}
         myPlayerId={mpPlayerId}
         onDetectiveMove={(detId, to, mode) => supabaseStore.submitDetectiveMove(map, detId, to, mode)}

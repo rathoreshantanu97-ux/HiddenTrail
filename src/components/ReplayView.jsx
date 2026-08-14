@@ -83,7 +83,11 @@ export default function ReplayView({ map, match, mrxName, detectiveName, onClose
       // v3.25: a "stay" step is not a move at all -- describe it as the
       // non-move it was, rather than as travel by an unknown mode.
       if (s.mode === "stay") {
-        return `${mrxLabel} did not move${s.ticket ? ` (forfeited a ${activeMode[s.ticket]?.label || s.ticket} ticket)` : ""}`;
+        // v3.32 (item 9): `black` is a Mr.X-only wildcard, not one of the
+        // map's transport modes, so it is resolved explicitly rather than
+        // being looked up in the map's mode theme and possibly missing.
+        const ticketLabel = s.ticket === "black" ? activeMode.black?.label || "Black" : activeMode[s.ticket]?.label || s.ticket;
+        return `${mrxLabel} did not move${s.ticket ? ` (forfeited a ${ticketLabel} ticket)` : " — no tickets left to forfeit"}`;
       }
       return `${mrxLabel} moved (${s.mode === "black" ? "Black" : activeMode[s.mode]?.label || s.mode})`;
     }

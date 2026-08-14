@@ -8,7 +8,15 @@ export default function EndedScreen({ map, match, mrxName, detectiveName, onNewG
   const [showReplay, setShowReplay] = useState(false);
   const activeMode = map.modeTheme || MODE_DEFAULT;
   const stationLabel = (id) => (map.names ? `${map.names[id]} (#${id})` : `station ${id}`);
-  const theme = { mrxName, detectiveName, stationLabel, modeLabel: (m) => activeMode[m].label };
+  // v3.32 (item 9): total, and explicit about the SPECIAL ticket types.
+  // This used to be `(m) => activeMode[m].label`, which THREW for any key
+  // the active map's modeTheme did not define. `black` is precisely such
+  // a key -- it is a Mr.X-only wildcard, not one of the map's transport
+  // modes -- so a black-ticket stay could take out the whole log line it
+  // appeared in, which is the reported "no ticket info for black" symptom.
+  const modeLabelSafe = (m) =>
+    m === "black" ? activeMode.black?.label || "Black" : m === "double" ? "2x (double move)" : activeMode[m]?.label || m;
+  const theme = { mrxName, detectiveName, stationLabel, modeLabel: modeLabelSafe };
 
   const readableLog = match.log
     .filter((e) => e.kind !== "reveal_full_route")
@@ -59,7 +67,7 @@ export default function EndedScreen({ map, match, mrxName, detectiveName, onNewG
                   }}
                   title={
                     entry.mode === "stay"
-                      ? `Round ${entry.round}: did not move${entry.ticket ? ` (forfeited a ${activeMode[entry.ticket]?.label || entry.ticket} ticket)` : ""}`
+                      ? `Round ${entry.round}: did not move${entry.ticket ? ` (forfeited a ${modeLabelSafe(entry.ticket)} ticket)` : " — no tickets left to forfeit"}`
                       : entry.mode
                         ? `Round ${entry.round}: ${activeMode[entry.mode]?.label || entry.mode}`
                         : "Start"

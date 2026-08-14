@@ -34,6 +34,11 @@ export async function createRoom({
   // server-side so both ends always agree.
   stayBlackThreshold = null,
   stayDoubleThreshold = null,
+  // v3.32 -- per-room top-up added to Mr.X's own turn clock the moment he
+  // activates a double move. null = inherit (admin default, else one full
+  // derived Mr.X window). Resolved server-side in activate_double_move so
+  // every client agrees without doing the arithmetic itself.
+  doubleMoveExtraSeconds = null,
   featureOverrides = {},
   isPublic = false,
   roomName = null,
@@ -53,12 +58,18 @@ export async function createRoom({
     p_planning_time_seconds: planningTimeSeconds ?? null,
     p_extra_detective_seconds: extraDetectiveSeconds ?? null,
     p_map_station_count: mapStationCount ?? null,
+    // v3.32 -- FOUR independent highlight slots. The two unprefixed
+    // fields are now specifically the PLANNING-phase pair; the two
+    // acting* fields are the acting-phase pair. Names unchanged on the
+    // planning side on purpose, so every already-stored room override
+    // keeps meaning exactly what it meant before the split.
     p_position_highlight_style_override: featureOverrides.positionHighlightStyle ?? null,
     p_destination_highlight_style_override: featureOverrides.destinationHighlightStyle ?? null,
+    p_acting_position_highlight_style_override: featureOverrides.actingPositionHighlightStyle ?? null,
+    p_acting_destination_highlight_style_override: featureOverrides.actingDestinationHighlightStyle ?? null,
     p_route_explorer_override: featureOverrides.routeExplorer ?? null,
     p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
-    p_draw_override: featureOverrides.draw ?? null,
-    p_peek_override: featureOverrides.peek ?? null,
+    p_double_move_extra_seconds: doubleMoveExtraSeconds ?? null,
     p_stay_black_threshold: stayBlackThreshold ?? null,
     p_stay_double_threshold: stayDoubleThreshold ?? null,
     p_is_public: isPublic,
@@ -267,6 +278,7 @@ export async function updateRoomSettings({
   // v3.28 stay-reward thresholds -- see createRoom above.
   stayBlackThreshold = null,
   stayDoubleThreshold = null,
+  doubleMoveExtraSeconds = null, // v3.32 -- see createRoom above
   featureOverrides = {},
   isPublic = false,
   roomName = null,
@@ -290,10 +302,11 @@ export async function updateRoomSettings({
     p_redistribute_roles_override: featureOverrides.redistributeRoles ?? null,
     p_position_highlight_style_override: featureOverrides.positionHighlightStyle ?? null,
     p_destination_highlight_style_override: featureOverrides.destinationHighlightStyle ?? null,
+    p_acting_position_highlight_style_override: featureOverrides.actingPositionHighlightStyle ?? null,
+    p_acting_destination_highlight_style_override: featureOverrides.actingDestinationHighlightStyle ?? null,
     p_route_explorer_override: featureOverrides.routeExplorer ?? null,
     p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
-    p_draw_override: featureOverrides.draw ?? null,
-    p_peek_override: featureOverrides.peek ?? null,
+    p_double_move_extra_seconds: doubleMoveExtraSeconds ?? null,
     p_stay_black_threshold: stayBlackThreshold ?? null,
     p_stay_double_threshold: stayDoubleThreshold ?? null,
     p_is_public: isPublic,
@@ -849,6 +862,22 @@ export async function getEffectivePositionHighlightStyle(roomId) {
 export async function getEffectiveDestinationHighlightStyle(roomId) {
   const value = await callRpc("get_effective_destination_highlight_style", { p_room_id: roomId });
   return value || "rotating";
+}
+
+// v3.32 -- the ACTING-phase half of the four-slot highlight config. Same
+// resolution chain as the planning-phase pair above (room override ->
+// admin global -> hardcoded fallback), just reading the acting_* columns.
+// A room created before the split had its single old override copied into
+// both slots by the migration, so nothing renders differently until
+// someone deliberately configures the two phases apart.
+export async function getEffectiveActingPositionHighlightStyle(roomId) {
+  const value = await callRpc("get_effective_acting_position_highlight_style", { p_room_id: roomId });
+  return typeof value === "string" ? value : "ring";
+}
+
+export async function getEffectiveActingDestinationHighlightStyle(roomId) {
+  const value = await callRpc("get_effective_acting_destination_highlight_style", { p_room_id: roomId });
+  return typeof value === "string" ? value : "rotating";
 }
 
 export async function fetchPlayers(roomId) {

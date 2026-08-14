@@ -466,37 +466,50 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
               />
             </label>
           )}
-          {featureConfig.positionHighlightStyleOverridable && (
-            <label style={styles.featureOverrideRow}>
-              <span>Position highlight style (your turn / Mr. X's own view)</span>
-              <select
-                style={styles.featureOverrideSelect}
-                value={featureOverrides.positionHighlightStyle ?? featureConfig.positionHighlightStyle}
-                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, positionHighlightStyle: e.target.value }))}
-              >
-                <option value="ring">Pulsing ring</option>
-                <option value="rotating">Rotating ring</option>
-                <option value="blink">Blink</option>
-                <option value="static">Static ring</option>
-                <option value="none">None</option>
-              </select>
-            </label>
-          )}
-          {featureConfig.destinationHighlightStyleOverridable && (
-            <label style={styles.featureOverrideRow}>
-              <span>Destination highlight style (legal moves)</span>
-              <select
-                style={styles.featureOverrideSelect}
-                value={featureOverrides.destinationHighlightStyle ?? featureConfig.destinationHighlightStyle}
-                onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, destinationHighlightStyle: e.target.value }))}
-              >
-                <option value="ring">Pulsing ring</option>
-                <option value="rotating">Rotating ring</option>
-                <option value="blink">Blink</option>
-                <option value="static">Static ring</option>
-                <option value="none">None</option>
-              </select>
-            </label>
+          {/* v3.32 -- FOUR independent highlight slots (planning origin,
+              planning destination, acting origin, acting destination).
+              Each is offered to the host only if the admin left that
+              specific slot host-overridable, exactly as the original two
+              were. The two planning keys keep their old, unprefixed
+              names, so a room that already had an override keeps it. */}
+          {[
+            {
+              key: "positionHighlightStyle",
+              overridableKey: "positionHighlightStyleOverridable",
+              label: "Planning phase — origin/position highlight style",
+            },
+            {
+              key: "destinationHighlightStyle",
+              overridableKey: "destinationHighlightStyleOverridable",
+              label: "Planning phase — destination highlight style",
+            },
+            {
+              key: "actingPositionHighlightStyle",
+              overridableKey: "actingPositionHighlightStyleOverridable",
+              label: "Acting phase — origin/position highlight style",
+            },
+            {
+              key: "actingDestinationHighlightStyle",
+              overridableKey: "actingDestinationHighlightStyleOverridable",
+              label: "Acting phase — destination highlight style",
+            },
+          ].map(({ key, overridableKey, label }) =>
+            featureConfig[overridableKey] ? (
+              <label key={key} style={styles.featureOverrideRow}>
+                <span>{label}</span>
+                <select
+                  style={styles.featureOverrideSelect}
+                  value={featureOverrides[key] ?? featureConfig[key] ?? "ring"}
+                  onChange={(e) => setFeatureOverrides((prev) => ({ ...prev, [key]: e.target.value }))}
+                >
+                  <option value="ring">Pulsing ring</option>
+                  <option value="rotating">Rotating ring</option>
+                  <option value="blink">Blink</option>
+                  <option value="static">Static ring</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+            ) : null
           )}
           {featureConfig.roundScalingOverridable && (
             <label style={styles.featureOverrideRow}>

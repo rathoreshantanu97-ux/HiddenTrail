@@ -98,79 +98,14 @@ export function usePresence({
   const [, forceTick] = useState(0); // re-render periodically so grace-period expiry gets reflected in UI
   const channelRef = useRef(null);
   const backgroundTimeoutRef = useRef(null);
-  // Ref indirection for every broadcast callback: the listeners are
-  // attached once per channel (channel setup only re-runs on
-  // room/player/role changes, not every render), but App passes fresh
-  // inline functions each render, so the listeners read through these
-  // refs rather than closing over a stale copy.
-  const onStrokesSyncRef = useRef(onStrokesSync);
-  onStrokesSyncRef.current = onStrokesSync;
-  const onStrokesRequestRef = useRef(onStrokesRequest);
-  onStrokesRequestRef.current = onStrokesRequest;
-  const onPeekOffRef = useRef(onPeekOff);
-  onPeekOffRef.current = onPeekOff;
-  const onRevealSyncRef = useRef(onRevealSync);
-  onRevealSyncRef.current = onRevealSync;
+  // (v3.32: the ref indirection for onStrokesSync / onStrokesRequest /
+  // onPeekOff / onRevealSync is gone with those callbacks. No broadcast
+  // callbacks are passed into this hook any more.)
 
-  // -------------------------------------------------------------------
-  // OUTBOUND SEND QUEUE (v3.24) -- THE actual fix for the long-running
-  // "peek-and-draw vanishes" bug. See sendOnChannel below for the full
-  // reasoning; in short, `channel.send()` silently does nothing useful
-  // (it falls back to a REST call and resolves "error") whenever the
-  // channel is not in the `joined` state, and NOTHING in this app ever
-  // looked at that return value. Anything sent during a reconnect, a
-  // channel rebuild, or the first moments after a tab wakes up was
-  // dropped without a trace. Now it's queued and flushed on the next
-  // successful SUBSCRIBED instead.
-  // -------------------------------------------------------------------
-  const outboxRef = useRef([]);
-  const channelJoinedRef = useRef(false);
-
-  const flushOutbox = useCallback(() => {
-    const ch = channelRef.current;
-    if (!ch || !channelJoinedRef.current) return;
-    const pending = outboxRef.current;
-    outboxRef.current = [];
-    for (const msg of pending) {
-      ch.send(msg).catch((e) => console.error("Realtime flush failed:", msg.event, e));
-    }
-  }, []);
-
-  // sendOnChannel -- one gate every broadcast in this hook goes through.
-  // Returns nothing; failures are queued for retry rather than thrown.
-  const sendOnChannel = useCallback(
-    (event, payload) => {
-      const msg = { type: "broadcast", event, payload };
-      const ch = channelRef.current;
-      if (!ch || !channelJoinedRef.current) {
-        // Bounded so a long disconnection can't grow without limit. The
-        // messages that matter most here (strokes_sync, reveal_sync) are
-        // full snapshots, so only the newest of each really matters --
-        // dropping the oldest is exactly the right thing to lose.
-        outboxRef.current.push(msg);
-        if (outboxRef.current.length > 60) outboxRef.current.shift();
-        return;
-      }
-      ch.send(msg)
-        .then((res) => {
-          // With broadcast ack enabled (see the channel config), this
-          // resolves to the SERVER's answer, not just "we wrote to a
-          // socket." Anything other than "ok" means the message did not
-          // land -- previously invisible, now retried.
-          if (res !== "ok") {
-            console.warn("Realtime broadcast not acknowledged:", event, res);
-            outboxRef.current.push(msg);
-            if (outboxRef.current.length > 60) outboxRef.current.shift();
-          }
-        })
-        .catch((e) => {
-          console.error("Realtime broadcast failed:", event, e);
-          outboxRef.current.push(msg);
-          if (outboxRef.current.length > 60) outboxRef.current.shift();
-        });
-    },
-    []
-  );
+  // (v3.32: the outbound send queue and sendOnChannel gate are gone --
+  // they existed solely to make stroke/reveal broadcasts survive a
+  // reconnect. This hook no longer broadcasts anything; Presence's own
+  // join/leave/sync bookkeeping is handled by the Supabase client.)
 
   useEffect(() => {
     if (!supabase || !roomId || !myPlayerId) return;
@@ -192,7 +127,6 @@ export function usePresence({
       },
     });
     channelRef.current = channel;
-    channelJoinedRef.current = false;
 
     // (v3.32: the strokes_sync / strokes_request / peek_off /
     // reveal_sync broadcast listeners lived here. All four are gone with
@@ -200,35 +134,6 @@ export function usePresence({
     // broadcast on this channel any more beyond Presence's own
     // join/leave/sync bookkeeping.)
 
-    // strokes_request -- someone just STARTED peeking me and wants my
-    // current drawing right now, rather than waiting for my next edit.
-    // Same v3.23 reasoning as the "stroke" handler above: the
-    // "am I the target?" test is no longer made against this effect's
-    // captured `myPlayerId`. The full payload is handed to the consumer,
-    // which compares it against its own live player id and answers with
-    // a strokes_sync only if it really is the target.
-    channel.on("broadcast", { event: "strokes_request" }, ({ payload }) => {
-      if (payload?.targetPlayerId && onStrokesRequestRef.current) {
-        onStrokesRequestRef.current(payload);
-      }
-    });
-
-    // peek_off -- a player revoked peek permission. Primary, immediate
-    // release path for anyone currently peeking them.
-    channel.on("broadcast", { event: "peek_off" }, ({ payload }) => {
-      if (payload?.senderPlayerId && payload.senderPlayerId !== myPlayerId && onPeekOffRef.current) {
-        onPeekOffRef.current(payload);
-      }
-    });
-
-    // reveal_sync -- a player's current "whose destinations am I looking
-    // at" set (v3.24). Room-wide; each client decides for itself whether
-    // it cares. Ignore our own echo, same as strokes_sync.
-    channel.on("broadcast", { event: "reveal_sync" }, ({ payload }) => {
-      if (payload?.senderPlayerId && payload.senderPlayerId !== myPlayerId && onRevealSyncRef.current) {
-        onRevealSyncRef.current(payload);
-      }
-    });
 
     channel.on("presence", { event: "sync" }, () => {
       const state = channel.presenceState();
@@ -256,20 +161,11 @@ export function usePresence({
 
     channel.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        channelJoinedRef.current = true;
         await channel.track({ displayName: myDisplayName, role: myRole });
-        // Anything that was attempted while the channel was down goes
-        // out now, in order. This is what turns a reconnect from
-        // "silently lost every message in that window" into "delivered
-        // a moment late."
-        flushOutbox();
-      } else if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        channelJoinedRef.current = false;
       }
     });
 
     return () => {
-      channelJoinedRef.current = false;
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
@@ -286,13 +182,13 @@ export function usePresence({
     // no longer riding along (they broadcast separately now -- see the
     // header comment), this payload is small and bounded, so a
     // size-limit rejection is no longer a realistic failure mode.
-    channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable }).catch((e) => console.error("Presence track failed:", e));
+    channelRef.current.track({ displayName: myDisplayName, role: myRole }).catch((e) => console.error("Presence track failed:", e));
     // Depend on the SERIALIZED array/objects, not their references -- the
     // caller reasonably passes freshly-built arrays each render (e.g.
     // Array.from(aSet)), which would otherwise re-track on every render
     // even when nothing actually changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(myToggledDetectiveIds), myDisplayName, myRole, myPeekable]);
+  }, [myDisplayName, myRole]);
 
   useEffect(() => {
     const id = setInterval(() => forceTick((t) => t + 1), 1000);
@@ -311,7 +207,7 @@ export function usePresence({
           backgroundTimeoutRef.current = null;
         }
         if (channelRef.current) {
-          channelRef.current.track({ displayName: myDisplayName, role: myRole, toggledDetectiveIds: myToggledDetectiveIds, peekable: myPeekable }).catch(() => {});
+          channelRef.current.track({ displayName: myDisplayName, role: myRole }).catch(() => {});
         }
       }
     }

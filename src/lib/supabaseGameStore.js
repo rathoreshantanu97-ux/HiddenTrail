@@ -26,6 +26,11 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
   const [match, setMatch] = useState(null);
   const [error, setError] = useState(null);
   const myMrxPositionRef = useRef(null);
+  // Declared up here, above every consumer, because the realtime
+  // subscription effect below calls into it (heartbeat leg 4 -- see the
+  // long note on the heartbeat effect) and reads better without a
+  // forward reference.
+  const beatRef = useRef({ last: 0, fn: null });
 
   const refreshMrxPosition = useCallback(async () => {
     if (myRole !== "mrx" || !roomId || !myPlayerId) return;
@@ -63,6 +68,13 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
         { event: "*", schema: "public", table: "game_state_public", filter: `room_id=eq.${roomId}` },
         () => {
           refreshMatch();
+          // Heartbeat leg 4: websocket delivery is not subject to the
+          // background-tab timer throttling that can stall the interval,
+          // so piggy-backing on inbound realtime traffic keeps a hidden
+          // tab's last_seen_at fresh in any game where anything is
+          // actually happening. Rate-limited inside beatIfStale, so this
+          // adds no write load on a busy room.
+          beatRef.current.fn?.();
         }
       )
       .subscribe();
@@ -87,22 +99,95 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
   // was refreshing the timestamp either. During that gap the server's
   // connected set can be smaller than the real one, which makes a
   // too-small unanimity denominator possible.
+  // v3.36 -- HARDENED AGAINST BACKGROUND-TAB TIMER THROTTLING.
+  //
+  // THE BUG. Every major browser throttles setInterval in a hidden tab.
+  // Chrome's "intensive throttling" drops a background page's timers to
+  // ONE WAKEUP PER MINUTE after it has been hidden ~5 minutes; Safari and
+  // Firefox land in the same ballpark. A 15s interval is therefore not a
+  // 15s interval -- once a player backgrounds the tab (checks a message,
+  // switches windows on a shared machine, which is exactly how this was
+  // first reproduced) it can become a ~60s+ interval. Against a 60s
+  // server grace period that is a coin flip, and losing the flip means
+  // the server stops counting that player as connected, which shrinks the
+  // unanimity DENOMINATOR in set_planning_ready and lets the acting phase
+  // start on fewer ticks than there are real players.
+  //
+  // WHAT DOESN'T WORK, and why this isn't a one-liner:
+  //   - a shorter interval: throttling collapses N ticks into one wakeup,
+  //     so 5s and 15s behave identically once throttled;
+  //   - requestAnimationFrame: not called AT ALL in a hidden tab -- worse;
+  //   - a dedicated Web Worker: Chrome throttles timers in workers owned
+  //     by a hidden page too, so it buys nothing for real complexity;
+  //   - navigator.sendBeacon on hide: one-shot, doesn't keep you fresh.
+  //
+  // THE APPROACH -- many independent triggers into one rate-limited beat,
+  // so no single throttled clock is load-bearing:
+  //   1. an interval, now 10s, as the baseline while visible;
+  //   2. visibilitychange in BOTH directions. Beating on the way OUT
+  //      matters as much as on the way back: it starts the away window
+  //      with a maximally fresh timestamp instead of an up-to-15s-stale
+  //      one, which is pure free margin;
+  //   3. focus / blur / pageshow / online -- pageshow covers restore from
+  //      the bfcache (where timers were frozen outright), online covers a
+  //      network blip that silently swallowed beats;
+  //   4. realtime traffic. Any game_state_public change arriving over the
+  //      websocket beats too. This is the strongest leg: websocket
+  //      message delivery is NOT timer-throttled in background tabs, so
+  //      in an active game it keeps a hidden tab fresh independently of
+  //      any clock;
+  //   5. real user input (pointerdown/keydown), which is both free and a
+  //      definitive liveness signal.
+  //
+  // Every trigger funnels through beatIfStale, which does nothing if a
+  // beat already went out inside MIN_BEAT_GAP_MS. So adding triggers does
+  // not add RPC load -- the steady state is still ~one write per 10s per
+  // player -- it only adds independent CHANCES to fire.
+  //
+  // Paired with the server side: the presence grace period goes 60s ->
+  // 90s in the same release, so even the fully-throttled worst case (one
+  // wakeup per minute, nothing else firing) stays inside the window.
   useEffect(() => {
     if (!myPlayerId) return;
-    const beat = () => api.heartbeat({ playerId: myPlayerId, callerSecret: myPlayerSecret }).catch(() => {});
-    beat();
-    const id = setInterval(beat, 15000);
-    // Also beat the moment the tab comes back to the foreground: a
-    // backgrounded mobile browser routinely throttles or suspends timers
-    // entirely, so the interval alone cannot be relied on to have kept
-    // running while the player was away.
-    const onVisible = () => {
-      if (document.visibilityState === "visible") beat();
+    const MIN_BEAT_GAP_MS = 8000;
+    let cancelled = false;
+    const beatNow = () => {
+      beatRef.current.last = Date.now();
+      api.heartbeat({ playerId: myPlayerId, callerSecret: myPlayerSecret }).catch(() => {
+        // A failed beat must not count as a beat -- otherwise a transient
+        // network error is followed by a rate-limit-enforced silence.
+        if (!cancelled) beatRef.current.last = 0;
+      });
     };
-    document.addEventListener("visibilitychange", onVisible);
+    const beatIfStale = () => {
+      if (cancelled) return;
+      if (Date.now() - beatRef.current.last < MIN_BEAT_GAP_MS) return;
+      beatNow();
+    };
+    beatRef.current.fn = beatIfStale;
+
+    beatNow();
+    const id = setInterval(beatIfStale, 10000);
+    const onVisibility = () => beatIfStale(); // both directions, deliberately
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", beatIfStale);
+    window.addEventListener("blur", beatIfStale);
+    window.addEventListener("pageshow", beatIfStale);
+    window.addEventListener("online", beatIfStale);
+    window.addEventListener("pointerdown", beatIfStale, { passive: true });
+    window.addEventListener("keydown", beatIfStale, { passive: true });
+
     return () => {
+      cancelled = true;
+      beatRef.current.fn = null;
       clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", beatIfStale);
+      window.removeEventListener("blur", beatIfStale);
+      window.removeEventListener("pageshow", beatIfStale);
+      window.removeEventListener("online", beatIfStale);
+      window.removeEventListener("pointerdown", beatIfStale);
+      window.removeEventListener("keydown", beatIfStale);
     };
   }, [myPlayerId, myPlayerSecret]);
 

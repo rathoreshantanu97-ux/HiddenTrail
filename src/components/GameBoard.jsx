@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
 import { useHighlightStyles } from "../lib/useHighlightStyles.js";
-import HighlightRing from "./HighlightRing.jsx";
+import HighlightRing, { ORIGIN_RING, DESTINATION_RING } from "./HighlightRing.jsx";
 import MovePopup from "./MovePopup.jsx";
 import { useMoveAnimation } from "../lib/useMoveAnimation.js";
 import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
@@ -491,10 +491,26 @@ export default function GameBoard({
   const isPassAndPlay = myRole === null;
   const roundPhaseMp = !isPassAndPlay ? match.roundPhase : null;
   // Which of the four configured highlight styles is in force right now.
-  // Multiplayer acting phase -> the acting pair; everything else
-  // (planning, Mr.X's own turn, and the whole of pass-and-play) -> the
-  // planning pair, which is the pair that carries the pre-v3.32 values.
-  const useActingHighlightStyles = !isPassAndPlay && roundPhaseMp === "acting";
+  //
+  // v3.36 -- MR.X'S OWN TURN IS AN ACTING PHASE. Up to v3.35 the acting
+  // pair was selected on `roundPhaseMp === "acting"` alone, so Mr.X, who
+  // moves during round_phase === 'mrx', got the PLANNING pair for his own
+  // origin ring and his own legal-move destinations. That is the wrong
+  // mapping: 'mrx' is not a planning window for him, it is his acting
+  // window -- he is the one piece on the board that owes a move right
+  // then, exactly the situation the acting-phase slots exist to describe.
+  // A host who deliberately configured "acting looks like THIS" therefore
+  // saw it apply to detectives but not to Mr.X, for no reason a player
+  // could infer. Now the acting pair is in force whenever the viewer is
+  // the one acting: the multiplayer acting phase (detectives), or the
+  // 'mrx' phase seen from Mr.X's own client.
+  //
+  // Deliberately gated on iAmMrX, not on the phase alone: during 'mrx' a
+  // DETECTIVE's client is still in its between-turns/looking-around state
+  // (toggled teammate highlights, no move of its own to make), which is
+  // the planning-pair situation. Pass-and-play is untouched and always
+  // uses the planning pair, as it always has.
+  const useActingHighlightStyles = !isPassAndPlay && (roundPhaseMp === "acting" || (roundPhaseMp === "mrx" && iAmMrX));
   const highlightPositionStyle = useActingHighlightStyles ? actingPositionStyle : planningPositionStyle;
   const highlightDestinationStyle = useActingHighlightStyles ? actingDestinationStyle : planningDestinationStyle;
   const detectivesActedSet = new Set((match.detectivesActed || []).map(Number));
@@ -1480,14 +1496,14 @@ export default function GameBoard({
             </div>
           )}
 
-          {/* DOUBLE-MOVE TIMER CUE (v3.35). Same banner treatment as the
-              bonus flash above, but purely local to Mr.X -- see the note
-              above handleActivateDoubleMove. */}
-          {doubleMoveFlash && (
-            <div style={styles.stayBonusFlash} role="status">
-              ⏱️ Timer refreshed for your double move — you have a full turn window for both legs.
-            </div>
-          )}
+          {/* (v3.36) The double-move timer cue USED to live here, next to
+              the bonus flash. It has moved to the map's top bar, pinned
+              directly above the timer track -- see mapTopBarDoubleFlash.
+              A message whose entire subject is "look at your clock" was
+              being printed in the one place Mr.X is definitely not
+              looking when he has just clicked 2x on the map. The bonus
+              flash stays here: it is addressed to the whole room and is
+              about tickets, which is a sidebar concern. */}
 
           {/* STAY-TALLY WIDGET (v3.28 item 3). Compact, and slotted into
               the EXISTING sidebar structure on purpose -- the full
@@ -1980,6 +1996,28 @@ export default function GameBoard({
                       unconditionally so the row's height never changes;
                       when a room has no timer configured at all the
                       track simply sits empty. */}
+                  {/* DOUBLE-MOVE TIMER CUE (moved here in v3.36 from the
+                      sidebar, where v3.35 first put it). Same banner
+                      styling and same htStayBonusFlash animation as the
+                      sidebar bonus flash -- only the position changed.
+
+                      ABSOLUTELY POSITIONED ON PURPOSE. The top bar's
+                      constant height is structural (its measured height
+                      is subtracted before the map's fitted size is
+                      computed), and the timer track's constant width is
+                      the v3.31 fix, so this must not be a third row and
+                      must not be an inline sibling of the track. Taking
+                      it out of flow means it can sit hard against the
+                      timer without being able to resize or re-centre the
+                      map underneath it. It overlays the right-hand end of
+                      the text row, which for Mr.X -- the only person who
+                      ever sees this -- carries just the short phase
+                      descriptor. */}
+                  {doubleMoveFlash && (
+                    <div style={styles.mapTopBarDoubleFlash} role="status">
+                      ⏱️ Timer refreshed for your double move — a full window for both legs.
+                    </div>
+                  )}
                   <div style={styles.mapTopBarTimerWrap}>
                     {(() => {
                       // The bar's denominator changes with the phase --
@@ -2352,7 +2390,7 @@ export default function GameBoard({
                   >
                     <circle cx={x} cy={y} r={2.6 * sizeScale} fill="transparent" />
                     {isLegal && (
-                      <HighlightRing x={x} y={y} radius={nodeR + 0.7} color="#1a1a1a" strokeWidth={0.25} dashed style={highlightDestinationStyle} />
+                      <HighlightRing x={x} y={y} radius={nodeR + 0.7} color="#1a1a1a" {...DESTINATION_RING} style={highlightDestinationStyle} />
                     )}
                     {/* Reachable-destination highlights, all-modes-at-once
                         and ticket-aware -- stacked one ring per
@@ -2390,14 +2428,14 @@ export default function GameBoard({
                         IS genuine duplication of isLegal and is still
                         dropped outright, as before (see reachingDetectives). */}
                     {reachingDetectives.map((rd, i) => (
-                      <HighlightRing key={rd.detId} x={x} y={y} radius={nodeR + 0.7 + (i + destRingOffset) * 0.4} color={rd.color} strokeWidth={0.3} dashed={i + destRingOffset > 0} style={highlightDestinationStyle} />
+                      <HighlightRing key={rd.detId} x={x} y={y} radius={nodeR + 0.7 + (i + destRingOffset) * 0.4} color={rd.color} {...DESTINATION_RING} style={highlightDestinationStyle} />
                     ))}
                     {/* Origin ring for any highlighted detective's CURRENT
                         position -- lets you see, at a glance, whose
                         highlight a given cluster of destinations belongs
                         to, without needing the side panel. */}
                     {originDetective && highlightPositionStyle !== "blink" && (
-                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={originDetective.color} strokeWidth={0.35} dashed style={highlightPositionStyle} />
+                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={originDetective.color} {...ORIGIN_RING} style={highlightPositionStyle} />
                     )}
                     {isCurrentReveal && (
                       <circle cx={x} cy={y} r={nodeR + 1.4} fill="none" stroke="#e11" strokeWidth={0.35} opacity={0.8}>
@@ -2436,16 +2474,15 @@ export default function GameBoard({
                           y={y}
                           radius={nodeR + 0.7}
                           color={isMrXOwnTurnIndicator ? "#1a1a1a" : activeDetective.color}
-                          strokeWidth={0.25}
-                          dashed
+                          {...DESTINATION_RING}
                           style={highlightDestinationStyle}
                         />
                       )}
                     {isCurrentTurnStation && highlightPositionStyle !== "blink" && (
-                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={activeDetective.color} strokeWidth={0.4} style={highlightPositionStyle} />
+                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color={activeDetective.color} {...ORIGIN_RING} style={highlightPositionStyle} />
                     )}
                     {isMrXOwnTurnIndicator && highlightPositionStyle !== "blink" && (
-                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color="#1a1a1a" strokeWidth={0.4} style={highlightPositionStyle} />
+                      <HighlightRing x={x} y={y} radius={nodeR + 1.2} color="#1a1a1a" {...ORIGIN_RING} style={highlightPositionStyle} />
                     )}
                     <circle cx={x} cy={y} r={nodeR} fill={fill} stroke={stroke} strokeWidth={0.35} filter="url(#softShadow)">
                       {/* Blink style: animates the actual node's own fill
@@ -3264,6 +3301,36 @@ export const styles = {
     marginBottom: 8,
     boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
     boxSizing: "border-box",
+    // v3.36: containing block for the absolutely-positioned double-move
+    // timer cue below. Nothing else about the bar changes.
+    position: "relative",
+  },
+  // v3.36 -- the 2x "your clock was refreshed" cue, pinned to the top
+  // bar's right edge, immediately above the timer track. Out of flow so
+  // it cannot alter the bar's height (which the map's fit calculation
+  // depends on) or the track's width (v3.31). Same colours, border,
+  // radius and htStayBonusFlash animation as the sidebar stayBonusFlash
+  // it was lifted from -- just tighter padding and type, because it is
+  // sharing a compact strip rather than owning a panel row.
+  mapTopBarDoubleFlash: {
+    position: "absolute",
+    right: 14,
+    top: 4,
+    zIndex: 3,
+    maxWidth: "72%",
+    border: "1px solid #e0b436",
+    background: "#fff5d6",
+    borderRadius: 8,
+    padding: "3px 8px",
+    fontSize: 11.5,
+    fontWeight: 700,
+    color: "#5a4300",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
+    pointerEvents: "none",
+    animation: "htStayBonusFlash 0.9s ease-in-out 6",
   },
   mapTopBarPrimary: {
     order: 1,

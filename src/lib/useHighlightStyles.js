@@ -16,6 +16,12 @@ import * as api from "./supabaseApi.js";
 //   actingPositionStyle       origin indicator, acting phase
 //   actingDestinationStyle    destination indicator, acting phase
 //
+// "Acting phase" here means WHOEVER IS ACTING, not literally
+// round_phase='acting'. As of v3.36 Mr.X's own turn (round_phase='mrx',
+// seen from Mr.X's client) selects the acting pair too, since that turn
+// is his acting window -- see the useActingHighlightStyles note in
+// GameBoard.jsx. Detectives during 'mrx' still get the planning pair.
+//
 // BACKWARD COMPATIBILITY is handled server-side, not here: the migration
 // seeded the acting_* columns from the existing single values, so a room
 // that predates the split renders as it did before until someone

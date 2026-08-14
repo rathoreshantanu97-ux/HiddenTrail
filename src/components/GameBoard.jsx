@@ -1368,6 +1368,38 @@ export default function GameBoard({
 
   const bonusTypeLabel = (t) => (t === "double" ? "2x (double move) card" : "Black ticket");
 
+  // v3.35 -- DOUBLE-MOVE TIMER CUE. activate_double_move grants the extra
+  // time by pushing turn_started_at forward, clamped with
+  // least(turn_started_at + extra, now()). In practice that means Mr.X's
+  // clock is RESET to a fresh full window rather than having the extra
+  // seconds stacked on top of whatever was left. That is the intended,
+  // deliberately-simple behaviour (genuinely additive/overflow timer logic
+  // was considered and rejected) -- but without a cue it looks like a
+  // silent side effect, so we say it out loud. Local-only state: the
+  // activation is Mr.X's own click, and he is the only one whose clock
+  // changed, so there is nothing to sync to other clients. Reuses the
+  // stay-bonus flash banner styling (v3.28) rather than inventing a
+  // second notification idiom.
+  const [doubleMoveFlash, setDoubleMoveFlash] = useState(false);
+  const doubleFlashTimerRef = React.useRef(null);
+  useEffect(() => () => clearTimeout(doubleFlashTimerRef.current), []);
+  const handleActivateDoubleMove = async () => {
+    if (!onActivateDoubleMove) return;
+    // Only celebrate once the RPC actually went through -- a rejected
+    // activation (no card left, already active) must not claim the timer
+    // was refreshed. The store already surfaces the failure through the
+    // error bar and re-throws; swallowing it here only stops an unhandled
+    // rejection escaping the click handler.
+    try {
+      await onActivateDoubleMove();
+    } catch {
+      return;
+    }
+    setDoubleMoveFlash(true);
+    clearTimeout(doubleFlashTimerRef.current);
+    doubleFlashTimerRef.current = setTimeout(() => setDoubleMoveFlash(false), 6000);
+  };
+
   return (
     <div style={styles.pagePlaying}>
       <div style={styles.playingLayoutSidebar}>
@@ -1445,6 +1477,15 @@ export default function GameBoard({
             <div style={styles.stayBonusFlash} role="status">
               🎟️ {mrxName()} gained a {bonusTypeLabel(bonusFlash.type)} from the team's stays
               {typeof bonusFlash.tally === "number" ? ` (stay #${bonusFlash.tally})` : ""}.
+            </div>
+          )}
+
+          {/* DOUBLE-MOVE TIMER CUE (v3.35). Same banner treatment as the
+              bonus flash above, but purely local to Mr.X -- see the note
+              above handleActivateDoubleMove. */}
+          {doubleMoveFlash && (
+            <div style={styles.stayBonusFlash} role="status">
+              ⏱️ Timer refreshed for your double move — you have a full turn window for both legs.
             </div>
           )}
 
@@ -2948,8 +2989,8 @@ export default function GameBoard({
                         flexShrink: 0,
                       }}
                       disabled={!canDouble}
-                      onClick={onActivateDoubleMove}
-                      title="Play a double-move card: two moves in one turn. Your turn clock is topped up when you play it."
+                      onClick={handleActivateDoubleMove}
+                      title="Play a double-move card: two moves in one turn. Your turn clock is refreshed to a full window when you play it."
                     >
                       Play 2x ({match.mrX.tickets.double})
                     </button>

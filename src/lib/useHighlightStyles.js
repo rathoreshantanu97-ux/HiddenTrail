@@ -17,11 +17,17 @@ import * as api from "./supabaseApi.js";
 //   actingDestinationStyle    destination indicator, acting phase
 //
 // BACKWARD COMPATIBILITY is handled server-side, not here: the migration
-// seeded the acting_* columns from the existing single values, and the
-// get_effective_acting_* RPCs fall back to the planning-phase value if an
-// acting one was somehow never set. A room that predates the split
-// therefore renders byte-for-byte as it did before until someone
+// seeded the acting_* columns from the existing single values, so a room
+// that predates the split renders as it did before until someone
 // deliberately configures the two phases differently.
+//
+// If a room's acting_* override is unset, the get_effective_acting_* RPCs
+// fall back to the ADMIN GLOBAL DEFAULT -- NOT to that room's
+// planning-phase value. (Verified live against production; an earlier
+// version of this comment claimed the planning-phase fallback, which was
+// simply wrong.) That is the same "unset = inherit the admin default"
+// rule every other room-level override in this codebase follows, so there
+// is no special case to remember here.
 //
 // Pass roomId=null for pass-and-play, where there's no room-level
 // override concept -- always resolves to the admin's global default in

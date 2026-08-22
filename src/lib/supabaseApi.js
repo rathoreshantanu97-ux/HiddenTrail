@@ -254,66 +254,6 @@ export async function reassignHost({ roomId, callerPlayerId, callerSecret, newHo
   });
 }
 
-// Expanded to the full feature-override surface create_room accepts
-// (previously just map/detective count/turn timer) -- see
-// update_room_settings in functions.sql for the matching server-side
-// expansion and the overridable-by-host re-validation.
-export async function updateRoomSettings({
-  roomId,
-  callerPlayerId,
-  callerSecret,
-  mapId,
-  numDetectives,
-  totalPlayers,
-  mapStationCount,
-  turnTimerSeconds,
-  planningTimeSeconds,
-  extraDetectiveSeconds = null, // see createRoom above
-  // detectiveCapSeconds (v3.22) -- the per-SUB-TURN deadline for one
-  // detective inside the shared acting phase. Deliberately NOT the same
-  // thing as extraDetectiveSeconds (which sizes the pooled window):
-  // this one is "how long may this single detective sit on their move
-  // before it auto-passes." null => default to the base act time.
-  detectiveCapSeconds = null,
-  // v3.28 stay-reward thresholds -- see createRoom above.
-  stayBlackThreshold = null,
-  stayDoubleThreshold = null,
-  doubleMoveExtraSeconds = null, // v3.32 -- see createRoom above
-  featureOverrides = {},
-  isPublic = false,
-  roomName = null,
-}) {
-  await callRpc("update_room_settings", {
-    p_room_id: roomId,
-    p_caller_player_id: callerPlayerId,
-    p_caller_secret: callerSecret,
-    p_map_id: mapId,
-    p_num_detectives: numDetectives,
-    p_total_players: totalPlayers,
-    p_map_station_count: mapStationCount ?? null,
-    p_turn_timer_seconds: turnTimerSeconds ?? null,
-    p_planning_time_seconds: planningTimeSeconds ?? null,
-    p_extra_detective_seconds: extraDetectiveSeconds ?? null,
-    p_detective_cap_seconds: detectiveCapSeconds ?? null,
-    p_takeovers_override: featureOverrides.takeovers ?? null,
-    p_takeover_reversal_override: featureOverrides.takeoverReversal ?? null,
-    p_end_game_vote_override: featureOverrides.endGameVote ?? null,
-    p_pause_resume_override: featureOverrides.pauseResume ?? null,
-    p_redistribute_roles_override: featureOverrides.redistributeRoles ?? null,
-    p_position_highlight_style_override: featureOverrides.positionHighlightStyle ?? null,
-    p_destination_highlight_style_override: featureOverrides.destinationHighlightStyle ?? null,
-    p_acting_position_highlight_style_override: featureOverrides.actingPositionHighlightStyle ?? null,
-    p_acting_destination_highlight_style_override: featureOverrides.actingDestinationHighlightStyle ?? null,
-    p_route_explorer_override: featureOverrides.routeExplorer ?? null,
-    p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
-    p_double_move_extra_seconds: doubleMoveExtraSeconds ?? null,
-    p_stay_black_threshold: stayBlackThreshold ?? null,
-    p_stay_double_threshold: stayDoubleThreshold ?? null,
-    p_is_public: isPublic,
-    p_room_name: roomName,
-  });
-}
-
 // setSeatColor -- pass color: null to clear a seat's override back to
 // its default DETECTIVE_COLORS[seatIndex] assignment. See set_seat_color
 // in functions.sql for the full validation (ownership, allow-list,

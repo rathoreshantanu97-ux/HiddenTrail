@@ -24,6 +24,7 @@ const SECTIONS = [
   { id: "board", label: "The board & transport" },
   { id: "tickets", label: "Tickets" },
   { id: "turns", label: "Turn order & rounds" },
+  { id: "staying", label: "Staying put" },
   { id: "reveals", label: "Reveal rounds" },
   { id: "winning", label: "Winning the game" },
   { id: "controls", label: "On-screen controls" },
@@ -68,6 +69,7 @@ export default function RulebookView({ onClose, mrxName, detectiveName, modeThem
           {activeSection === "board" && <BoardSection activeMode={activeMode} mrxLabel={mrxLabel} />}
           {activeSection === "tickets" && <TicketsSection activeMode={activeMode} mrxLabel={mrxLabel} />}
           {activeSection === "turns" && <TurnsSection mrxLabel={mrxLabel} detLabel={detLabel} />}
+          {activeSection === "staying" && <StayingSection mrxLabel={mrxLabel} />}
           {activeSection === "reveals" && <RevealsSection mrxLabel={mrxLabel} />}
           {activeSection === "winning" && <WinningSection mrxLabel={mrxLabel} detLabel={detLabel} />}
           {activeSection === "controls" && <ControlsSection activeMode={activeMode} mrxLabel={mrxLabel} />}
@@ -287,13 +289,14 @@ function TicketsSection({ activeMode, mrxLabel }) {
 }
 
 function TurnsSection({ mrxLabel, detLabel }) {
-  const order = [mrxLabel, detLabel(0), detLabel(1), "…"];
+  const order = ["1. " + mrxLabel + " moves", "2. Planning", "3. Everyone acts"];
   return (
     <>
       <SectionTitle>Turn order & rounds</SectionTitle>
       <P>
-        {mrxLabel} always moves first each round, then every detective takes one move in turn. Once everyone has moved,
-        the round number advances.
+        Each round has three phases. {mrxLabel} moves first and in secret. Then there's a shared planning window where
+        detectives can preview possible destinations together but nobody can move yet. Then the acting phase begins:
+        every detective player moves at the same time, not in a fixed order — each on their own clock.
       </P>
       <DiagramCard caption="One full round, repeated until the game ends.">
         <div style={styles.turnFlow}>
@@ -306,7 +309,50 @@ function TurnsSection({ mrxLabel, detLabel }) {
           <span style={styles.turnArrow}>↻</span>
         </div>
       </DiagramCard>
+      <P>
+        <b>Acting phase, in detail:</b> if you control more than one detective, you move them one after another inside
+        your own window — but different players are never waiting on each other. A player controlling three
+        detectives simply gets a longer personal window than one controlling a single detective. The acting phase
+        ends once everyone still connected has finished, or the room's outer time limit is reached, whichever comes
+        first.
+      </P>
+      <P>
+        <b>Skipping the wait:</b> every detective player can tick "Ready to act" once they're done deciding, or already
+        know they have nothing left to do. The acting phase starts early only once <i>everyone</i> currently connected
+        has ticked it — a single tick never fast-forwards the room on its own. If people don't tick, play still moves
+        on automatically once the planning timer runs out.
+      </P>
       <P>The game has a fixed number of rounds (shown at setup, and always visible during play) — if {mrxLabel} survives to the end, they win by evasion.</P>
+    </>
+  );
+}
+
+function StayingSection({ mrxLabel }) {
+  return (
+    <>
+      <SectionTitle>Staying put</SectionTitle>
+      <P>
+        Sometimes the right move is no move — you're out of useful tickets, or every reachable station is worse than
+        where you already are. Everyone, {mrxLabel} included, can choose to stay at their current station instead of
+        moving.
+      </P>
+      <P>
+        <b>Staying always costs a ticket</b> — the same way moving does. You choose which type to spend, but only from
+        types your station actually has a real route for (so you can't, say, forfeit a bus ticket sitting somewhere
+        with no bus route). {mrxLabel}'s black ticket is the one exception — it can always be used to stay, anywhere.
+      </P>
+      <P>
+        <b>Running out the clock counts as staying too</b> — if your time runs out before you've acted, you're left in
+        place and automatically charged your cheapest held ticket, no choice involved. The travel log shows a
+        voluntary stay and a timed-out stay identically, so nobody can tell which happened just by watching.
+      </P>
+      <P>
+        <b>Detective stays feed {mrxLabel}'s ticket pool.</b> Every stay by the detective team, whether chosen or
+        timed out, adds to a running tally shown in the side panel. Certain tally totals hand {mrxLabel} a bonus black
+        ticket; certain other totals (independently configured) hand over a double-move card instead. This gives the
+        detective team a real reason to keep moving rather than camping — sitting still, in aggregate, makes{" "}
+        {mrxLabel} harder to catch.
+      </P>
     </>
   );
 }
@@ -384,17 +430,32 @@ function ControlsSection({ activeMode, mrxLabel }) {
           <b>Zoom controls (+/−, or pinch/scroll)</b> reveal more detail on dense real-city maps.
         </li>
         <li>
-          <b>Explore mode</b> lets you preview reachable stations 1–2 moves ahead without committing to anything.
+          <b>Route explorer</b> (planning phase, if enabled for the room) lets you preview reachable stations ahead
+          without committing to anything.
+        </li>
+        <li>
+          <b>"All detectives" / "My detectives" toggle</b> (top-left of the map, planning phase) switches whether you
+          see everyone's origin/destination previews or just your own — useful once the board gets crowded.
         </li>
         <li>
           <b>Travel log</b> (sidebar) shows every move {mrxLabel} has made so far by ticket type, and marks upcoming and
           past reveal rounds.
         </li>
         <li>
-          <b>Pass Turn</b> appears only when you genuinely have no legal moves left — take it, don't just wait.
+          <b>Team stays</b> (sidebar, acting phase) shows the running stay tally and how close the team is to handing{" "}
+          {mrxLabel} a bonus ticket — see "Staying put."
         </li>
         <li>
-          <b>2x button</b> ({mrxLabel} only) activates a double-move card for the current turn.
+          <b>"Stay Here"</b> appears in the move popup whenever you tap your own station — pick a ticket type to
+          forfeit and remain in place. If you have no legal moves at all, this is your only option.
+        </li>
+        <li>
+          <b>Ready to act</b> (top-right, planning phase, detectives only) — tick when you're done previewing to vote
+          for an early start to the acting phase.
+        </li>
+        <li>
+          <b>2x button</b> ({mrxLabel} only, top-right during {mrxLabel}'s own turn) activates a double-move card,
+          adding extra time to that turn's clock.
         </li>
       </ul>
     </>
@@ -417,11 +478,21 @@ function MultiplayerSection({ mrxLabel }) {
         </li>
         <li>
           <b>Takeover</b> — if a player disconnects, another player can take over their seat (including {mrxLabel}'s)
-          so the game isn't stuck waiting on someone who's gone.
+          so the game isn't stuck waiting on someone who's gone. A takeover can also be reversed by vote if the
+          original player reconnects.
+        </li>
+        <li>
+          <b>Redistribute roles</b> — the host can propose reshuffling who plays which seat mid-lobby, if enabled for
+          the room; needs everyone's agreement.
         </li>
         <li>
           <b>Chat</b> — detectives share one channel; {mrxLabel} is deliberately left out of it, matching the game's own
           information asymmetry.
+        </li>
+        <li>
+          <b>Room setup</b> — the host picks the map, detective count, timers, room visibility (private code-only or
+          public/listed), and which of the above features are switched on, all before the game starts. Seat colors and
+          (on character-named maps) detective names are also customizable in the lobby.
         </li>
       </ul>
     </>

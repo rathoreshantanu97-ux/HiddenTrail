@@ -9,6 +9,7 @@ import * as auth from "../lib/accessControlApi.js";
 import * as api from "../lib/supabaseApi.js";
 import { computeRoundsAndRevealSchedule } from "../maps/mapSchema.js";
 import RulebookButton from "./RulebookButton.jsx";
+import InfoIcon from "./InfoIcon.jsx";
 
 // ---------------------------------------------------------------------------
 // LANDING SCREEN — the very first thing a player sees.
@@ -472,6 +473,15 @@ function CreateRoomForm({ onCreate, accountDisplayName }) {
               specific slot host-overridable, exactly as the original two
               were. The two planning keys keep their old, unprefixed
               names, so a room that already had an override keeps it. */}
+          {(featureConfig.positionHighlightStyleOverridable ||
+            featureConfig.destinationHighlightStyleOverridable ||
+            featureConfig.actingPositionHighlightStyleOverridable ||
+            featureConfig.actingDestinationHighlightStyleOverridable) && (
+            <div style={styles.highlightStylesHeading}>
+              Highlight styles{" "}
+              <InfoIcon text="Controls how a station is visually marked as someone's current position vs. a place they could move to. Planning applies while the team is previewing routes before anyone moves; acting applies during the simultaneous move phase itself. Purely visual -- doesn't change what's legal to click." />
+            </div>
+          )}
           {[
             {
               key: "positionHighlightStyle",
@@ -1205,6 +1215,16 @@ const styles = {
     textAlign: "left",
   },
   featureOverridesTitle: { fontSize: 12.5, fontWeight: 700, color: "#555", marginBottom: 8 },
+  highlightStylesHeading: {
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: "#555",
+    marginTop: 10,
+    marginBottom: 4,
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+  },
   featureOverrideRow: {
     display: "flex",
     justifyContent: "space-between",

@@ -3,6 +3,7 @@ import MapBackground, { MapFrameAndCompass } from "./MapBackground.jsx";
 import { useHighlightStyles } from "../lib/useHighlightStyles.js";
 import HighlightRing, { ORIGIN_RING, DESTINATION_RING } from "./HighlightRing.jsx";
 import MovePopup from "./MovePopup.jsx";
+import InfoIcon from "./InfoIcon.jsx";
 import { useMoveAnimation } from "../lib/useMoveAnimation.js";
 import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 import { MODE_DEFAULT, modeChipLetter } from "../maps/mapSchema.js";
@@ -1513,7 +1514,12 @@ export default function GameBoard({
           {!isPassAndPlay && stayThresholds && (
             <div style={styles.stayTallyPanel}>
               <div style={styles.stayTallyHead}>
-                <span style={styles.stayTallyLabel}>Team stays</span>
+                <span style={styles.stayTallyLabel}>
+                  Team stays{" "}
+                  <InfoIcon
+                    text={`Every time a detective stays in place (by choice or by running out of time) instead of moving, it counts toward this tally. Certain totals hand ${mrxName()} a bonus ticket — a black ticket for camouflage, or a double-move card — so staying still isn't free even though it doesn't cost anything on the map itself.`}
+                  />
+                </span>
                 <span style={styles.stayTallyCount}>{stayTally}</span>
               </div>
               {stayNextBonus ? (
@@ -3014,7 +3020,11 @@ export default function GameBoard({
                           }
                         }}
                       />
-                      Ready to act ({readyVoters} of {totalVoters})
+                      Ready to act ({readyVoters} of {totalVoters}){" "}
+                      <InfoIcon
+                        side="top"
+                        text="The acting phase only starts early once every connected detective player has ticked this. If anyone doesn't tick, play still moves on automatically once the planning timer runs out -- so this is a shortcut, not a requirement."
+                      />
                     </label>
                   )}
                   {showDoubleMove && (

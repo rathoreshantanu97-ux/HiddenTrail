@@ -4,6 +4,7 @@ import { useHighlightStyles } from "../lib/useHighlightStyles.js";
 import HighlightRing, { ORIGIN_RING, DESTINATION_RING } from "./HighlightRing.jsx";
 import MovePopup from "./MovePopup.jsx";
 import InfoIcon from "./InfoIcon.jsx";
+import OnboardingHint from "./OnboardingHint.jsx";
 import { useMoveAnimation } from "../lib/useMoveAnimation.js";
 import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 import { MODE_DEFAULT, modeChipLetter } from "../maps/mapSchema.js";
@@ -1485,6 +1486,51 @@ export default function GameBoard({
               50%      { background: #ffe9a8; border-color: #b8860b; }
             }
           `}</style>
+
+          {/* ONBOARDING HINTS (v3.39) -- four one-time explainers, each
+              gated on its own moment happening right now AND not yet
+              having been dismissed on this browser (see OnboardingHint.jsx
+              for the localStorage persistence). Mounted unconditionally;
+              each instance figures out for itself whether to render.
+              Deliberately checked in this fixed priority order via early
+              return inside each render (only one can ever be showing at
+              once since they're full-screen overlays) -- mrx-turn and
+              reveal can theoretically both be true the same instant (a
+              reveal round where Mr.X hasn't moved yet), so ordering here
+              is: Mr.X's own turn first (it's the very first thing to ever
+              happen in a game), then reveal, then planning, then acting. */}
+          {!isSpectator && iAmMrX && isMrXTurn && (
+            <OnboardingHint
+              id="mrx_turn"
+              active
+              title={`You're ${mrxName()}`}
+              body={`Move in secret every round. Detectives never see your exact station -- only the ticket type you used -- except on scheduled reveal rounds, when your position is shown to everyone for that move only. Survive every round without being caught to win.`}
+            />
+          )}
+          {!isSpectator && !iAmMrX && !isMrXTurn && match.revealRounds && match.revealRounds.includes(match.round) && (
+            <OnboardingHint
+              id="reveal_round"
+              active
+              title="Reveal round"
+              body={`This round, ${mrxName()}'s exact station gets shown to everyone once ${mrxName()} has moved -- a rare chance to see exactly where they are instead of just the ticket type they used.`}
+            />
+          )}
+          {!isSpectator && !iAmMrX && preThinkActive && (
+            <OnboardingHint
+              id="planning_phase"
+              active
+              title="Planning phase"
+              body={`${mrxName()} has moved -- now the team gets a shared window to preview possible destinations together before anyone commits. No one can move yet. Tick "Ready to act" once you're done deciding; the acting phase starts early only once everyone has ticked it.`}
+            />
+          )}
+          {!isSpectator && !iAmMrX && actingActive && (
+            <OnboardingHint
+              id="acting_phase"
+              active
+              title="Acting phase"
+              body="Everyone moves now, at the same time -- not in a fixed order. You have your own personal clock (longer if you control more than one detective). Tap your detective, then tap a reachable station to move, or tap your own station to stay in place."
+            />
+          )}
 
           {/* BONUS FLASH (v3.28 item 4). Visible to detectives, Mr.X and
               spectators -- see the long note above the state that drives

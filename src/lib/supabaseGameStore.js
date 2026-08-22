@@ -287,24 +287,6 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     }
   }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
 
-  // mrxStayHere (v3.25) -- Mr.X's VOLUNTARY "stay put" action, taken
-  // from the move-confirmation overlay by clicking his own station.
-  // Errors ARE surfaced here (unlike the timeout counterpart below):
-  // this is a deliberate click, so a failure is something the player
-  // needs to see rather than a benign race.
-  // v3.26: ticketMode is the type the player picked to forfeit; null =>
-  // let the server take the cheapest held one.
-  const mrxStayHere = useCallback(async (ticketMode = null) => {
-    if (!roomId || !myPlayerId) return;
-    try {
-      await api.mrxStayHere({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, ticketMode });
-      await refreshMatch();
-    } catch (e) {
-      setError(e.message);
-      throw e;
-    }
-  }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
-
   // forceEndMrxTurn (v3.25) -- the timer-expiry path for Mr.X's turn.
   // Every connected client's timer fires this, so it races routinely and
   // is a server-side no-op after the first one lands; errors are logged,
@@ -319,17 +301,13 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     }
   }, [roomId, myPlayerId, myPlayerSecret, refreshMatch]);
 
-  // passDetectiveTurn -- a detective marks themselves done for this
-  // round's acting phase without moving (zero legal moves, or simply
-  // choosing not to act). v3.26: this costs a ticket now, just like
-  // Mr.X's stay -- ticketMode is the player's chosen type when they used
-  // the Stay Here popup, or null for the automatic no-legal-moves pass
-  // (cheapest held type, server-side).
+  // passDetectiveTurn -- v3.40: ONLY the auto-pass path for a detective
+  // with genuinely zero legal moves. No voluntary stay, no ticket cost.
   const passDetectiveTurn = useCallback(
-    async (detId, ticketMode = null) => {
+    async (detId) => {
       if (!roomId || !myPlayerId) return;
       try {
-        await api.passDetectiveTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, detId, ticketMode });
+        await api.passDetectiveTurn({ roomId, callerPlayerId: myPlayerId, callerSecret: myPlayerSecret, detId });
         await refreshMatch();
       } catch (e) {
         setError(e.message);
@@ -443,7 +421,6 @@ export function useSupabaseGameStore({ roomId, myPlayerId, myPlayerSecret, myRol
     submitMrXMove,
     activateDoubleMove,
     passMrxTurn,
-    mrxStayHere,
     forceEndMrxTurn,
     passDetectiveTurn,
     beginActingPhase,

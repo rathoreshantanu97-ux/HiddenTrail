@@ -332,26 +332,13 @@ function StayingSection({ mrxLabel }) {
     <>
       <SectionTitle>Staying put</SectionTitle>
       <P>
-        Sometimes the right move is no move — you're out of useful tickets, or every reachable station is worse than
-        where you already are. Everyone, {mrxLabel} included, can choose to stay at their current station instead of
-        moving.
+        You must move if you have a legal move available — {mrxLabel} included. There's no option to voluntarily stay
+        in place while a real move is still on the table.
       </P>
       <P>
-        <b>Staying always costs a ticket</b> — the same way moving does. You choose which type to spend, but only from
-        types your station actually has a real route for (so you can't, say, forfeit a bus ticket sitting somewhere
-        with no bus route). {mrxLabel}'s black ticket is the one exception — it can always be used to stay, anywhere.
-      </P>
-      <P>
-        <b>Running out the clock counts as staying too</b> — if your time runs out before you've acted, you're left in
-        place and automatically charged your cheapest held ticket, no choice involved. The travel log shows a
-        voluntary stay and a timed-out stay identically, so nobody can tell which happened just by watching.
-      </P>
-      <P>
-        <b>Detective stays feed {mrxLabel}'s ticket pool.</b> Every stay by the detective team, whether chosen or
-        timed out, adds to a running tally shown in the side panel. Certain tally totals hand {mrxLabel} a bonus black
-        ticket; certain other totals (independently configured) hand over a double-move card instead. This gives the
-        detective team a real reason to keep moving rather than camping — sitting still, in aggregate, makes{" "}
-        {mrxLabel} harder to catch.
+        <b>Genuinely stuck is different.</b> If you truly have no legal move — no ticket that matches any route out of
+        your station — you're automatically passed for that round. This costs nothing: no ticket is forfeited, and it
+        isn't a choice you make, it just happens the moment the game detects you're out of options.
       </P>
     </>
   );
@@ -442,12 +429,8 @@ function ControlsSection({ activeMode, mrxLabel }) {
           past reveal rounds.
         </li>
         <li>
-          <b>Team stays</b> (sidebar, acting phase) shows the running stay tally and how close the team is to handing{" "}
-          {mrxLabel} a bonus ticket — see "Staying put."
-        </li>
-        <li>
-          <b>"Stay Here"</b> appears in the move popup whenever you tap your own station — pick a ticket type to
-          forfeit and remain in place. If you have no legal moves at all, this is your only option.
+          <b>Auto-pass</b> — if you genuinely have no legal moves, you're passed automatically for that round, free of
+          charge, no click required. See "Staying put."
         </li>
         <li>
           <b>Ready to act</b> (top-right, planning phase, detectives only) — tick when you're done previewing to vote

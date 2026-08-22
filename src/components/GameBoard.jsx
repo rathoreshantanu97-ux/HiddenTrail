@@ -8,10 +8,6 @@ import OnboardingHint from "./OnboardingHint.jsx";
 import { useMoveAnimation } from "../lib/useMoveAnimation.js";
 import { useFeatureEnabled } from "../lib/useFeatureEnabled.js";
 import { MODE_DEFAULT, modeChipLetter } from "../maps/mapSchema.js";
-// bonusForTally -- the client-side mirror of the server's
-// stay_tally_bonuses() rule, kept in matchStateAdapter.js so exactly one
-// copy of it exists on this side of the wire (v3.28).
-import { bonusForTally } from "../lib/matchStateAdapter.js";
 import {
   currentActor,
   validMovesFor,
@@ -141,8 +137,7 @@ export default function GameBoard({
   onActivateDoubleMove,
   onPassTurn, // (actor) => void -- PASS-AND-PLAY ONLY (single shared device, still fully sequential turnIdx-walking). Multiplayer uses onPassMrxTurn/onPassDetectiveTurn instead (see the 3-phase acting model below).
   onPassMrxTurn, // () => void -- multiplayer only: Mr.X genuinely has zero legal moves
-  onMrxStayHere, // () => void -- multiplayer only (v3.25): Mr.X deliberately stays on his current station. Costs one ticket of his cheapest held type and is logged openly as a non-move round. Never passed in pass-and-play.
-  onPassDetectiveTurn, // (detId) => void -- multiplayer only: a specific detective genuinely has zero legal moves (or chooses not to move) during the acting phase
+  onPassDetectiveTurn, // (detId) => void -- multiplayer only: a specific detective genuinely has zero legal moves during the acting phase (v3.40: this is now the ONLY way a detective doesn't move -- no voluntary stay)
   onBeginActingPhase, // () => void -- multiplayer only: ends the shared planning window early. Now only the TIMEOUT path uses this (see useTurnTimer.js); the in-game control is the unanimous ready vote below.
   onSetPlanningReady, // (ready: boolean) => void -- multiplayer only: tick/un-tick MY "ready to act" vote. The SERVER decides when the vote is unanimous and flips the phase.
   connectedDetectivePlayerIds = [], // playerIds of detective-controlling players currently online (multiplayer only) -- the denominator for "Ready (X of Y)"
@@ -171,12 +166,6 @@ export default function GameBoard({
   // only advances when they actually move or pass. See the acting-phase
   // block further down.)
   roomCode = null, // multiplayer only -- shown persistently so a disconnected player can be told the code to rejoin
-  // v3.28 -- {x, y}: the room's two INDEPENDENT stay-reward thresholds,
-  // already resolved (defaults applied) by resolveStayThresholds in
-  // matchStateAdapter.js. Multiplayer only; null in pass-and-play, which
-  // has no stay-reward mechanic at all and is left completely untouched.
-  // Nothing below assumes any relationship between x and y.
-  stayThresholds = null,
 }) {
   // v3.32 -- FOUR independently configurable highlight styles, each
   // 'ring' | 'rotating' | 'blink' | 'static' | 'none'. Which PAIR is in
@@ -1100,28 +1089,11 @@ export default function GameBoard({
 
   function handleStationClick(station) {
     // -----------------------------------------------------------------
-    // STAY HERE (v3.25) -- clicking the station YOU ARE ALREADY STANDING
-    // ON, during your own turn, opens the SAME move-confirmation popup a
-    // real destination does, offering "Stay Here" instead of a travel
-    // option. This replaces the old standalone skip/pass button for the
-    // voluntary case: staying put is a move-shaped decision, so it's
-    // made with the same gesture (tap a station -> confirm/cancel) as
-    // every other move, in the same place on screen.
-    //
-    // MULTIPLAYER ONLY, and checked BEFORE the route-explorer branch
-    // below, since your own spotlighted piece's station would otherwise
-    // be swallowed by the highlight toggle. Pass-and-play (myRole ===
-    // null) is deliberately excluded entirely and keeps its own existing
-    // controls, per the standing constraint on that mode.
-    // -----------------------------------------------------------------
-    if (!isPassAndPlay && isMyTurnToAct && !preThinkActive) {
-      const myStation = isMrXTurn ? match.mrX.pos : activeDetective ? activeDetective.pos : null;
-      if (myStation != null && station === myStation) {
-        setPendingMove({ to: station, stay: true, availableModes: [] });
-        setMessage("");
-        return;
-      }
-    }
+    // v3.40: voluntary staying is gone -- if you have a legal move you
+    // must make it, so clicking your own station is no longer a special
+    // gesture. A genuinely stuck player (zero legal moves) is
+    // auto-passed for free elsewhere (see the auto-skip effect near
+    // onPassDetectiveTurnRef / forceEndMrxTurn), with no click required.
     // -----------------------------------------------------------------
     // ACTING PHASE: PICK WHICH OF YOUR PENDING DETECTIVES TO RESOLVE
     // (v3.32). Every one of your not-yet-acted detectives is highlighted
@@ -1271,27 +1243,6 @@ export default function GameBoard({
     onDetectiveMove(detId, to, mode);
   }
 
-  // commitStay (v3.25; symmetric + ticket choice in v3.26) -- confirming
-  // the "Stay Here" popup. Two server actions behind one identical
-  // gesture, and as of v3.26 they cost the same thing:
-  //   Mr.X      -> mrx_stay_here
-  //   detective -> pass_detective_turn
-  // Both keep the piece where it is and forfeit exactly one ticket. Since
-  // this is a DELIBERATE stay, the player names which chargeable type
-  // (taxi/bus/underground) to give up -- ticketMode -- picked from the
-  // same popup that picks a ticket for an ordinary multi-mode move. A
-  // timeout instead passes nothing and the server takes the cheapest held
-  // type; a piece holding none of those types pays nothing either way.
-  function commitStay(ticketMode) {
-    setPendingMove(null);
-    setMessage("");
-    if (isMrXTurn) {
-      if (onMrxStayHere) onMrxStayHere(ticketMode ?? null);
-    } else if (activeDetective) {
-      if (onPassDetectiveTurn) onPassDetectiveTurn(activeDetective.id, ticketMode ?? null);
-    }
-  }
-
   function commitMrXMove(edgeMode, ticketUsed) {
     if (!pendingMove) return;
     const { to } = pendingMove;
@@ -1301,90 +1252,6 @@ export default function GameBoard({
   }
 
   const isWesteros = map.id === "westeros";
-
-  // ---------------------------------------------------------------------
-  // STAY-TALLY WIDGET + BONUS FLASH (v3.28, items 3 and 4)
-  //
-  // Both are shown to EVERY multiplayer viewer -- detectives, Mr.X and
-  // spectators alike. This is deliberate and is NOT the same class of
-  // information as the detective-only ready-vote / sub-turn / pending-
-  // players UI: those reveal what a specific detective player is doing
-  // right now, whereas this is a public game-mechanic counter and a
-  // public game-mechanic event. Mr.X obviously has to know what he
-  // earned, and the detectives have to be able to see the cost of
-  // standing still -- that visible pressure IS the mechanic.
-  //
-  // Everything is derived from the room's configured X/Y rather than
-  // assumed, so a room set to X=2, Y=7 shows "2 stays to a Black
-  // ticket", then at 12 correctly shows "2 stays to a 2x card" (14 being
-  // the first tally that is a multiple of both). No ratio is implied
-  // anywhere.
-  const stayTally = !isPassAndPlay ? (match.detectiveStayTally ?? 0) : 0;
-  const stayNextBonus = (() => {
-    if (isPassAndPlay || !stayThresholds) return null;
-    const { x, y } = stayThresholds;
-    if (!(x >= 1)) return null;
-    for (let t = stayTally + 1; t <= stayTally + 2 * x * y + x; t++) {
-      const type = bonusForTally(t, x, y);
-      if (type) return { at: t, type, staysAway: t - stayTally };
-    }
-    return null;
-  })();
-
-  // The flash itself. lastStayBonus.seq is the tally value at the moment
-  // of the grant, which only ever increases, so comparing it against the
-  // last one we showed is enough to tell a genuinely NEW award from the
-  // same one re-rendering. Auto-clears after a few seconds ("brief").
-  //
-  // v3.30 -- THE "FLASH NEVER APPEARS" FIX, and the root cause was this
-  // component's own staleness guard, not the server.
-  //
-  // What was here before ALSO required `lastStayBonus.round === match.round`
-  // -- the idea being "don't replay an old celebration to someone who just
-  // refreshed". The problem is that a stay which crosses a threshold very
-  // often IS the last action of the round: pass_detective_turn writes
-  // last_stay_bonus (stamped with the CURRENT round) and then, in the SAME
-  // transaction, calls begin_next_round_mrx_internal, which increments
-  // `round`. force_end_acting_phase (the timeout path) does the same thing
-  // unconditionally. So by the time the single realtime update reaches any
-  // client, last_stay_bonus.round is already round-1 and the guard threw
-  // the flash away every time. Verified directly against the live database:
-  // a room sitting at round 4 with
-  // last_stay_bonus = {type: black, tally: 10, round: 3} -- a bonus that
-  // no client was ever shown.
-  //
-  // The replacement does the staleness job properly and without depending
-  // on round numbers at all: the FIRST value we ever observe is recorded
-  // as a baseline and deliberately NOT flashed (that is the refresh /
-  // late-join case), and every change after that is a genuinely new award
-  // that happened while we were watching. Same protection, no false
-  // negatives.
-  const lastStayBonus = !isPassAndPlay ? match.lastStayBonus : null;
-  const [flashedBonusSeq, setFlashedBonusSeq] = useState(null);
-  const [bonusFlash, setBonusFlash] = useState(null);
-  const bonusBaselineRef = React.useRef(false);
-  useEffect(() => {
-    if (isPassAndPlay) return;
-    const seq = lastStayBonus?.seq ?? null;
-    // Baseline pass: whatever the state already was when this board
-    // mounted is "history", never a celebration. Runs on the first
-    // render regardless of whether a bonus exists yet, so a game with
-    // no bonus so far still flashes correctly on its very first one.
-    if (!bonusBaselineRef.current) {
-      bonusBaselineRef.current = true;
-      setFlashedBonusSeq(seq);
-      return;
-    }
-    if (seq == null) return;
-    if (flashedBonusSeq === seq) return;
-    setFlashedBonusSeq(seq);
-    setBonusFlash(lastStayBonus);
-    const t = setTimeout(() => setBonusFlash(null), 9000);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastStayBonus?.seq, isPassAndPlay]);
-
-  const bonusTypeLabel = (t) => (t === "double" ? "2x (double move) card" : "Black ticket");
 
   // v3.35 -- DOUBLE-MOVE TIMER CUE. activate_double_move grants the extra
   // time by pushing turn_started_at forward, clamped with
@@ -1528,71 +1395,15 @@ export default function GameBoard({
               id="acting_phase"
               active
               title="Acting phase"
-              body="Everyone moves now, at the same time -- not in a fixed order. You have your own personal clock (longer if you control more than one detective). Tap your detective, then tap a reachable station to move, or tap your own station to stay in place."
+              body="Everyone moves now, at the same time -- not in a fixed order. You have your own personal clock (longer if you control more than one detective). Tap your detective, then tap a reachable station to move -- you must move if you have a legal one; a genuinely stuck detective is passed automatically, free of charge."
             />
           )}
 
-          {/* BONUS FLASH (v3.28 item 4). Visible to detectives, Mr.X and
-              spectators -- see the long note above the state that drives
-              it for why this is deliberately NOT gated the way the
-              detective-only ready-vote UI is. */}
-          {bonusFlash && (
-            <div style={styles.stayBonusFlash} role="status">
-              🎟️ {mrxName()} gained a {bonusTypeLabel(bonusFlash.type)} from the team's stays
-              {typeof bonusFlash.tally === "number" ? ` (stay #${bonusFlash.tally})` : ""}.
-            </div>
-          )}
-
-          {/* (v3.36) The double-move timer cue USED to live here, next to
-              the bonus flash. It has moved to the map's top bar, pinned
-              directly above the timer track -- see mapTopBarDoubleFlash.
-              A message whose entire subject is "look at your clock" was
-              being printed in the one place Mr.X is definitely not
-              looking when he has just clicked 2x on the map. The bonus
-              flash stays here: it is addressed to the whole room and is
-              about tickets, which is a sidebar concern. */}
-
-          {/* STAY-TALLY WIDGET (v3.28 item 3). Compact, and slotted into
-              the EXISTING sidebar structure on purpose -- the full
-              layout reorganization is explicitly a separate piece of
-              work, so this does not move anything that was already
-              here. Same audience as the flash above. */}
-          {!isPassAndPlay && stayThresholds && (
-            <div style={styles.stayTallyPanel}>
-              <div style={styles.stayTallyHead}>
-                <span style={styles.stayTallyLabel}>
-                  Team stays{" "}
-                  <InfoIcon
-                    text={`Every time a detective stays in place (by choice or by running out of time) instead of moving, it counts toward this tally. Certain totals hand ${mrxName()} a bonus ticket — a black ticket for camouflage, or a double-move card — so staying still isn't free even though it doesn't cost anything on the map itself.`}
-                  />
-                </span>
-                <span style={styles.stayTallyCount}>{stayTally}</span>
-              </div>
-              {stayNextBonus ? (
-                <>
-                  <div style={styles.stayTallyNext}>
-                    {stayNextBonus.staysAway} more {stayNextBonus.staysAway === 1 ? "stay" : "stays"} → {mrxName()} gets a{" "}
-                    <strong>{bonusTypeLabel(stayNextBonus.type)}</strong>
-                  </div>
-                  {/* Progress toward the NEXT award specifically, not
-                      toward some fixed X -- with independent X and Y the
-                      gap between consecutive awards is not constant, so
-                      the bar is measured against this award's own gap. */}
-                  <div style={styles.stayTallyBarOuter}>
-                    <div
-                      style={{
-                        ...styles.stayTallyBarInner,
-                        width: `${Math.max(4, Math.round(((stayThresholds.x - stayNextBonus.staysAway) / stayThresholds.x) * 100))}%`,
-                        background: stayNextBonus.type === "double" ? "#8e44ad" : "#1a1a1a",
-                      }}
-                    />
-                  </div>
-                </>
-              ) : (
-                <div style={styles.stayTallyNext}>No further rewards configured.</div>
-              )}
-            </div>
-          )}
+          {/* (v3.40: the stay-tally widget and bonus-ticket flash that used
+              to live here are gone along with voluntary staying -- see
+              force_end_mrx_turn / pass_detective_turn server-side. Staying
+              in place is no longer a choice, so there was nothing left to
+              track or reward.) */}
 
           {/* (v3.32: the "Play 2x" button used to live here in the side
               panel. It is a move-shaped decision Mr.X takes on his own
@@ -2774,114 +2585,6 @@ export default function GameBoard({
             {isMyTurnToAct && pendingMove && (() => {
               const [sx, sy] = map.stations[pendingMove.to];
               const screenPos = svgPointToScreenPoint(sx, sy);
-              // STAY HERE (v3.25; ticket choice v3.26) -- same popup
-              // component, same position, same confirm/cancel gesture as
-              // a real move. Staying costs one ticket for BOTH roles now,
-              // and because this is a deliberate stay the player picks
-              // WHICH chargeable type to give up -- one option per type
-              // they actually hold, exactly like the ticket picker for an
-              // ordinary move that several modes could pay for. If they
-              // hold none of taxi/bus/underground there's nothing to take
-              // and a single free "Stay Here" option is offered instead,
-              // matching the server's "nothing left to deduct" branch.
-              if (pendingMove.stay) {
-                const stayer = isMrXTurn ? match.mrX : activeDetective;
-                if (!stayer) return null;
-                // v3.27 -- CONNECTION-RESTRICTED TICKET CHOICE. The
-                // options offered are the types the player HOLDS
-                // intersected with the types that genuinely have an
-                // outgoing connection from the station they're standing
-                // on (map.stationModes, a Set built from the map's own
-                // edge list in mapSchema.js). Holding a metro ticket at a
-                // station no metro line touches is no longer a valid
-                // thing to give up.
-                //
-                // Why this rule exists: with forfeited tickets now going
-                // to Mr.X (v3.27), an unrestricted choice let a
-                // coordinated team decide exactly which types Mr.X would
-                // and wouldn't be fed, independently of anything on the
-                // board. The map now constrains that.
-                //
-                // The server enforces the identical rule in
-                // pass_detective_turn / mrx_stay_here and rejects a
-                // request that violates it, so this is the honest UI for
-                // a rule that holds regardless -- not the rule itself.
-                //
-                // FALLBACK: a station whose only connections are ferry
-                // (westeros #62 is a real example) yields no chargeable
-                // type at all. There, rather than offering nothing, we
-                // fall back to every held type -- which is exactly what
-                // the server's pick_stay_ticket does in the same case.
-                const stayStationModes = map.stationModes?.[pendingMove.to];
-                const connectedModes = STAY_TICKET_ORDER.filter((m) => stayStationModes?.has(m));
-                const heldModes = STAY_TICKET_ORDER.filter((m) => (stayer.tickets?.[m] || 0) > 0);
-                const connectedHeld = connectedModes.length > 0 ? heldModes.filter((m) => connectedModes.includes(m)) : heldModes;
-                // Second fallback, matching pick_stay_ticket's last
-                // resort exactly: they hold tickets, but none of a type
-                // that connects here. Something still has to be
-                // forfeited (the stay always costs one), so offer what
-                // they do hold rather than showing a misleading "nothing
-                // to forfeit" and having the server silently charge them
-                // a type the UI never mentioned.
-                const payableModes = connectedHeld.length > 0 ? connectedHeld : heldModes;
-                const who = isMrXTurn ? mrxName() : detectiveName(activeDetective.id);
-                // v3.28 -- BLACK TICKET AS STAY FARE, MR.X ONLY.
-                //
-                // Black is a WILDCARD, so unlike taxi/bus/underground it
-                // is deliberately NOT filtered by which modes actually
-                // connect to this station. That restriction exists
-                // because a fare you could not have travelled on is not a
-                // fare -- and a black ticket is not a mode-specific fare
-                // at all, which is exactly what makes it a wildcard
-                // everywhere else in the game too.
-                //
-                // Offered ONLY here, on the VOLUNTARY stay path. A
-                // timeout stay never names a ticket type, and the
-                // server's cheapest-connected-normal fallback never picks
-                // black, so a timeout can never silently burn one -- see
-                // mrx_stay_internal. Detectives never see this option
-                // because they never hold black tickets in the first
-                // place; the isMrXTurn guard makes that explicit rather
-                // than relying on the ticket count happening to be zero.
-                const canPayWithBlack = isMrXTurn && (stayer.tickets?.black || 0) > 0;
-                const stayOptions = [
-                  ...payableModes.map((mode) => ({
-                    key: `stay-${mode}`,
-                    label: `Stay — forfeit a ${activeMode[mode].label} ticket`,
-                    accent: "#5a5a5a",
-                    onClick: () => commitStay(mode),
-                  })),
-                  ...(canPayWithBlack
-                    ? [
-                        {
-                          key: "stay-black",
-                          label: `Stay — forfeit a Black ticket (${stayer.tickets.black})`,
-                          accent: "#1a1a1a",
-                          onClick: () => commitStay("black"),
-                        },
-                      ]
-                    : []),
-                ];
-                const stayOptionsFinal =
-                  stayOptions.length > 0
-                    ? stayOptions
-                    : [{ key: "stay", label: "Stay Here", accent: "#5a5a5a", onClick: () => commitStay(null) }];
-                return (
-                  <MovePopup
-                    x={screenPos.x}
-                    y={screenPos.y}
-                    fallback={screenPos.fallback}
-                    openDirection={screenPos.openDirection}
-                    title={
-                      stayOptions.length > 0
-                        ? `${who} stays at ${stationLabel(pendingMove.to)} — choose a ticket to forfeit:`
-                        : `${who} stays at ${stationLabel(pendingMove.to)} — no tickets left to forfeit.`
-                    }
-                    options={stayOptionsFinal}
-                    onClose={() => setPendingMove(null)}
-                  />
-                );
-              }
               if (isMrXTurn) {
                 // Build one option per genuinely available mode to this
                 // destination (fixes the old single-edge bug: previously
@@ -3668,35 +3371,6 @@ export const styles = {
     color: "#555",
     boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
   },
-  // v3.28 -- stay tally + bonus flash + planning view filter.
-  stayBonusFlash: {
-    order: 0,
-    border: "1px solid #e0b436",
-    background: "#fff5d6",
-    borderRadius: 10,
-    padding: "8px 10px",
-    fontSize: 12.5,
-    fontWeight: 600,
-    color: "#5a4300",
-    marginBottom: 8,
-    animation: "htStayBonusFlash 0.9s ease-in-out 6",
-  },
-  stayTallyPanel: {
-    // v3.32 panel sequence: utility cluster (1) -> Team Stays (3) ->
-    // Everyone's tickets (4) -> Travel log (5) -> Chat (6).
-    order: 3,
-    border: "1px solid #e2ddcf",
-    background: "#fbfaf6",
-    borderRadius: 10,
-    padding: "7px 10px",
-    marginBottom: 8,
-  },
-  stayTallyHead: { display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 },
-  stayTallyLabel: { fontSize: 11, fontWeight: 700, letterSpacing: 0.3, textTransform: "uppercase", color: "#8a8375" },
-  stayTallyCount: { fontSize: 17, fontWeight: 800, color: "#1a1a1a", lineHeight: 1 },
-  stayTallyNext: { fontSize: 11.5, color: "#666", marginTop: 3 },
-  stayTallyBarOuter: { height: 4, borderRadius: 3, background: "#e6e2d6", marginTop: 5, overflow: "hidden" },
-  stayTallyBarInner: { height: "100%", borderRadius: 3, transition: "width 0.3s ease" },
   // v3.32: map-anchored now, so no sidebar flex `order` and no bottom
   // margin -- and given a panel background of its own, since it sits
   // over the board rather than inside the side panel.

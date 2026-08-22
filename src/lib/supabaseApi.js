@@ -28,12 +28,6 @@ export async function createRoom({
   // configured, which the client's turnSchedule.js treats as "one full
   // base act window per extra detective".
   extraDetectiveSeconds = null,
-  // v3.28 -- the two stay-reward thresholds (see resolveStayThresholds in
-  // matchStateAdapter.js). Two INDEPENDENT integers; null on either means
-  // "use the default" (X = detective count, Y = 3X), which is resolved
-  // server-side so both ends always agree.
-  stayBlackThreshold = null,
-  stayDoubleThreshold = null,
   // v3.32 -- per-room top-up added to Mr.X's own turn clock the moment he
   // activates a double move. null = inherit (admin default, else one full
   // derived Mr.X window). Resolved server-side in activate_double_move so
@@ -70,8 +64,6 @@ export async function createRoom({
     p_route_explorer_override: featureOverrides.routeExplorer ?? null,
     p_round_scaling_ratio_override: featureOverrides.roundScalingRatio ?? null,
     p_double_move_extra_seconds: doubleMoveExtraSeconds ?? null,
-    p_stay_black_threshold: stayBlackThreshold ?? null,
-    p_stay_double_threshold: stayDoubleThreshold ?? null,
     p_is_public: isPublic,
     p_room_name: roomName,
   });
@@ -299,27 +291,12 @@ export async function passMrxTurn({ roomId, callerPlayerId, callerSecret }) {
   });
 }
 
-// mrxStayHere (v3.25, ticket choice added in v3.26) -- Mr.X deliberately
-// stays on his current station for this round. Costs one ticket:
-// ticketMode names WHICH chargeable type (taxi/bus/underground) he gives
-// up, since this is a deliberate choice; null falls back to cheapest-held
-// and nothing at all is taken if he holds none of those. Recorded in the
-// travel log as a non-move round, WITHOUT distinguishing it from a
-// timed-out one. Server authority: mrx_stay_here -> mrx_stay_internal.
-export async function mrxStayHere({ roomId, callerPlayerId, callerSecret, ticketMode = null }) {
-  await callRpc("mrx_stay_here", {
-    p_room_id: roomId,
-    p_caller_player_id: callerPlayerId,
-    p_caller_secret: callerSecret,
-    p_ticket_mode: ticketMode,
-  });
-}
-
-// forceEndMrxTurn (v3.25) -- the TIMEOUT counterpart of mrxStayHere.
-// Callable by any player in the room (Mr.X may be the one who's
-// disconnected), idempotent no-op if his turn already ended. Runs the
-// EXACT same server-side implementation as the voluntary action, so the
-// two paths can never diverge -- see mrx_stay_internal.
+// forceEndMrxTurn (v3.25) -- v3.40: this is now the ONLY way Mr.X's turn
+// ends without a real move. There is no more voluntary stay -- if he has
+// a legal move he must make it. This exists purely for the genuinely-
+// stuck / timed-out case, is free (no ticket cost), and is callable by
+// any player in the room (Mr.X may be the one who's disconnected),
+// idempotent no-op if his turn already ended.
 export async function forceEndMrxTurn({ roomId, callerPlayerId, callerSecret }) {
   await callRpc("force_end_mrx_turn", {
     p_room_id: roomId,
@@ -328,22 +305,16 @@ export async function forceEndMrxTurn({ roomId, callerPlayerId, callerSecret }) 
   });
 }
 
-// passDetectiveTurn -- a detective with genuinely zero legal moves (or
-// who simply doesn't want to move) marks themselves done for this
-// round's acting phase, independent of everyone else.
-//
-// v3.26: this is no longer free. Staying put costs a ticket for
-// detectives exactly as it does for Mr.X. ticketMode names the chargeable
-// type (taxi/bus/underground) the player picked in the Stay Here popup;
-// null (the auto-pass-on-no-legal-moves path) means cheapest-held, and a
-// detective holding none of those types still pays nothing.
-export async function passDetectiveTurn({ roomId, callerPlayerId, callerSecret, detId, ticketMode = null }) {
+// passDetectiveTurn -- v3.40: a detective with genuinely ZERO legal moves
+// is auto-passed for this round's acting phase, independent of everyone
+// else. There is no more voluntary stay and no ticket cost -- being
+// stuck isn't a choice, so nothing is forfeited for it.
+export async function passDetectiveTurn({ roomId, callerPlayerId, callerSecret, detId }) {
   await callRpc("pass_detective_turn", {
     p_room_id: roomId,
     p_caller_player_id: callerPlayerId,
     p_caller_secret: callerSecret,
     p_det_id: detId,
-    p_ticket_mode: ticketMode,
   });
 }
 
